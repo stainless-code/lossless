@@ -1,0 +1,66 @@
+---
+import Icon from "blume/components/Icon.astro";
+
+interface Props {
+	command: string;
+	tone?: "surface" | "muted" | "violet";
+}
+
+const { command, tone = "surface" } = Astro.props;
+
+const frame =
+	tone === "violet"
+		? "border-transparent bg-white"
+		: tone === "muted"
+			? "border-transparent bg-muted"
+			: "border-border bg-[var(--landing-surface)]";
+const codeClass =
+	tone === "violet" ? "text-[#18181b]" : "text-foreground";
+const promptClass =
+	tone === "violet" ? "text-[#6b6b75]" : "text-[var(--landing-faint)]";
+const buttonClass =
+	tone === "violet"
+		? "bg-[#f4f4f5] text-[#52525b] hover:text-[#18181b]"
+		: "bg-muted text-muted-foreground hover:text-foreground";
+---
+
+<div
+  class={`flex w-fit max-w-full items-center border ${tone === "violet" ? "gap-[14px] rounded-[10px] py-3 pr-3 pl-5" : "gap-4 rounded-xl py-2.5 pr-2.5 pl-5"} ${frame}`}
+  data-landing-command
+>
+  <span aria-hidden="true" class={`select-none font-mono text-base ${promptClass}`}>$</span>
+  <code class={`min-w-0 flex-1 truncate text-left font-mono text-base ${codeClass}`}>{command}</code>
+  <button
+    aria-label={`Copy ${command}`}
+    class={`inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors ${buttonClass}`}
+    data-landing-copy
+    data-command={command}
+    type="button"
+  >
+    <Icon name="copy" size={tone === "violet" ? 14 : 15} />
+  </button>
+</div>
+
+<script is:inline>
+  (() => {
+    if (document.documentElement.dataset.landingCopyBound === "true") return;
+    document.documentElement.dataset.landingCopyBound = "true";
+    const CHECK =
+      '<svg height="15" width="15" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>';
+    document.addEventListener("click", async (e) => {
+      const target = e.target instanceof Element ? e.target : null;
+      const button = target?.closest("[data-landing-copy]");
+      if (!(button instanceof HTMLElement)) return;
+      try {
+        await navigator.clipboard.writeText(button.dataset.command ?? "");
+      } catch {
+        return;
+      }
+      const original = button.innerHTML;
+      button.innerHTML = CHECK;
+      setTimeout(() => {
+        button.innerHTML = original;
+      }, 1500);
+    });
+  })();
+</script>

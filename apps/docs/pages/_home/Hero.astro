@@ -1,0 +1,49 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+import Icon from "blume/components/Icon.astro";
+import CopyCommand from "./CopyCommand.astro";
+---
+
+<section class="landing-gutter pt-16 pb-14 sm:pt-24 sm:pb-24">
+  <div class="mx-auto max-w-3xl text-center">
+    <p
+      class="mx-auto flex w-fit items-center gap-2 rounded-full border border-border bg-[var(--landing-surface)] px-4 py-2 font-mono text-muted-foreground text-xs"
+    >
+      <span aria-hidden="true" class="size-[7px] rounded-full bg-accent"></span>
+      Pi extension · SQLite + FTS5 · MIT
+    </p>
+
+    <h1
+      class="mx-auto mt-5 max-w-3xl text-balance font-display font-semibold text-5xl leading-[1.02] tracking-tight sm:text-6xl"
+    >
+      <span class="block">Nothing is lost.</span>
+      <span class="block text-accent">The model sees less.</span>
+    </h1>
+
+    <p class="mx-auto mt-6 max-w-2xl text-balance text-lg text-muted-foreground">
+      Aged turns become summary pointers the model can navigate. Every message
+      behind them stays in a local store, searchable and readable in full.
+    </p>
+
+    <div class="mt-8 flex justify-center">
+      <CopyCommand command="pi install npm:pi-lossless" />
+    </div>
+
+    <div class="mt-6 flex flex-wrap items-center justify-center gap-4">
+      <a
+        class="inline-flex h-11 items-center gap-2 rounded-[9px] bg-accent px-5 font-medium text-base text-[var(--landing-surface)] transition-opacity hover:opacity-90"
+        href={contentHref("/guides/getting-started")}
+      >
+        Get started
+        <Icon name="arrow-right" size={14} />
+      </a>
+      <a
+        class="inline-flex h-11 items-center gap-2 rounded-[9px] border border-border bg-[var(--landing-surface)] px-5 font-medium text-base text-foreground transition-colors hover:border-foreground"
+        href={contentHref("/concepts/how-it-works")}
+      >
+        How it works
+        <Icon name="arrow-right" size={14} />
+      </a>
+    </div>
+  </div>
+</section>

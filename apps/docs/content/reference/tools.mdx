@@ -1,0 +1,105 @@
+---
+title: Recall tools
+description: "lcm_grep, lcm_describe, and lcm_expand_query: every parameter, the bounds each path enforces, and which one a question needs."
+search:
+  tags: ["reference", "tools"]
+---
+
+Three tools reach stored history. Two of them return a bounded view; the third delegates reading to a bounded reader.
+
+| Question | Tool |
+| --- | --- |
+| "Where did we talk about X?" | `lcm_grep` |
+| "What is in summary #12, and what would reading it cost?" | `lcm_describe` |
+| "Read the originals and answer from them." | `lcm_expand_query` |
+
+## lcm_grep
+
+Searches stored history, including content already compacted out of the visible context.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `query` | string | none | FTS5 search: words, quoted phrases, `AND`/`OR`, prefix `*`. Matches the first 100,000 characters of a message. |
+| `pattern` | string | none | JavaScript regular expression over the full text of every stored message, past the index's 100,000-character reach. Case-insensitive unless `case_sensitive`. Give one of `query` or `pattern`, not both. |
+| `case_sensitive` | boolean | `false` | Match a pattern with its own case. |
+| `offset` | integer `>= 0` | `0` | Hits to skip, for the next page. |
+| `after` | string | none | Continue a pattern scan from this entry id, which is the value a deadline stop names. |
+| `limit` | integer `1..50` | `20` | Hits one page holds. |
+| `summary_id` | integer | none | Restrict hits to the messages that summary covers. |
+| `include_removed` | boolean | `false` | Include matches from a branch that left the active path. An included hit is labelled `[removed]`. |
+| `scope` | `"session" \| "sessions" \| "all_sessions"` | `"session"` | Which store to read. See [cross-session recall](/guides/cross-session-recall). |
+
+Bounds, each named in the output that hits it:
+
+| Bound | Value |
+| --- | --- |
+| Indexed characters per message (`query`) | 100,000 |
+| Pattern reach per message | 200,000 |
+| Pattern deadline | 1 second |
+| Pattern matches per message | 100 |
+| One hit line | 400 characters, whitespace collapsed |
+| Cross-session sessions scanned | 20 most recent, newest first |
+| Cross-session search deadline | 1.5 seconds |
+| Cross-session hits | 40 |
+
+A `query` search reports its total; a `pattern` search says whether more matches exist rather than claiming a count it did not compute. A pattern hit that ran into a per-message cap is marked `[lcm:scan-partial ...]`.
+
+Every hit names the entry id that `lcm_expand_query` reads in full, and the summary (`#N`) that covers it.
+
+## lcm_describe
+
+```text
+lcm_describe({ id: 12 })
+```
+
+`id` is the `N` in an `[lcm:summary #N ...]` header. Returns a node without expanding it:
+
+- kind, depth, and token count
+- the covered span (`e104 .. e238`)
+- costs: the source text behind it, in tokens and messages, and the whole subtree
+- tiers, when the node keeps a thorough text beside its terse one
+- the files its children cover, each with the first line of its exploration summary
+- children and parents, with a per-child cost line
+
+The thorough tier is what a describe returns when both exist, and both sizes are named. An id the store does not hold is refused.
+
+## lcm_expand_query
+
+Reads stored originals in a bounded reader and answers from them.
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `query` | string | required | What to search for in the stored history. |
+| `prompt` | string | required | What to find out, and the form the answer takes. Ask for a verbatim quote when the exact words matter. |
+| `summary_id` | integer | none | Read this node's originals, from an `[lcm:summary #N ...]` header. |
+| `entry_id` | string | none | Read one stored message, from a grep hit. |
+| `session` | string | none | The hash from an `[lcm:session ...]` pointer: read that past session's store instead. Its text returns labelled as a past session's content and is never injected into the context. |
+| `max_tokens` | integer `500..40000` | `10000` | Retrieved content budget, in estimated tokens. |
+
+Pass `summary_id` or `entry_id`, not both. With neither, the reader searches. Findings come back; the stored text does not enter this conversation.
+
+Bounds:
+
+| Bound | Value |
+| --- | --- |
+| Retrieved content per call | `max_tokens`, default 10,000 |
+| Reader turns | 6 |
+| One reader window | 20,000 characters, paged inside a single message |
+| Source named by a call | whatever it read, up to the reader's budget |
+
+A finding from a past session is tagged as that session's history. An `entry_id` that is not covered by the `summary_id` it was passed with is refused, and so is an address the store does not hold, before any model call.
+
+## Failure modes
+
+| Result | Cause |
+| --- | --- |
+| `No stored history for this session yet` | Nothing has been ingested, or the session is ephemeral. |
+| `No summary with id N` | The address is not in this store. |
+| `Message eNNN is not covered by summary #N` | The entry and summary were mismatched. |
+| `LCM: past sessions are not reachable in this process` | No session directory is wired, so cross-session scope cannot run. |
+
+## Related
+
+- [Recall and provenance](/concepts/recall-and-provenance): what the headers and addresses mean.
+- [Cross-session recall](/guides/cross-session-recall): the `session` pointer flow end to end.
+- [Limits](/concepts/limits): the caps in one place.

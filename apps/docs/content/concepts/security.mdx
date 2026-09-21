@@ -1,0 +1,66 @@
+---
+title: Security
+description: Plaintext stores at mode 0600, best-effort redaction on outbound text, and the surfaces that carry stored bytes.
+search:
+  tags: ["concept", "security"]
+---
+
+The short version: a store is the only copy of what the session produced, it is plaintext, and redaction is best-effort masking rather than a boundary. Plan accordingly.
+
+## The store is plaintext, verbatim, and derived
+
+- One SQLite file per session under `~/.pi/agent/lcm/`, mode 0600, created 0700 per directory.
+- It holds message text verbatim, whatever its size, secrets included and unrewritten.
+- It is derived. Pi's session file is the source of truth, so deleting the database and restarting rebuilds the index from the session file.
+
+## Redaction masks on the way out, never on disk [#redaction]
+
+Redaction runs on the way out, at every seam that hands stored text to a model. It never touches a stored row, and it changes nothing on disk.
+
+Provider key shapes are matched exactly: OpenAI, Anthropic and OpenRouter keys, GitHub tokens, AWS access key ids, Slack tokens, Google API keys, `Bearer` headers, npm tokens, GCP OAuth tokens, PEM private key blocks, and bare JWTs.
+
+Assignments are rewritten when the name looks like a credential and either
+
+- the value carries a digit, or
+- it is written the way an env file writes it (`KEY=value`, no space before the `=`).
+
+That leaves real gaps by design:
+
+- a secret of letters only, with no digit and no env-file form, passes through
+- a bare secret broken up by punctuation, such as a dot, passes through
+- anything the patterns do not know about passes through
+
+`redactSecrets: false` disables masking on every outbound seam. A row a read would have masked is still in the store, and a later read with the toggle back on masks it again.
+
+## Four surfaces carry the stored bytes
+
+These are your data and deserve the same care as the original session file:
+
+| Surface | Where it goes |
+| --- | --- |
+| `/lcm export [path]` | Full verbatim JSONL, default `lcm-export-<timestamp>.jsonl` in the working directory, mode 0600. |
+| `/lcm backup` | `<store>.db.backup-<timestamp>`, beside the store. Never deleted by LCM. |
+| `/lcm gc --apply` | `lcm-export-gc-<timestamp>.jsonl` beside the stores it protects, before any deletion. |
+| `/lcm diagnose` | A capped block that carries no message body, no summary text, and no query. |
+
+An export carries committed memory: a pass still running is not in it, and an import is refused until that pass finishes.
+
+## Cross-session reads are read-only and inject nothing
+
+- Line 1 of every session file in the sessions root is read for its header: working directory, id, timestamp. Never a message.
+- Stores that match the scope are opened read-only, with writes forbidden on the connection.
+- Findings pass the same redaction as in-session recall.
+- Nothing from a past session is injected or stored into the current one.
+- `/lcm migrate` is the only path that writes to a past session's store, and it is explicit and dry-run by default.
+
+## The diagnose bundle is safe to paste, at 8 KB
+
+`/lcm diagnose` is designed to be pasted in public and is capped at 8 KB. It carries version numbers, counters, model ids, entry ids, config values, and the effective config as JSON. It carries no message body, no summary text, no search query, and no absolute path outside your home directory, where a path prints with `~`. Provider and host error text is masked, so a key in a failure message cannot leave the block.
+
+Read it once before posting, and strip anything personal: it is your session metadata, and only you can judge what identifies you.
+
+## Related
+
+- [Limits](/concepts/limits): the accepted deviations, including the redaction gaps.
+- [Reference: files](/reference/files): every path, mode, and naming rule.
+- [Troubleshooting](/guides/troubleshooting#reporting-a-problem): what the diagnose block contains.

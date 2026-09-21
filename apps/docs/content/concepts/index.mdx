@@ -1,0 +1,20 @@
+---
+title: Concepts
+description: "How a session survives compaction: the engine and its harness, the cut line, the summary DAG, provenance, security, and the limits LCM accepts."
+search:
+  tags: ["concept"]
+---
+
+The mechanism, written for someone deciding whether to trust it with a long session.
+
+| Page                                                   | Topic                                                                     |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| [How it works](/concepts/how-it-works)                 | Regimes, the recursive DAG, escalation, tiers, file handles, integrity.    |
+| [The engine and its harness](/concepts/engine-and-harness) | The `lossless-core` engine, its two ports, and the Pi adapter.         |
+| [Compaction zones](/concepts/compaction-zones)         | The four lines that decide what the model sees, and what crosses them.     |
+| [Token estimation](/concepts/token-estimation)         | Why counts are estimates, how calibration narrows them, and window fixes.  |
+| [Recall and provenance](/concepts/recall-and-provenance) | Headers, addresses, spans, and what a bounded reader may read.           |
+| [Security](/concepts/security)                         | Plaintext stores, best-effort redaction, and the surfaces that carry bytes. |
+| [Limits](/concepts/limits)                             | The deviations LCM accepts, stated as user-visible limits.                 |
+
+Task-shaped walkthroughs sit beside these pages: [Guides](/guides) installs the package, tunes the cut line, and reads the diagnostics when a swap does not happen.

@@ -1,0 +1,72 @@
+---
+title: Cross-session recall
+description: How lcm_grep reaches sessions that already ended, what it reads from them, and why nothing from a past session is ever injected into this one.
+search:
+  tags: ["guide", "recall"]
+---
+
+A new session starts empty. The work you did yesterday is in a different store, and the model cannot see it unless it asks.
+
+## Pick a scope: this session, this project, the machine
+
+`lcm_grep` takes a `scope`:
+
+| Scope | Reaches |
+| --- | --- |
+| `"session"` | This session only. The default. |
+| `"sessions"` | This project's past sessions, matched by working directory. |
+| `"all_sessions"` | Every past session on the machine. |
+
+```text
+lcm_grep({ query: "why we dropped the WAL checkpoint", scope: "sessions" })
+```
+
+Both cross-session scopes walk the 20 most recent past sessions under a wall-clock deadline, newest first, so the answer arrives even when the search cannot finish. A search stops at 20 stores, 40 hits, or 1.5 seconds, whichever comes first.
+
+## The scan reads headers, never messages
+
+The session files themselves are read for their one-line header only: the working directory, the session id, and the timestamp. Never a message. Committed session files stay untouched.
+
+The stores of the sessions that match the scope are opened read-only, with writes forbidden at the connection, so a search can never migrate, repair, or write what it reads. A store written by an older build cannot answer this build's queries and is counted as `older-generation` rather than upgraded on the fly.
+
+## Nothing is injected
+
+A hit from another session is a pointer, not text:
+
+```text
+[lcm:session 3f9c1ab2c7d4e5f6 2026-09-16 /Users/you/project] [e412] (assistant) #12 … the checkpoint was dropped because the reader never used it …
+  e412  … the checkpoint was dropped because the reader never used it …
+```
+
+Reading it is a second call the model has to make:
+
+```text
+lcm_expand_query({
+  query: "why we dropped the WAL checkpoint",
+  session: "3f9c1ab2c7d4e5f6",
+  entry_id: "e412",
+})
+```
+
+The findings come back labelled as a past session's history. No text from a past session enters this session's context by itself, and nothing from a past session is stored into this session's store. Cross-session recall is always a tool call the model chose to make.
+
+## Migrate a store this build cannot read
+
+`/lcm migrate` upgrades stores left at an older schema:
+
+```bash
+/lcm migrate            # dry-run list
+/lcm migrate --apply    # upgrade in place
+```
+
+It is the only path in LCM that writes to a past session's store, it reports before it writes, and it exists so cross-session search can read those sessions at all. A store also becomes searchable without migration as soon as its own session next runs, because that session's build rewrites it in place.
+
+## Deleting a past session's store
+
+`/lcm gc --apply` deletes the stores whose session file is gone. Those stores are not only that session's index: they are a past session the cross-session scope can no longer read. The transcript export gc writes before deleting keeps the bytes, and nothing re-indexes it. The export lands beside the stores it protects, never in the directory Pi was started from, because it holds stored bytes, secrets included.
+
+## Related
+
+- [Recall and provenance](/concepts/recall-and-provenance): the pointer format, spans, and what a reader is allowed to read.
+- [Security](/concepts/security): what cross-session reads touch, and the redaction that applies to their findings.
+- [Reference: tools](/reference/tools): every parameter of the three recall tools.

@@ -1,0 +1,61 @@
+{
+  "name": "pi-lossless",
+  "version": "0.1.0",
+  "description": "Lossless Context Management for the Pi coding agent: long sessions keep working past the point where the model would forget, and every verbatim message stays searchable and readable (lcm_grep / lcm_describe / lcm_expand_query).",
+  "keywords": [
+    "coding-agent",
+    "context",
+    "lcm",
+    "memory",
+    "pi",
+    "pi-package"
+  ],
+  "homepage": "https://github.com/stainless-code/lossless#readme",
+  "bugs": "https://github.com/stainless-code/lossless/issues",
+  "license": "MIT",
+  "author": "stainless-code",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stainless-code/lossless.git",
+    "directory": "packages/pi"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "pack:watch": "vp pack --watch",
+    "prepack": "vp pack",
+    "prepublishOnly": "vp check && vp test"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "^0.85.1",
+    "lossless-core": "workspace:*",
+    "typebox": "1.3.7"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.85.1",
+    "@earendil-works/pi-coding-agent": ">=0.85.1",
+    "@earendil-works/pi-tui": "^0.85.1",
+    "typebox": ">=1.3.7 <2"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.mjs"
+    ]
+  }
+}

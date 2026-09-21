@@ -1,0 +1,37 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+import Icon from "blume/components/Icon.astro";
+
+interface Props {
+	eyebrow: string;
+	title: string;
+	sub: string;
+	link?: { label: string; href: string };
+	linkPosition?: "below";
+}
+
+const { eyebrow, title, sub, link } = Astro.props;
+---
+
+<div class="mx-auto max-w-2xl text-center">
+  <p class="font-mono text-accent text-xs tracking-[0.14em]">{eyebrow}</p>
+  <h2 class="mt-3 text-balance font-semibold text-3xl tracking-tight sm:text-[39px] sm:leading-[1.05]">
+    {title}
+  </h2>
+  <p class="mx-auto mt-4 max-w-xl text-balance text-lg text-muted-foreground sm:max-w-[640px] sm:text-xl sm:leading-[31px]">
+    {sub}
+  </p>
+</div>
+{
+  link && (
+    <div class="mt-8 text-center">
+      <a
+        class="inline-flex items-center gap-1.5 font-medium text-accent transition-opacity hover:opacity-80"
+        href={contentHref(link.href)}
+      >
+        {link.label}
+        <Icon name="arrow-right" size={16} />
+      </a>
+    </div>
+  )
+}

@@ -1,0 +1,197 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    name: 💅 Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Run format check
+        run: bun run format:check
+
+  lint:
+    name: 🕵 Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Run lint
+        run: bun run lint:ci
+
+  typecheck:
+    name: ✅ Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Run typecheck
+        run: bun run typecheck
+
+  test:
+    name: 🔬 Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Run tests with coverage gate
+        run: bun run test:coverage
+
+  build:
+    name: 🧰 Pack (dist + validation)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Build the publish artifact
+        run: bun run pack
+
+      - name: Verify the extension's publish tarball (dry run)
+        working-directory: packages/pi
+        run: npm publish --dry-run
+
+      - name: Verify the engine's publish tarball (dry run)
+        working-directory: packages/core
+        run: npm publish --dry-run
+
+  docs:
+    name: 📖 Docs site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          # blume --strict fails on BLUME_SHALLOW_GIT_HISTORY: lastmod reads git log per file.
+          fetch-depth: 0
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: Generate the comparison page from COMPARISON.md
+        run: bun apps/docs/scripts/build-comparison.ts
+
+      - name: Validate docs links
+        run: vp run --filter ./apps/docs validate --strict
+
+      - name: Typecheck the docs app
+        run: vp run --filter ./apps/docs check --isolated
+
+      - name: Build the docs site
+        run: vp run --filter ./apps/docs build
+
+      - name: Audit the built site
+        run: vp run --filter ./apps/docs audit
+
+  audit:
+    name: 🛡 Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup
+        uses: ./.github/actions/setup
+
+      - name: bun audit (block on high/critical)
+        shell: bash
+        run: |
+          # bun exits 1 both for findings at or above the level and for a
+          # registry outage. An outage is a warning, not a block: we cannot
+          # act on it. Capture the exit code directly; a pipe into tee would
+          # report tee's status, not bun's.
+          #
+          # Ignored: the six highs, none of which reaches a published
+          # tarball. Their paths run through the private docs workspace and
+          # through the two @earendil-works packages the adapter marks as
+          # peers, which the host supplies at runtime and both bundles keep
+          # external. The pinned versions come from Blume's subtree
+          # (@scalar/json-magic pins undici 7.24.4, @vercel/routing-utils pins
+          # path-to-regexp 6.1.0, mermaid's chevrotain pins lodash-es 4.17.23),
+          # so `bun audit fix` clears 0 of them. Reassess this list on every
+          # Blume bump; a new advisory under any other path still blocks.
+          set +e
+          out=$(NO_COLOR=1 bun audit --audit-level=high \
+            --ignore=GHSA-r5fr-rjxr-66jc \
+            --ignore=GHSA-9wv6-86v2-598j \
+            --ignore=GHSA-4cwx-7wf7-3272 \
+            --ignore=GHSA-vmh5-mc38-953g \
+            --ignore=GHSA-vxpw-j846-p89q \
+            --ignore=GHSA-hm92-r4w5-c3mj \
+            2>&1)
+          code=$?
+          set -e
+          printf '%s\n' "$out"
+          if [ "$code" -eq 0 ]; then exit 0; fi
+          # bun 1.4.2 wording: "error: POST <url> - ConnectionRefused",
+          # "<registry> did not answer the audit request; skipped",
+          # "<registry> returned a non-JSON audit response".
+          if ! grep -qE '[0-9]+ vulnerabilit' <<<"$out" &&
+             grep -qE 'error: (GET|POST) |did not answer the audit request|non-JSON audit response' <<<"$out"; then
+            echo "::warning::advisory registry unreachable; audit skipped"
+            exit 0
+          fi
+          exit "$code"
+
+  ci-complete:
+    name: CI complete
+    needs: [format, lint, typecheck, test, build, docs, audit]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed
+        if: |
+          needs.format.result != 'success' ||
+            needs.lint.result != 'success' ||
+            needs.typecheck.result != 'success' ||
+            needs.test.result != 'success' ||
+            needs.build.result != 'success' ||
+            needs.docs.result != 'success' ||
+            needs.audit.result != 'success'
+        run: exit 1
+
+      - name: OK
+        run: echo "CI requirements satisfied"

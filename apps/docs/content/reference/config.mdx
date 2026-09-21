@@ -1,0 +1,65 @@
+---
+title: Config file
+description: "~/.pi/agent/lcm.json: every key, its default and range, the three threshold vocabularies, and what a bad value does."
+search:
+  tags: ["reference", "config"]
+---
+
+```text
+~/.pi/agent/lcm.json        # optional; defaults apply when absent
+~/.pi/agent/lcm.json.bak    # written by the first overwrite, never replaced after
+```
+
+Strict JSON: comments and trailing commas are rejected. A file that does not parse is left untouched, defaults apply, and the problem is reported at session start.
+
+## Keys
+
+| Key | Type | Default | Range | Effect |
+| --- | --- | --- | --- | --- |
+| `summarizer` | string or string[] | `"auto"` | one id, or an ordered chain | Which model summarizes. `auto` is the session model. |
+| `smartZone` | number | unset | `>= 0` | Easy mode: swap at this many tokens, re-cut at `x 1.18`. |
+| `swapAtTokens` | number | unset | `>= 0` | Swap line in tokens. |
+| `recutAtTokens` | number | unset | `>= 0` | Re-cut line in tokens. |
+| `swapAtRatio` | number | `0.7` | `> 0`, `<= 1` | Swap line as a share of the window. |
+| `recutAtRatio` | number | `0.85` | `> 0`, `<= 1` | Re-cut line as a share of the window. |
+| `zones` | object | unset | map of `"provider/id"` to thresholds | Per-model threshold overrides. |
+| `summaryTokens` | number | `1500` | `>= 1` | Target size of one summary. |
+| `leafChunkTokens` | number | `3000` | `>= 1` | Source tokens folded into one leaf summary. |
+| `keepRecentTokens` | number | `20000` | `>= 0` | Messages this recent stay verbatim in the projection. |
+| `maxAsyncChunks` | number | `24` | `>= 1` | Chunks one asynchronous pass may summarize before it yields. |
+| `redactSecrets` | boolean | `true` | | Mask secret-shaped text on its way to a model. Never affects storage. |
+| `assemblyEnabled` | boolean | `true` | | Per-turn projection assembly. Off leaves logging and recall in place. |
+| `largeFileChars` | number | `32000` | `>= 1000` | Body length at which a result read from a named path becomes a file handle. |
+| `externalizeFiles` | boolean | `true` | | Turns the file-handle path on or off. |
+| `summarizerTokensPerCall` | number | `60000` | `>= 1` | Ceiling on one summarizer request, estimate plus output cap. |
+| `summarizerTokensPerPass` | number | `250000` | `>= 1` | Ceiling on one pass across its calls. |
+
+`zones` accepts only the five threshold keys: `smartZone`, `swapAtTokens`, `recutAtTokens`, `swapAtRatio`, `recutAtRatio`. Anything else under a model key is dropped and named.
+
+## Threshold resolution
+
+| Vocabulary | Set | Swap | Re-cut |
+| --- | --- | --- | --- |
+| Ratios | `swapAtRatio`, `recutAtRatio` | the ratio | the ratio |
+| Smart zone | `smartZone` | the token count | `smartZone x 1.18` |
+| Tokens | `swapAtTokens`, `recutAtTokens` | the token count | the token count |
+
+Explicit tokens win over `smartZone`, which wins over ratios. Per-model `zones` values merge over the global config. The resolved swap fraction is capped at 0.9, and the re-cut fraction is folded into `(swap, 0.95]`; `/lcm status` prints `(clamped)` when either moved.
+
+## Parse rules
+
+- A value of the wrong type is dropped and named.
+- A number outside its key's range is dropped and named, so `"summaryTokens": 0` falls back to the default instead of condensing the whole DAG.
+- An unknown key is dropped and named.
+- `summarizer` accepts one string or an array of strings. There is no comma form.
+- A duplicate or empty chain entry is dropped; a chain entry the registry cannot find is reported once per session and recorded as a `summarizer-model` metric.
+
+The first write copies the existing file to `lcm.json.bak`, and never replaces an existing backup. Nothing else in LCM deletes this file.
+
+A process that looks like a test run refuses a home directory outside its temp dir. `LCM_ALLOW_REAL_HOME=1` overrides that refusal for a live session that inherits a test signal.
+
+## Related
+
+- [Configuration](/guides/configuration): the same keys with the reasoning and examples.
+- [Compaction zones](/concepts/compaction-zones): the resolved lines in context.
+- [The /lcm command](/reference/command): editing these values live.

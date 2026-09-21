@@ -1,0 +1,122 @@
+---
+title: The /lcm command
+description: Every /lcm subcommand, the flags it takes, the output it prints, and the cockpit that edits thresholds live in the running session.
+search:
+  tags: ["reference", "command"]
+---
+
+```text
+/lcm                 # the cockpit: interactive settings for this session
+/lcm <subcommand>    # one of the ten below
+```
+
+A session with no session file, or one where nothing has been ingested yet, has no store. The command says so instead of printing an empty projection.
+
+## The cockpit
+
+```text
+/lcm                 # same as /lcm settings, and /lcm cockpit
+```
+
+The cockpit is an interactive list of every knob that matters, each row showing its current value and its effect:
+
+| Row | Edits |
+| --- | --- |
+| per-turn assembly | `assemblyEnabled` |
+| redact secrets | `redactSecrets` |
+| swap trigger | `swapAtRatio` |
+| swap trigger (tokens) | `swapAtTokens` |
+| smart zone (easy) | `smartZone` |
+| recut line | `recutAtRatio` |
+| recut line (tokens) | `recutAtTokens` |
+| keep recent | `keepRecentTokens` |
+| summary target | `summaryTokens` |
+| leaf chunk | `leafChunkTokens` |
+| max async chunks | `maxAsyncChunks` |
+| summarizer model | `summarizer` |
+| externalize large files | `externalizeFiles` |
+| file threshold | `largeFileChars` |
+
+A change applies to the running session immediately. Writing the same values to `~/.pi/agent/lcm.json` makes them the default for every session after it.
+
+## status
+
+```text
+/lcm status
+```
+
+Prints the store counts, the pinned projection and the occupancy it was applied at, Pi's context usage, the resolved thresholds (with `(clamped)` when the safety clamp moved them), and the window the thresholds were resolved against with its source.
+
+## report
+
+```text
+/lcm report
+```
+
+A metrics summary for this session: context decisions, what each swap moved, summarizer calls with model, stage, and what the provider billed, recall calls, externalized files, branch changes, and named conditions such as `model-fallback`.
+
+## doctor
+
+```text
+/lcm doctor              # checks, findings, footprint, thresholds, chain
+/lcm doctor --repair     # rebuild the index, drop unreachable rows
+```
+
+Checks cover the full-text index, summary spans, node shape, children a committed node names, duplicate spans, foreign keys, the recorded schema version, runs whose writer is gone, and messages with no leaf yet. It also reports the depth histogram, the pinned projection, the thresholds and summarizer chain in effect, and the store footprint: how many session databases, their total size, and how many backup files exist (which LCM never deletes).
+
+`--repair` rebuilds the index, drops summaries whose span names a missing entry or whose child is gone, removes duplicate span rows while keeping the expandable one, and reaps rows a dead run left behind.
+
+## backup
+
+```text
+/lcm backup
+```
+
+Copies the store to `<store>.db.backup-<timestamp>`, beside the store. Store surfaces carry the stored bytes, secrets included.
+
+## export
+
+```text
+/lcm export [path]
+```
+
+Writes the full verbatim transcript as JSONL: every message and every summary. The default name is `lcm-export-<timestamp>.jsonl` in the working directory. Mode 0600.
+
+An export carries committed memory, so a compaction pass still running is not in it.
+
+## import
+
+```text
+/lcm import <path>
+```
+
+Restores rows from a file written by `/lcm export`. Already-present rows are skipped and counted. An import is refused while a pass is running, and refused when the file does not parse.
+
+## gc
+
+```text
+/lcm gc                  # dry-run list
+/lcm gc --apply          # export each transcript, then delete
+```
+
+Candidates are stores whose session file is gone (`session-gone`) and scratch stores older than 30 days (`scratch-expired`). `--apply` writes `lcm-export-gc-<timestamp>.jsonl` beside the stores, appends a `gc-deleted` metric per store, and removes the database plus its WAL and SHM sidecars. Backups are never touched. A deleted store stops being reachable by cross-session search.
+
+## migrate
+
+```text
+/lcm migrate             # dry-run list of older-schema stores
+/lcm migrate --apply     # upgrade them in place
+```
+
+The only path that writes to a past session's store, and the reason cross-session search can read sessions written by older builds.
+
+## diagnose
+
+```text
+/lcm diagnose
+/lcm diagnose --save <path>      # or --save=<path>
+```
+
+One pasteable block, capped at 8 KB: versions, session metadata, store facts, the effective config, and this session's metrics. No message body, no summary text, no search query, no absolute path outside your home directory, and provider error text masked. `--save` writes the exact bytes at mode 0600 and names the path instead of printing the block; `--save` with no path is refused.
+
+The keys it needs (`~/.pi/agent/lcm.json`) are documented in [Config file](/reference/config), and what each report line means is in [Troubleshooting](/guides/troubleshooting).

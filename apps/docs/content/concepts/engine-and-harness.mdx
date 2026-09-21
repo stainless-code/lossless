@@ -1,0 +1,56 @@
+---
+title: The engine and its harness
+description: lossless-core holds the store, the summary DAG, and the recall tools behind two ports, and pi-lossless implements them for Pi, the first harness LCM runs in.
+search:
+  tags: ["concept", "architecture"]
+---
+
+LCM ships as two packages. `lossless-core` is the engine: the store, the summary DAG, the thresholds, the recall tools, and the metrics. `pi-lossless` is the adapter that runs that engine inside Pi, and Pi is the only harness LCM runs in today. The engine names no agent SDK, so every line of Pi-specific code sits on the adapter's side of a contract the engine states as two ports.
+
+## A harness is the agent LCM runs inside
+
+Pi owns the session file, the model calls, the tool loop, and the screen. LCM needs all four and owns none of them, so the engine asks its host for each one. That split is why a second harness is a second adapter rather than a second engine.
+
+## Two ports carry what the engine cannot do itself
+
+| Port | The question it answers |
+| --- | --- |
+| `ModelHost` | Which model, and what did it answer |
+| `Reader` | What the reader asked for, and what it concluded |
+
+`ModelHost` names the session's model, resolves a model named in config, and runs a single completion from a prompt the engine has already rendered, so a host cannot change what the summarizer is asked. Notices travel the same way: a host with no user interface reports `none`, so the engine has one branch to write.
+
+`Reader` is one retrieval conversation. `begin()` returns a reading whose `next()` appends the tool results the caller ran and returns the model's reply. That is what keeps a read out of the main loop.
+
+The engine asks for nothing else. Its boundary test fails the first module under `src/` that imports an agent SDK or a specifier outside `node:*` and `typebox`, so the contract cannot erode quietly.
+
+## The adapter owns everything Pi-shaped
+
+`pi-lossless` holds:
+
+- the hooks: `session_start`, `message_end`, and `turn_end` feed messages in, `context` swaps the aged head between turns, and `session_before_compact` takes over at Pi's compaction limit
+- the model host over Pi's model registry, and the notices that reach Pi's interface
+- Pi's session files and home layout, which decide which store a session opens
+- the `/lcm` command and the settings cockpit, from `/lcm status` to `/lcm settings`
+- the three tools the model calls: `lcm_grep`, `lcm_describe`, and `lcm_expand_query`
+
+Every hook name in that list is Pi's, and the engine never sees one. `session_tree` lands there too, marking the entries an abandoned branch took out of context and clearing the mark when a later turn returns to them.
+
+One install brings one package: the pack inlines the engine into `dist/index.mjs`, and the manifest declares no runtime dependency, since every package the bundle imports is one Pi already has.
+
+## What a second harness needs
+
+An adapter package that implements both ports and owns that harness's session files, home layout, tool registration, and interface. The store, the DAG, the thresholds, the recall tools, and the metrics belong to the engine and do not change.
+
+Two edges are Pi-shaped today, and a second adapter brings its own:
+
+- the path helper the engine exports resolves under `~/.pi/agent/`, and the adapter composes on it for stores, metrics, and the config file
+- cross-session recall lists past sessions by reading the first line of a session file, which is Pi's JSONL header
+
+[Limits](/concepts/limits#one-harness-ships-today) states both with the rest.
+
+## Related
+
+- [How it works](/concepts/how-it-works): the regimes, the DAG, and the integrity checks.
+- [Recall tools](/reference/tools): the three tools the adapter registers, and their bounds.
+- [Files](/reference/files): the stores, metrics, and exports on disk.

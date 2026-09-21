@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "paths": {
+      "lossless-core": ["./packages/core/src/index.ts"]
+    }
+  },
+  "include": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "scripts/**/*.ts"]
+}

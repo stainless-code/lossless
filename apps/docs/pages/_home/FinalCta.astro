@@ -1,0 +1,79 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+import Icon from "blume/components/Icon.astro";
+import CopyCommand from "./CopyCommand.astro";
+---
+
+<section class="landing-gutter py-16 sm:py-[104px]">
+  <div class="mx-auto max-w-[1160px]">
+    <div class="flex flex-col items-center gap-6 rounded-3xl bg-[#6d28d9] px-6 py-16 text-center sm:p-16">
+      <svg
+        aria-hidden="true"
+        class="block h-[46px] w-[46px]"
+        fill="none"
+        viewBox="0 0 46 46"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M6.133 6.517V39.483"
+          opacity="0.55"
+          stroke="#FFFFFF"
+          stroke-width="3.258"
+          stroke-linecap="round"
+        />
+        <path
+          d="M39.867 6.517V39.483"
+          opacity="0.55"
+          stroke="#FFFFFF"
+          stroke-width="3.258"
+          stroke-linecap="round"
+        />
+        <path
+          d="M19.167 12.65H14.567V33.35H19.167"
+          stroke="#FFFFFF"
+          stroke-width="4.408"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <path
+          d="M26.833 12.65H31.433V33.35H26.833"
+          stroke="#FFFFFF"
+          stroke-width="4.408"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+        <circle cx="23" cy="23" r="4.6" fill="#FFFFFF" />
+      </svg>
+      <h2
+        class="max-w-3xl text-balance text-center font-display font-semibold text-3xl text-white tracking-tight sm:text-[39px] sm:leading-[39px]"
+      >
+        Install it, then leave it alone.
+      </h2>
+      <p class="mx-auto max-w-[580px] text-center text-lg text-white/85 sm:text-xl sm:leading-[31px]">
+        Every session after that one is logged, searchable, and rebuildable from
+        the session file.
+      </p>
+      <div class="flex flex-col items-center gap-4 pt-2">
+        <CopyCommand
+          command="pi install npm:pi-lossless"
+          tone="violet"
+        />
+        <div class="flex flex-col items-center gap-4 sm:flex-row">
+          <a
+            class="inline-flex h-11 items-center rounded-[10px] border border-white/60 px-5 font-medium text-base text-white transition-colors hover:bg-white/10"
+            href={contentHref("/concepts/how-it-works")}
+          >
+            Browse concepts
+          </a>
+          <a
+            class="inline-flex h-11 items-center gap-2 rounded-[10px] border border-white bg-white px-5 font-medium text-[#6d28d9] text-base transition-opacity hover:opacity-90"
+            href={contentHref("/guides/getting-started")}
+          >
+            Get started
+            <Icon name="arrow-right" size={16} />
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

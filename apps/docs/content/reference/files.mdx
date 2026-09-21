@@ -1,0 +1,83 @@
+---
+title: Files
+description: Where the store, the metrics, the exports, and the backups live, how each is named, and how to rebuild everything from the session file.
+search:
+  tags: ["reference", "files"]
+---
+
+Everything LCM writes lives under the Pi home, `~/.pi/agent/`. The exception is an export you name yourself, which lands where you ran the command.
+
+## Store
+
+```text
+~/.pi/agent/lcm/<16 hex chars>.db        # one per session
+~/.pi/agent/lcm/scratch-<16 hex chars>.db # session without a session file
+```
+
+The name is the first 16 hex characters of the SHA-256 of the session file's path. Directories are created mode 0700 and the database is chmod 0600.
+
+SQLite in WAL mode means two sidecar files can exist beside a live database: `<name>.db-wal` and `<name>.db-shm`. Both belong to the store; `/lcm gc` removes them with it.
+
+The store is derived. Delete it and restart the session to rebuild it from Pi's session file. A store written by an older build carries its own schema generation: it is upgraded by `/lcm migrate`, by its own session's next run, or not at all if you keep using it read-only.
+
+## Metrics [#metrics]
+
+```text
+~/.pi/agent/lcm/metrics.jsonl
+```
+
+Append-only JSONL, one row per event, every row tagged with the store it belongs to. Groups:
+
+| Group | Kinds |
+| --- | --- |
+| Context decisions | `context-decision`, `swap-applied`, `swap-blocked`, `projection-over-budget` |
+| Compaction | `compaction-complete`, `compaction-awaited`, `compaction-queued`, `compaction-queued-dropped`, `compaction-stale`, `compaction-timeout-cleared`, `compaction-abandoned`, `compaction-noop` |
+| Summaries | `summary-stored`, `summary-fallback-stored`, `summary-skipped-covered`, `summary-skipped-existing`, `summary-oversized`, `summary-replaced`, `summary-final-truncated`, `summary-input-clipped`, `condensation-stalled`, `condensation-reduced` |
+| Summarizer and spend | `summarizer-usage`, `summarizer-model`, `summarizer-fallback`, `summarizer-capped`, `summarizer-error` |
+| Window and estimation | `estimate-calibrated`, `window-corrected`, `window-floor` |
+| Files and branches | `file-externalized`, `large-inline`, `branch-removed` |
+| Recall, import, and review | `recall`, `import`, `gc-deleted`, `store-migrated`, `config-problem`, `compaction-error` |
+
+`/lcm report` is a view over these rows; `/lcm doctor` reports the thresholds, zone, and chain that were in effect, which is what makes the log readable after the fact.
+
+## Exports, backups, and gc
+
+| Path | Written by | Contents |
+| --- | --- | --- |
+| `<path>` you name, default `lcm-export-<timestamp>.jsonl` in the working directory | `/lcm export [path]` | Every message and summary, verbatim, mode 0600. |
+| `<store>.db.backup-<timestamp>` beside the store | `/lcm backup` | A file copy of the database. Never deleted by LCM. |
+| `~/.pi/agent/lcm/lcm-export-gc-<timestamp>.jsonl` | `/lcm gc --apply` | The transcripts of every store it is about to delete. |
+
+All three carry stored bytes, secrets included. They are the same data as the session file they came from.
+
+`/lcm import <path>` reads a file written by `/lcm export`, restores rows that are missing, skips rows that are present, and is refused while a compaction pass is running.
+
+## Diagnostics
+
+```text
+/lcm diagnose                     # rendered, not written
+/lcm diagnose --save <path>       # exact bytes, mode 0600, plus a final newline
+```
+
+The block is capped at 8 KB and carries versions, session metadata, store facts, the effective config, and this session's metrics. See [Troubleshooting](/guides/troubleshooting#reporting-a-problem) for the exact contents.
+
+## Config
+
+```text
+~/.pi/agent/lcm.json       # this package's config
+~/.pi/agent/lcm.json.bak   # the copy the first overwrite left behind
+```
+
+## Footprint
+
+```text
+/lcm doctor
+```
+
+prints how many session databases exist, their total size, and how many backup files sit beside them. Session databases are one file per session, so the count grows with use; `/lcm gc` is what removes the ones whose session file is gone.
+
+## Related
+
+- [Security](/concepts/security): modes, contents, and what each surface exposes.
+- [The /lcm command](/reference/command): the subcommands that read and write these files.
+- [Getting started](/guides/getting-started#rebuild-or-remove): rebuilding and removing a store.

@@ -1,0 +1,31 @@
+---
+const stats = [
+	{ value: "70%", label: "default swap point" },
+	{ value: "20k", label: "default recent budget" },
+	{ value: "3", label: "recall tools" },
+	{ value: "1", label: "tool call to read an original" },
+];
+---
+
+<section class="landing-gutter border-border border-y">
+  <dl
+    class="mx-auto grid max-w-[1160px] grid-cols-2 gap-y-8 py-6 lg:grid-cols-4"
+  >
+    {
+      stats.map((stat, i) => (
+        <div
+          class={
+            i === 0
+              ? "flex flex-col lg:pl-8"
+              : "flex flex-col lg:border-border lg:border-l lg:pl-8"
+          }
+        >
+          <dt class="order-2 mt-2 text-muted-foreground text-sm">{stat.label}</dt>
+          <dd class="order-1 font-display font-semibold text-3xl text-foreground tracking-tight">
+            {stat.value}
+          </dd>
+        </div>
+      ))
+    }
+  </dl>
+</section>

@@ -1,0 +1,29 @@
+name: Setup
+description: Setup Vite+, Bun and Node, then install packages (frozen lockfile)
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Bun (the install, the audit, and the node-based scripts)
+      uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: 1.4.2
+
+    - name: Setup Node (the npm publish dry runs and the node-based scripts)
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    # Vite+'s installer is what puts `vp` on PATH for a bare `vp run` step; the
+    # two manager flags keep setup-bun and setup-node the tools the jobs use.
+    - name: Setup Vite+ (vp on PATH, cached dependencies)
+      uses: voidzero-dev/setup-vp@v1.21.1
+      with:
+        node-manager: false
+        package-manager: false
+        cache: true
+        run-install: false
+
+    - name: Install packages
+      shell: bash
+      run: bun install --frozen-lockfile

@@ -1,0 +1,96 @@
+---
+title: Configuration
+description: Every key in ~/.pi/agent/lcm.json, the three vocabularies that set the cut line, and what LCM does with a value it cannot use.
+search:
+  tags: ["guide", "config"]
+---
+
+The file is optional and lives at `~/.pi/agent/lcm.json`. It must be strict JSON: `//` comments and trailing commas are rejected. A file that does not parse is left untouched, defaults apply, and the problem is reported at session start (or recorded as a `config-problem` metric when there is no UI).
+
+An overwrite copies the file it replaces to `lcm.json.bak` first, and never replaces a backup that already exists. Nothing else in LCM deletes this file.
+
+## Every key, default, and range
+
+The [config reference](/reference/config#keys) is the lookup table for all of
+them: type, default, range, and effect. A value of the wrong type or outside its
+key's range is ignored like an unknown key, so a hand-edited
+`"summaryTokens": 0` falls back to the default instead of condensing the whole
+DAG on every pass, and anything the parse had to normalize or drop is named when
+the session starts. The sections below take the keys that change what a session
+does, one decision at a time.
+
+## Three ways to set the cut line
+
+The vocabularies are OR-mode with explicit tokens winning:
+
+```json
+{ "swapAtRatio": 0.7, "recutAtRatio": 0.85 }
+```
+
+```json
+{ "smartZone": 110000 }
+```
+
+```json
+{ "swapAtTokens": 110000, "recutAtTokens": 130000 }
+```
+
+The first is the default and needs no file. `smartZone` is the easy mode: one number, and the re-cut point is derived from it so the two lines cannot cross. The third is what a per-model override usually looks like.
+
+Setting `smartZone` and an explicit token pair at once is a config conflict: the tokens win, and LCM says so at session start.
+
+### Per-model overrides
+
+```json
+{
+  "swapAtRatio": 0.7,
+  "zones": {
+    "openrouter/z-ai/glm-5.3-flash": { "swapAtTokens": 110000, "recutAtTokens": 130000 }
+  }
+}
+```
+
+`zones` carries thresholds only, merged over the global values for the model that is running. The key is the same `"provider/id"` string `/lcm doctor` prints for the model. Nothing else about a pass can be set per model except the summarizer chain, which is global.
+
+### The clamp pulls an unusable line back
+
+A swap line above 90% of the window is clamped down, and the re-cut line is folded to stay strictly above the swap line and at or below 95%. On a small window, ratios that would put both lines past the end of the context are quietly pulled back and `/lcm status` prints `(clamped)`. The clamp exists so the loop cannot pin a projection, then grow the raw tail past the window while reporting that everything is stable.
+
+## Set a summarizer chain, and see which entry runs
+
+```json
+{ "summarizer": ["anthropic/claude-haiku-4-5", "openai/gpt-5-mini", "auto"] }
+```
+
+One model id, or an ordered chain. There is no comma form, because a model id may contain a comma. `auto` is the session model and nothing else: it never means "pick something cheap". Unset behaves as `auto`.
+
+A chain entry is tried in order and skipped when the registry cannot find it, when the call throws, when the provider marks the response `error`, or when the response stopped at its token cap (`length`), which would otherwise store half a summary. An entry that fails is demoted to the back of the order for the rest of that pass, so a broken primary costs one failed call per pass rather than one per chunk. The session model is the last resort unless the chain already names it.
+
+`/lcm doctor` prints the chain that will actually run, next to the config it came from, so `auto` expansion and the appended session model are visible rather than implied.
+
+| Event | When it is recorded |
+| --- | --- |
+| `summarizer-model` | An entry the registry cannot find was reported once this session. |
+| `summarizer-fallback` | A pass needed more than one model. `/lcm report` shows it as `model-fallback`. |
+| `summarizer-capped` | A budget was crossed; remaining chunks used the mechanical truncate. |
+
+## Cap what a pass may spend
+
+`summarizerTokensPerCall` and `summarizerTokensPerPass` are backstops against a provider that answers and never stops. A request's size is known before the call, so a refusal costs nothing: the pass finishes its remaining chunks with the mechanical truncate and records `summarizer-capped` with `source: "budget"`.
+
+The defaults sit far above what a healthy pass spends. A pass that respects `summaryTokens` and `leafChunkTokens` costs a fraction of either cap.
+
+## Turn large bodies into handles, mask what leaves
+
+- `largeFileChars` plus `externalizeFiles`: a body read from a named path at or above the threshold becomes a file handle (path, content id, kind, exploration summary, bounded preview) that the summarizer reads instead of a clipped wall of text. The bytes stay in the message row. A body that large with no path is stored as text and recorded as `large-inline`.
+- `redactSecrets: false` disables masking on every outbound seam. It changes nothing on disk, because storage never consults it.
+
+## Turn assembly off and keep the store
+
+`assemblyEnabled: false` stops per-turn projection assembly: ingestion, recall, the report, and the metrics stay, and the context hook stops swapping. It is the switch for a session where you want the store but not the substitution, for example while comparing Pi's own compaction against LCM on the same work.
+
+## Related
+
+- [Compaction zones](/concepts/compaction-zones): what each line does when it is crossed.
+- [Config reference](/reference/config): the same keys with their on-disk effects and the parse rules.
+- [Troubleshooting](/guides/troubleshooting): what a rejected value looks like from the outside.

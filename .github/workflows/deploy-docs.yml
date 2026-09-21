@@ -1,0 +1,70 @@
+name: Deploy docs
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-docs-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 🚀 Build & Deploy docs (FTP)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'release' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'docs'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+          # A closed PR checkout defaults to a dead merge ref, so pin the merge commit on main.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.merge_commit_sha || github.sha }}
+          # The sitemap's lastmod reads `git log` per file.
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: ./.github/actions/setup
+
+      - name: Generate the comparison page from COMPARISON.md
+        run: bun apps/docs/scripts/build-comparison.ts
+
+      - name: Validate docs links
+        run: vp run --filter ./apps/docs validate --strict
+
+      - name: Typecheck docs site
+        run: vp run --filter ./apps/docs check --isolated
+
+      - name: Build docs site
+        run: vp run --filter ./apps/docs build
+
+      - name: Audit docs site
+        run: vp run --filter ./apps/docs audit
+
+      - name: Upload to /lossless via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          security: strict
+          local-dir: ./apps/docs/dist/
+          server-dir: ./
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**

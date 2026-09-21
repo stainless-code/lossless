@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+*.tgz
+
+# test output
+coverage/
+
+# macOS
+.DS_Store
+
+# pi runtime scratch: background task logs, one directory per session.
+# `.pi/settings.json`, extensions, skills, prompts and themes stay tracked.
+.pi/tasks/
+
+# generated vite-plus hook dispatcher (project-owned scripts are tracked)
+.vite-hooks/_
+.blume-verify/
+
+# local, uncommitted working notes for agent passes
+.agents/local/

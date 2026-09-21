@@ -1,0 +1,156 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+import Icon from "blume/components/Icon.astro";
+import SectionHeader from "./SectionHeader.astro";
+
+const pointers = [
+	{ text: "summary 07 · 8 children", tone: "text-[var(--landing-faint)]" },
+	{ text: "summary 08 · 4 children", tone: "text-muted-foreground" },
+	{ text: "summary 09 · 2 children", tone: "text-foreground" },
+];
+
+const messages = [
+	{ role: "user", widths: ["w-3/4", "w-1/2"] },
+	{ role: "assistant", widths: ["w-5/6", "w-2/5"] },
+	{ role: "user", widths: ["w-3/5", "w-4/5"] },
+	{ role: "assistant", widths: ["w-11/12", "w-1/3"] },
+];
+
+const tickHeights = [13, 6, 9, 12, 5, 8, 11, 4, 7, 10];
+// One shared 120-tick lattice across the full 1112-unit viewBox: the first 111
+// ticks are the store, the last 9 are recent. Positions are rounded to 1 decimal,
+// which reproduces the export exactly (1028.6 boundary included), so the rhythm
+// never breaks between inactive and active ticks.
+const pitch = 1112 / 120;
+const tickX = (i: number) => Math.round(i * pitch * 10) / 10;
+const storedTicks = Array.from({ length: 111 }, (_, i) => ({
+  x: tickX(i),
+  height: tickHeights[i % tickHeights.length],
+}));
+const recentTicks = Array.from({ length: 9 }, (_, i) => tickX(111 + i));
+---
+
+<section class="landing-gutter py-16 sm:py-24">
+  <div class="mx-auto max-w-[1160px]">
+    <SectionHeader
+      eyebrow="THE PROJECTION"
+      title="What the model sees, and what it can still read."
+      sub="Two layers, one session. The window is what the model pays for on every turn; the store is what it can still reach."
+    />
+
+    <div class="mt-12">
+      <div class="overflow-hidden rounded-2xl border border-border bg-[var(--landing-surface)]">
+        <div class="flex items-center gap-3 border-border border-b px-6 py-5">
+          <p class="font-mono text-muted-foreground text-xs">
+            context · what the model receives
+          </p>
+          <span class="flex-1"></span>
+          <p class="font-mono text-xs text-[var(--landing-faint)]">
+            20k tokens recent · 3 pointers
+          </p>
+        </div>
+
+        {
+          pointers.map((pointer, i) => (
+            <div
+              class="flex items-center gap-3.5 border-border border-b px-6 py-4"
+            >
+              <Icon class="shrink-0 text-muted-foreground" name="layers" size={15} />
+              <p class={`font-mono text-sm ${pointer.tone}`}>{pointer.text}</p>
+              <span class="flex-1"></span>
+              <p class="hidden font-mono text-xs text-[var(--landing-faint)] sm:block">
+                expand
+              </p>
+              <Icon class="shrink-0 text-muted-foreground" name="chevron-down" size={13} />
+            </div>
+          ))
+        }
+
+        <div class="flex items-center gap-3 px-6 py-3">
+          <div aria-hidden="true" class="h-px flex-1 bg-border"></div>
+          <p class="font-mono text-accent text-xs">swap point · 70%</p>
+          <div aria-hidden="true" class="h-px flex-1 bg-border"></div>
+        </div>
+
+        {
+          messages.map((message, i) => (
+            <div
+              class={`flex items-start gap-3.5 px-6 py-4 ${i < messages.length - 1 ? "border-border border-b" : ""}`}
+            >
+              <span class="shrink-0 rounded-md bg-muted px-2.5 py-1 font-mono text-muted-foreground text-xs">
+                {message.role}
+              </span>
+              <div aria-hidden="true" class="flex flex-1 flex-col gap-2 pt-1">
+                {message.widths.map((width) => (
+                  <div class={`h-2 rounded-full bg-border ${width}`}></div>
+                ))}
+              </div>
+            </div>
+          ))
+        }
+
+        <div class="border-border border-t px-6 py-4">
+          <p class="font-mono text-xs text-[var(--landing-faint)]">
+            every line below the swap point is byte for byte what was typed
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 rounded-2xl border border-border bg-[var(--landing-surface)] p-6">
+        <div class="flex items-center gap-3">
+          <p class="font-mono text-muted-foreground text-xs">
+            on disk · the store
+          </p>
+          <span class="flex-1"></span>
+          <p class="font-mono text-xs text-[var(--landing-faint)]">
+            every message · FTS5 indexed
+          </p>
+        </div>
+        <svg
+          aria-hidden="true"
+          class="mt-4 h-7 w-full"
+          preserveAspectRatio="none"
+          viewBox="0 0 1112 28"
+        >
+          {
+            storedTicks.map((tick) => (
+              <rect
+                height={28 - tick.height}
+                style="fill: var(--blume-border)"
+                width="4.6"
+                x={tick.x}
+                y={tick.height}
+              />
+            ))
+          }
+          {
+            recentTicks.map((x) => (
+              <rect
+                height="26"
+                style="fill: var(--blume-accent)"
+                width="4.6"
+                x={x}
+                y="2"
+              />
+            ))
+          }
+        </svg>
+        <div class="mt-2 flex items-center gap-3">
+          <p class="font-mono text-xs text-[var(--landing-faint)]">oldest</p>
+          <span class="flex-1"></span>
+          <p class="font-mono text-xs text-[var(--landing-faint)]">now</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-8 text-center">
+      <a
+        class="inline-flex items-center gap-1.5 font-medium text-accent transition-opacity hover:opacity-80"
+        href={contentHref("/concepts/compaction-zones")}
+      >
+        How a cut is chosen
+        <Icon name="arrow-right" size={16} />
+      </a>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,112 @@
+---
+import data from "blume:data";
+import { contentHref } from "blume/components/content/base-href.ts";
+import { EN_UI } from "blume/core/i18n-ui.ts";
+import type { UIStrings } from "blume/core/i18n-ui.ts";
+import type { Navigation } from "blume/core/types.ts";
+import Logo from "blume/components/layout/Logo.astro";
+
+interface Props {
+	site: { title: string; description?: string };
+	navigation: Navigation;
+	ui: UIStrings;
+}
+
+const { site, navigation, ui } = Astro.props;
+
+// PageLayout omits `logo`; read it from blume:data to match the header mark.
+const logo = data.config.logo;
+const repoUrl = navigation.repoUrl ?? "https://github.com/stainless-code/lossless";
+const year = new Date().getFullYear();
+
+// Merge over the English defaults so a label missing from a translation still
+// renders instead of coming out blank.
+const strings = { ...EN_UI, ...ui };
+
+const groups: {
+	label: string;
+	links: { href: string; label: string; external?: boolean }[];
+}[] = [
+	{
+		label: "Docs",
+		links: [
+			{ href: contentHref("/guides"), label: "Guides" },
+			{ href: contentHref("/concepts"), label: "Concepts" },
+			{ href: contentHref("/reference"), label: "Reference" },
+			{ href: contentHref("/reference/comparison"), label: "Comparison" },
+		],
+	},
+	{
+		label: "Packages",
+		links: [
+			{ href: "https://npmx.dev/package/pi-lossless", label: "pi-lossless", external: true },
+			{ href: "https://npmx.dev/package/lossless-core", label: "lossless-core", external: true },
+			{ href: `${repoUrl}/blob/main/docs/roadmap.md`, label: "Roadmap", external: true },
+		],
+	},
+	{
+		label: "Project",
+		links: [
+			{ href: repoUrl, label: "GitHub", external: true },
+			{ href: "https://npmx.dev/package/pi-lossless", label: "npm", external: true },
+			{ href: `${repoUrl}/blob/main/LICENSE`, label: "MIT license", external: true },
+			{ href: "https://github.com/stainless-code", label: "stainless-code", external: true },
+		],
+	},
+];
+---
+
+<footer class="landing-gutter border-border border-t">
+  <div class="mx-auto max-w-[1160px] py-14 sm:py-16">
+    <div class="grid gap-12 lg:grid-cols-[1.4fr_3fr] lg:gap-16">
+      <div class="lg:w-72 lg:shrink-0">
+        <Logo logo={logo} site={site} />
+        <p
+          class="mt-4 max-w-xs text-balance text-muted-foreground text-sm leading-relaxed"
+        >
+          Lossless Context Management for coding agents, starting with Pi.
+          Aged history becomes summary pointers, and every message stays
+          verbatim and searchable.
+        </p>
+      </div>
+
+      <nav
+        aria-label={strings.nav.navigation}
+        class="grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3"
+      >
+        {
+          groups.map((group) => (
+            <div>
+              <h3 class="font-mono font-normal text-muted-foreground text-xs tracking-[0.1em] uppercase">
+                {group.label}
+              </h3>
+              <ul class="mt-4 space-y-3">
+                {group.links.map((link) => (
+                  <li>
+                    <a
+                      class="text-muted-foreground text-sm transition-colors hover:text-foreground"
+                      href={link.href}
+                      rel={link.external ? "noreferrer" : undefined}
+                      target={link.external ? "_blank" : undefined}
+                    >
+                      {link.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        }
+      </nav>
+    </div>
+
+    <div
+      class="mt-14 flex flex-col gap-4 border-border border-t pt-8 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p class="font-mono text-muted-foreground text-xs">© {year} Lossless · MIT</p>
+      <p class="font-mono text-muted-foreground text-xs">
+        Nothing is lost. The model sees less.
+      </p>
+    </div>
+  </div>
+</footer>

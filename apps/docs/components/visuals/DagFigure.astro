@@ -1,0 +1,188 @@
+---
+/**
+ *
+ *
+ * The accessible name is an `aria-label`, not an SVG `<title>`: the site audit
+ * counts `<title>` elements per page and treats a second one as an error.
+ */
+const leaves = [
+	{ id: "#7", span: "e12..e40" },
+	{ id: "#8", span: "e41..e103" },
+	{ id: "#9", span: "e104..e170" },
+	{ id: "#10", span: "e171..e238" },
+].map((leaf, index) => ({ ...leaf, x: 70 + index * 180 }));
+
+const condensed = [
+	{ id: "#11", span: "e12..e103", x: 139 },
+	{ id: "#12", span: "e104..e238", x: 499 },
+];
+
+const frontier = { id: "#15", span: "e12..e238" };
+
+const edges = [
+	["149,288", "239,172"],
+	["329,288", "239,172"],
+	["509,288", "599,172"],
+	["689,288", "599,172"],
+	["239,172", "419,100"],
+	["599,172", "419,100"],
+] as const;
+
+const depthLabels = [
+	{ label: "depth 0", y: 315 },
+	{ label: "depth 1", y: 200 },
+	{ label: "depth 2", y: 76 },
+];
+---
+
+<figure class="not-prose mx-auto w-full max-w-[50rem] @container">
+  <div class="hidden @min-[40rem]:block">
+    <svg
+    aria-label="A summary DAG drawn as a reduced example: four depth-0 leaves over raw messages, two depth-1 nodes (#11 and #12) over those leaves, and one depth-2 frontier node (#15) carried by the projection"
+    class="dag w-full"
+    role="img"
+    viewBox="0 0 800 380"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    {
+      edges.map(([from, to]) => (
+        <line class="dag-edge" x1={from.split(",")[0]} x2={to.split(",")[0]} y1={from.split(",")[1]} y2={to.split(",")[1]} />
+      ))
+    }
+
+    {
+      depthLabels.map((depth) => (
+        <text class="dag-depth" x="8" y={depth.y}>
+          {depth.label}
+        </text>
+      ))
+    }
+
+    {
+      leaves.map((leaf) => (
+        <g>
+          <rect class="dag-node" height="46" rx="8" width="158" x={leaf.x} y="288" />
+          <text class="dag-title" x={leaf.x + 14} y="308">
+            {leaf.id} · leaf
+          </text>
+          <text class="dag-meta" x={leaf.x + 14} y="324">
+            3,000 tok · {leaf.span}
+          </text>
+        </g>
+      ))
+    }
+
+    {
+      condensed.map((node) => (
+        <g>
+          <rect class="dag-node" height="48" rx="8" width="200" x={node.x} y="172" />
+          <text class="dag-title" x={node.x + 16} y="193">
+            {node.id} · depth 1
+          </text>
+          <text class="dag-meta" x={node.x + 16} y="210">
+            1,412 tok · {node.span}
+          </text>
+        </g>
+      ))
+    }
+
+    <g>
+      <rect
+        class="dag-node dag-node--frontier"
+        height="56"
+        rx="9"
+        width="250"
+        x="294"
+        y="44"
+      />
+      <text class="dag-title" x="314" y="67">{frontier.id} · depth 2</text>
+      <text class="dag-meta" x="314" y="86">
+        1,930 tok · {frontier.span}
+      </text>
+    </g>
+
+    <text class="dag-note" x="556" y="60">frontier</text>
+    <text class="dag-meta" x="556" y="76">carried in the window</text>
+    </svg>
+  </div>
+
+  <div class="flex flex-col gap-4 @min-[40rem]:hidden">
+    <div>
+      <p class="font-mono text-muted-foreground text-xs">depth 2 · frontier</p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <span class="rounded-md border border-accent/40 bg-accent/10 px-2 py-1 font-mono text-[11px] text-accent">
+          {frontier.id} · 1,930 tok · {frontier.span}
+        </span>
+      </div>
+    </div>
+    <div>
+      <p class="font-mono text-muted-foreground text-xs">depth 1</p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        {condensed.map((node) => (
+          <span class="rounded-md border border-border px-2 py-1 font-mono text-[11px] text-foreground">
+            {node.id} · 1,412 tok · {node.span}
+          </span>
+        ))}
+      </div>
+    </div>
+    <div>
+      <p class="font-mono text-muted-foreground text-xs">depth 0 · leaves</p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        {leaves.map((leaf) => (
+          <span class="rounded-md border border-border px-2 py-1 font-mono text-[11px] text-muted-foreground">
+            {leaf.id} · {leaf.span}
+          </span>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <figcaption class="mt-4 text-center text-muted-foreground text-sm">
+    The shape behind a window pointer, drawn with four leaves. Real sessions
+    carry many more. Schematic, not to scale.
+  </figcaption>
+</figure>
+
+<style>
+  .dag text {
+    font-family: inherit;
+  }
+
+  .dag-edge {
+    stroke: var(--blume-muted-foreground);
+    stroke-opacity: 0.45;
+    stroke-width: 1.5;
+  }
+
+  .dag-node {
+    fill: var(--blume-background);
+    stroke: var(--blume-border);
+    stroke-width: 1.5;
+  }
+
+  .dag-node--frontier {
+    fill: var(--blume-muted);
+    fill: color-mix(in oklab, var(--blume-accent) 12%, var(--blume-background));
+    stroke: var(--blume-accent);
+    stroke-width: 2;
+  }
+
+  .dag-title {
+    fill: var(--blume-foreground);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .dag-meta,
+  .dag-depth {
+    fill: var(--blume-muted-foreground);
+    font-family: var(--blume-font-mono, ui-monospace), ui-monospace, monospace;
+    font-size: 10px;
+  }
+
+  .dag-note {
+    fill: var(--blume-accent);
+    font-family: var(--blume-font-mono, ui-monospace), ui-monospace, monospace;
+    font-size: 11px;
+  }
+</style>

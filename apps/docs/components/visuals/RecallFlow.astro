@@ -1,0 +1,84 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+
+const steps = [
+	{
+		tool: "lcm_describe",
+		href: "/reference/tools#lcm_describe",
+		call: `lcm_describe({ id: 15 })`,
+		output: `Costs: source 41,200 tok across 34 messages
+Children: #11, #12
+Files: packages/core/src/store.ts (TypeScript, 1,637 lines)`,
+		body: "Price a node before reading it. Nothing is expanded, and an address the store does not hold is refused.",
+	},
+	{
+		tool: "lcm_grep",
+		href: "/reference/tools#lcm_grep",
+		call: `lcm_grep({ query: "retry policy", summary_id: 15 })`,
+		output: `e231  … retries: 3, backoff 250ms …   [#12]
+e188  … the timeout we rejected …     [#15]`,
+		body: "Find the entry, and the node that covers it.",
+	},
+	{
+		tool: "lcm_expand_query",
+		href: "/reference/tools#lcm_expand_query",
+		call: `lcm_expand_query({ entry_id: "e231" })`,
+		output: `findings from the stored originals,
+read in the reader's own context,
+returned as an answer`,
+		body: "Read the originals through a reader with its own budget: 10,000 tokens and 6 turns by default.",
+	},
+];
+---
+
+<figure class="not-prose mx-auto w-full max-w-5xl @container">
+  <div class="grid gap-4 @4xl:grid-cols-3">
+    {
+      steps.map((step, index) => (
+        <div class="flex flex-col rounded-blume border border-border p-4">
+          <div class="flex items-baseline justify-between gap-2">
+            <p class="font-medium text-sm">
+              <a
+                class="text-foreground transition-colors hover:text-accent"
+                href={contentHref(step.href)}
+              >
+                {step.tool}
+              </a>
+            </p>
+            <p class="font-mono text-muted-foreground text-xs">
+              {String(index + 1).padStart(2, "0")}
+            </p>
+          </div>
+          <div class="mt-3 rounded-md bg-muted/60 p-2 font-mono text-[10px] text-foreground leading-relaxed break-words">
+            {step.call}
+          </div>
+          <div class="mt-2 whitespace-pre-line rounded-md border border-border bg-background p-2 font-mono text-[10px] text-muted-foreground leading-relaxed break-words">
+            {step.output}
+          </div>
+          <p class="mt-3 text-muted-foreground text-sm leading-relaxed">
+            {step.body}
+          </p>
+        </div>
+      ))
+    }
+  </div>
+
+  <div class="mx-auto mt-4 w-fit rounded-blume border border-border bg-muted/30 px-4 py-2">
+    <div class="flex items-center gap-2">
+      <p class="font-mono text-foreground text-xs">window · unchanged</p>
+      <svg
+        aria-hidden="true"
+        class="size-4 shrink-0 text-muted-foreground"
+        fill="none"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.75"
+        viewBox="0 0 24 24"
+      >
+        <path d="M12 19V5"></path><path d="m5 12 7-7 7 7"></path>
+      </svg>
+      <p class="font-mono text-muted-foreground text-xs">the store</p>
+    </div>
+  </div>
+</figure>

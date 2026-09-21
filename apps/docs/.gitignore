@@ -1,0 +1,6 @@
+.blume/
+.blume-verify/
+dist/
+
+# Generated from COMPARISON.md by scripts/build-comparison.ts; that file is the source
+content/reference/comparison.mdx

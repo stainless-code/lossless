@@ -1,0 +1,138 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+import Icon from "blume/components/Icon.astro";
+import SectionHeader from "./SectionHeader.astro";
+
+const zones = [
+	{
+		range: "0 to 70%",
+		title: "Quiet",
+		body: "The projection is the conversation itself, so a provider's cached prefix stays valid turn after turn.",
+	},
+	{
+		range: "70 to 85%",
+		title: "Swapped",
+		body: "Swaps append a pointer and leave the rest of the context byte for byte.",
+	},
+	{
+		range: "85% to the window",
+		title: "Recut",
+		body: "One re-cut replaces the previous shape, and the frontier folds a depth at a time.",
+	},
+];
+
+const knobs = [
+	{ key: "swapAtRatio", value: "0.7", note: "of the model's window" },
+	{ key: "recutAtRatio", value: "0.85", note: "the re-cut, strictly above swap" },
+	{ key: "keepRecentTokens", value: "20,000", note: "tokens left verbatim at the tail" },
+	{ key: "zones[model]", value: "per model", note: "token overrides win" },
+];
+
+const regimes = [
+	{
+		label: "Async",
+		line: "Swaps wait for a commit boundary and land between turns, never mid-turn.",
+	},
+	{
+		label: "Blocking",
+		line: "At Pi's compaction limit, LCM replaces default compaction with escalated summaries, and falls back on failure.",
+	},
+];
+---
+
+<section class="bg-muted landing-gutter py-16 sm:py-[100px]">
+  <div class="mx-auto max-w-[1160px]">
+    <SectionHeader
+      eyebrow="ZONES"
+      title="A soft point, not the hard limit."
+      sub="Model quality falls off before the context window is full. LCM swaps on a token budget you set, and stays quiet below it."
+    />
+
+    <div class="mt-12">
+      <div
+        aria-hidden="true"
+        class="flex h-4 w-full overflow-hidden rounded-[7px] border border-[var(--landing-zone-track)]"
+      >
+        <div class="h-full w-[70%] bg-[var(--landing-zone-quiet)]"></div>
+        <div class="h-full w-[15%] bg-[var(--landing-zone-swapped)]"></div>
+        <div class="h-full w-[15%] bg-[var(--landing-zone-recut)]"></div>
+      </div>
+      <div
+        aria-hidden="true"
+        class="relative mt-2 h-5 font-mono text-muted-foreground text-xs"
+      >
+        <span class="absolute left-0">0</span>
+        <span class="absolute left-[70%] hidden -translate-x-1/2 sm:block">70%</span>
+        <span class="absolute left-[85%] hidden -translate-x-1/2 sm:block">85%</span>
+        <span class="absolute right-0">window</span>
+      </div>
+
+      <div class="mt-6 grid gap-8 border-border border-t pt-6 sm:grid-cols-3 sm:gap-0">
+        {
+          zones.map((zone, i) => (
+            <div class={i === 0 ? "sm:pr-8" : "sm:border-border sm:border-l sm:px-8 sm:last:pr-0"}>
+              <p class="font-mono text-accent text-sm">{zone.range}</p>
+              <h3 class="mt-3 font-display font-semibold text-foreground text-xl tracking-tight">
+                {zone.title}
+              </h3>
+              <p class="mt-3 text-muted-foreground text-sm leading-relaxed">
+                {zone.body}
+              </p>
+            </div>
+          ))
+        }
+      </div>
+
+      <div class="mt-12">
+        <div class="grid grid-cols-[1fr_auto] gap-6 border-border border-b pb-3 font-mono text-muted-foreground text-xs tracking-[0.1em] sm:grid-cols-[minmax(0,18rem)_minmax(0,9rem)_1fr]">
+          <span>KEY</span>
+          <span>DEFAULT</span>
+          <span class="hidden sm:block">NOTES</span>
+        </div>
+        {
+          knobs.map((knob) => (
+            <div class="grid grid-cols-[1fr_auto] gap-6 border-border border-b py-4 sm:grid-cols-[minmax(0,18rem)_minmax(0,9rem)_1fr]">
+              <span class="font-mono text-foreground text-sm">{knob.key}</span>
+              <span class="text-right font-mono text-accent text-sm font-semibold sm:text-left">
+                {knob.value}
+              </span>
+              <span class="col-span-2 text-muted-foreground text-sm sm:col-span-1">
+                {knob.note}
+              </span>
+            </div>
+          ))
+        }
+      </div>
+
+      <div class="mt-12">
+        <p class="font-mono text-muted-foreground text-xs tracking-[0.1em]">
+          WHEN IT RUNS
+        </p>
+        <div class="mt-4 grid grid-cols-[minmax(0,10rem)_1fr] gap-6 border-border border-b pb-3 font-mono text-muted-foreground text-xs tracking-[0.1em] sm:grid-cols-[minmax(0,18rem)_1fr]">
+          <span>REGIME</span>
+          <span>WHAT LANDS, AND WHEN</span>
+        </div>
+        {
+          regimes.map((regime) => (
+            <div class="grid grid-cols-[minmax(0,10rem)_1fr] gap-6 border-border border-b py-4 sm:grid-cols-[minmax(0,18rem)_1fr]">
+              <span class="font-mono text-foreground text-sm">{regime.label}</span>
+              <span class="text-muted-foreground text-sm leading-relaxed">
+                {regime.line}
+              </span>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+
+    <div class="mt-10 text-center">
+      <a
+        class="inline-flex items-center gap-1.5 font-medium text-accent transition-opacity hover:opacity-80"
+        href={contentHref("/concepts/compaction-zones")}
+      >
+        Every threshold, and what crosses it
+        <Icon name="arrow-right" size={16} />
+      </a>
+    </div>
+  </div>
+</section>

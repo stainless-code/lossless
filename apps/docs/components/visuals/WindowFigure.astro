@@ -1,0 +1,132 @@
+---
+/**
+ * Numbers match the example used across the docs
+ * (400.0k window, swap at 70%, fresh tail 20,000 tokens), and the ratio they
+ * imply is the point of the figure.
+ */
+const pointers = [
+	{ id: "#11", depth: 1, span: "e12..e103", tokens: "1,412 tok" },
+	{ id: "#12", depth: 1, span: "e104..e238", tokens: "1,412 tok" },
+];
+
+const rawRows = 7;
+const tailRows = 3;
+---
+
+<figure class="not-prose mx-auto w-full max-w-5xl @container">
+  <div class="grid gap-8 @3xl:grid-cols-[minmax(0,22rem)_1fr] @3xl:gap-12">
+    <div>
+      <div class="flex items-baseline justify-between">
+        <p class="font-mono text-muted-foreground text-xs">
+          window · 400.0k tokens
+        </p>
+        <p class="font-mono text-muted-foreground text-xs">82% used</p>
+      </div>
+
+      <div
+        class="mt-3 flex flex-col gap-[3px] rounded-blume border border-border bg-background p-2"
+      >
+        {
+          pointers.map((pointer) => (
+            <div class="rounded-md border border-accent/40 bg-accent/10 px-2 py-1.5 font-mono text-[10px] text-accent leading-tight">
+              [lcm:summary {pointer.id} depth {pointer.depth} span {pointer.span}]
+              <span class="text-muted-foreground"> {pointer.tokens}</span>
+            </div>
+          ))
+        }
+
+        <div class="my-1 flex items-center gap-2">
+          <div class="h-px flex-1 border-border border-t border-dashed"></div>
+          <span class="font-mono text-[10px] text-muted-foreground">
+            head replaced · 284,000 tok
+          </span>
+        </div>
+
+        <div class="rounded-md border border-border/70 p-1.5">
+          <p class="mb-1 font-mono text-[10px] text-muted-foreground">
+            raw messages · verbatim · 325,300 tok
+          </p>
+          <div class="flex flex-col gap-[3px]">
+            {Array.from({ length: rawRows }).map(() => (
+              <div class="h-2.5 rounded-sm bg-border"></div>
+            ))}
+          </div>
+        </div>
+
+        <div class="mt-1 rounded-md border border-border border-dashed p-1.5">
+          <p class="mb-1 font-mono text-[10px] text-muted-foreground">
+            fresh tail · 20,000 tok · never compacted
+          </p>
+          <div class="flex flex-col gap-[3px]">
+            {Array.from({ length: tailRows }).map(() => (
+              <div class="h-2.5 rounded-sm bg-foreground/25"></div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          class="mt-1 rounded-md border border-border border-dashed px-2 py-2 text-center font-mono text-[10px] text-muted-foreground"
+        >
+          headroom · 18%
+        </div>
+      </div>
+    </div>
+
+    <div class="flex flex-col justify-center gap-5">
+      <div>
+        <p class="font-mono text-accent text-xs">pointers</p>
+        <p class="mt-1 text-muted-foreground text-sm leading-relaxed">
+          2.8k tokens of summary stand in for 284k tokens of aged history. The
+          header names the node and the entries it covers, so the model can
+          address what it is no longer reading. One row per frontier node: two
+          siblings here, because neither covers the other.
+        </p>
+      </div>
+      <div>
+        <p class="font-mono text-foreground text-xs">verbatim tail</p>
+        <p class="mt-1 text-muted-foreground text-sm leading-relaxed">
+          Messages after the cut stay in the projection as raw text.
+        </p>
+      </div>
+      <div>
+        <p class="font-mono text-foreground text-xs">fresh tail</p>
+        <p class="mt-1 text-muted-foreground text-sm leading-relaxed">
+          The most recent 20,000 tokens are never compacted. This is the part a
+          turn is actually reasoning about.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-6 rounded-blume border border-border bg-muted/30 p-3">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <p class="font-mono text-foreground text-xs">
+        store · every message the session produced · SQLite + FTS5
+      </p>
+      <p class="font-mono text-muted-foreground text-xs">
+        ~/.pi/agent/lcm/&lt;session&gt;.db · mode 0600
+      </p>
+    </div>
+    <div class="mt-2 flex h-6 w-full gap-[2px] overflow-hidden rounded-sm">
+      <div
+        class="flex w-[62%] items-center justify-center rounded-sm border border-accent/40 bg-accent/10 font-mono text-[10px] text-accent"
+      >
+        #11, #12 → e12..e238
+      </div>
+      <div
+        class="flex flex-1 items-center justify-center rounded-sm border border-border bg-background font-mono text-[10px] text-muted-foreground"
+      >
+        still raw here
+      </div>
+    </div>
+    <p class="mt-2 text-muted-foreground text-sm leading-relaxed">
+      Nothing above the cut was deleted: it moved from the window into the
+      store.
+    </p>
+  </div>
+
+  <figcaption class="mt-3 text-muted-foreground text-sm">
+    One session's projection after a cut, with the store beneath it. Schematic,
+    not to scale.
+  </figcaption>
+</figure>

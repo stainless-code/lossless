@@ -1,0 +1,77 @@
+---
+title: Limits
+description: "The bounds LCM accepts and the deviations it states: lossy summaries, best-effort redaction, capped reads, and where the design stops."
+search:
+  tags: ["concept", "limits"]
+---
+
+These are the limits a reader should know before trusting a long session to LCM. They are properties of the design, not open bugs.
+
+## Summaries are lossy
+
+The projection is lossy by construction. LCM's guarantee is that the *store* is not: every message is held whole and every node expands back to its originals. A summary that drops a detail is recoverable through `lcm_describe` and `lcm_expand_query`, and it is not recoverable from the summary text alone.
+
+## Redaction is not a boundary
+
+Stores are plaintext. Redaction masks secret-shaped text on its way to a model and never writes to disk. A letters-only secret, a bare secret broken by punctuation, and anything the patterns do not recognize pass through. See [Security](/concepts/security#redaction).
+
+## Reading is capped, and the caps are named
+
+| Bound | Value | Where it applies |
+| --- | --- | --- |
+| Indexed characters per message | 100,000 | `lcm_grep` with `query`: the token index holds this much. |
+| Pattern reach per message | 200,000 | `lcm_grep` with `pattern`. |
+| Pattern deadline | 1 second per call | A pattern scan stops and says so. |
+| Pattern matches per row | 100 | Per message scanned. |
+| One grep hit line | 400 characters | Whitespace collapsed, remainder named with an entry id. |
+| One reader window | 20,000 characters | Inside `lcm_expand_query`. |
+| One reader call | `max_tokens`, default 10,000 | Retrieved content across at most 6 reader turns. |
+| One stored message read | Whole | `/lcm export` writes every character. |
+
+Each bound is named in the output that hits it, so a partial answer is never presented as a complete one: a pattern hit that ran into the per-row cap is marked `[lcm:scan-partial ...]`, and a scan that ran out of time says where to resume.
+
+## Only derived text is indexed [#derived-text]
+
+The index and the summarizer read a message's derived text, which is not always the whole message. A thinking block, an image, a signature, or an unknown block type is kept as a payload on the row and returned by a read, but a row written before this build keeps only the derived text. Deleting the store and restarting rebuilds it from the session file.
+
+## Cross-session reach stops at 20 sessions
+
+- Cross-session scopes walk the 20 most recent past sessions, newest first, under a wall-clock deadline. Older sessions are reachable only by narrowing the scope or by history that happens to be inside the window.
+- A store at an older schema is counted as `older-generation` and skipped rather than migrated: `/lcm migrate` is the explicit path.
+- `/lcm gc --apply` deletes the stores of sessions whose session file is gone, and that removes those sessions from cross-session reach. The transcript export remains; nothing re-indexes it.
+
+## Structural caps stall the pass instead of evicting
+
+| Cap | Value | Meaning |
+| --- | --- | --- |
+| DAG fanout | 8 children per node | One condensation group's width. |
+| DAG depth | 8 | A structural assert, not policy. |
+| Async chunks per pass | `maxAsyncChunks`, default 24 | How far one asynchronous pass gets before it yields. |
+| Summary target | `summaryTokens`, default 1500 | What a node aims for. |
+| Leaf chunk | `leafChunkTokens`, default 3000 | How much source text one leaf covers. |
+| Summarizer call budget | `summarizerTokensPerCall`, default 60,000 | Refused before the provider is called. |
+| Summarizer pass budget | `summarizerTokensPerPass`, default 250,000 | Crossed, the rest of the pass uses the mechanical truncate. |
+
+A pass that cannot meet its summary budget records `condensation-stalled` rather than evicting a frontier node. The projection reports the problem instead of hiding it.
+
+## One engine per session
+
+LCM replaces Pi's default compaction. Running a second compaction engine over the same context produces a projection neither engine can explain, so pick one.
+
+## One harness ships today
+
+Pi is the only harness with an adapter, and `pi-lossless` is the package that runs the engine inside it. The paths (stores, metrics, and `lcm.json` under `~/.pi/agent/`), the session file that cross-session recall reads, and the commands are all Pi's. A second harness needs an adapter of its own, and [The engine and its harness](/concepts/engine-and-harness) says what that adapter supplies.
+
+If Pi is the harness you run, this limit costs you nothing.
+
+## Where it does not help
+
+- A session that never approaches its window: LCM logs and stays out of the way, and you get search over that session's history.
+- A machine where the session's bytes cannot sit on disk in plaintext: do not run it.
+- Work that needs history from another machine: the store is local, with no sync path.
+
+## Related
+
+- [Security](/concepts/security): the store, redaction, and the surfaces that carry bytes.
+- [Compaction zones](/concepts/compaction-zones): the threshold values above.
+- [Troubleshooting](/guides/troubleshooting): which limit you are hitting, and what to run.

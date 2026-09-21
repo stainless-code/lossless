@@ -1,0 +1,49 @@
+---
+title: Token estimation
+description: Why counts are estimates, how the estimator calibrates itself against Pi's reported usage, and how a provider's stated window corrects Pi's belief.
+search:
+  tags: ["concept", "tokens"]
+---
+
+LCM has to decide occupancy before it can decide anything else, and it does that by counting characters. Pi reports tokens for the request it just sent; LCM counts the text it stored.
+
+## `chars / 4` is a placeholder for a ratio it can measure
+
+The estimator counts `chars / 4`. That constant is a placeholder for a ratio it can measure, not a claim about your model: an English-heavy context and a code-heavy one do not tokenize the same.
+
+## A measured ratio replaces the constant, under three conditions
+
+After each turn, LCM samples two numbers: how many characters it counted in the messages, and how many tokens Pi reported for the request that carried them. Sampling differences rather than totals is what cancels Pi's system prompt and tool definitions, which LCM never counts.
+
+A calibrated ratio is used when:
+
+- at least 3 samples exist (`CALIBRATION_MIN_SAMPLES`)
+- the last 8 samples (the sample cap) are within 25% of their median
+- that median is between 2 and 8 characters per token
+
+Outside the band or the spread, the ratio is refused rather than clamped, and the constant stays. A refused measurement is a state the estimator reads as "keep the constant", and `/lcm report` names it.
+
+Calibration changes budgets, not just the gauge. A model whose real ratio is 6 needs 1.5 times the configured tokens accumulated before it has kept the context you asked for, so `keepRecentTokens` and the token thresholds are scaled by the measured ratio. Without a ratio, the configured number is used unchanged.
+
+## A provider refusal teaches the real window, per model
+
+Two different values can describe the same model's window:
+
+- **Pi's belief** is what Pi reports for the current turn. LCM never counts it as ground truth.
+- **A provider's statement** is the real limit, parsed out of an over-window refusal and stored per model, so it outlives the session that learned it. `/lcm status` prints it as `corrected to 1.0M (provider-error)`.
+
+The parser recognizes the refusal shapes providers actually send (a `prompt is too long` count against a maximum, an `exceeds the limit of` number, an allowed input range, and others), and only accepts a value between 1,000 and 100,000,000 tokens. Outside that band the number is treated as a misread of a status code or a request count, not a window. When a provider refuses for length but names no window, LCM keeps Pi's belief and arms a one-shot conservative floor for the next turn rather than writing a wrong permanent value.
+
+Stale reports are handled the same way: a reported count below a quarter of the estimate describes some other turn (Pi reports its last measurement, and after a resume that measurement belongs to the previous process), so LCM ignores it instead of compacting early. A reported count that is too high only compacts sooner, which is why the check looks one way.
+
+## A ratio is a share of the resolved window; tokens are absolute
+
+`swapAtRatio: 0.7` is 70% of the window the estimator resolves: the provider's statement when one exists, otherwise Pi's belief. `swapAtTokens: 110000` is a budget in estimated tokens, which is what makes it independent of the window and the model.
+
+When a count looks wrong, the answer is almost always the cache: `/lcm status` prints the window it used and where the number came from, and `/lcm report` prints the calibration the estimator is holding.
+
+## Related
+
+- [Compaction zones](/concepts/compaction-zones): how the resolved window turns into a swap line.
+- [Troubleshooting](/guides/troubleshooting#the-gauge-disagrees-with-pi): reading the two numbers in `/lcm status`.
+- [Diagnostics and metrics](/reference/files#metrics): the rows that record window corrections and calibration.

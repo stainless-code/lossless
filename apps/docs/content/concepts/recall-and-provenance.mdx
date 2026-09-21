@@ -1,0 +1,71 @@
+---
+title: Recall and provenance
+description: What a summary header carries, how an address is resolved, what a bounded reader is allowed to read, and where recall runs.
+search:
+  tags: ["concept", "recall"]
+---
+
+Every summary the model sees arrives with a header the engine wrote, and every hit the model gets names the entry it matched. Addresses are how the model gets from a projection back to the bytes.
+
+## Every summary arrives with its address
+
+```text
+[lcm:summary #12 depth 1 span e104..e238]
+```
+
+| Part | Meaning |
+| --- | --- |
+| `#12` | The node id. `lcm_describe({ id: 12 })` inspects it; `lcm_expand_query({ summary_id: 12 })` reads its originals. |
+| `depth 1` | How many condensation levels sit under this node. Depth 0 covers leaf chunks. |
+| `span e104..e238` | The first and last stored message this node covers, in ingestion order. |
+
+Entry ids (`e104`) are stable across restarts, and they are what `lcm_expand_query({ entry_id })` reads. A grep hit names both its entry id and the summary that covers it, so a hit and its node are one call apart.
+
+## Every node expands back to its verbatim messages
+
+That property is what makes the DAG safe to serve: a projection can be lossy in what it shows and still be lossless in what it implies, because the address is in the header and the store holds the text.
+
+Two consequences are visible in the tools:
+
+- `lcm_describe` reports a node's costs: how many tokens its source spans across how many messages, and what the whole subtree under it would cost.
+- An address the store does not hold is refused before any model call. A `summary_id` and an `entry_id` that do not belong together are refused too, rather than silently reading a different entry.
+
+## `lcm_describe` prices a node before you read it
+
+```text
+Summary #12 (leaf, depth 0, 1412 tokens)
+Span: e104 .. e238
+Costs: source 41200 tokens across 34 messages; subtree 41200 tokens
+Tiers: thorough 2100 tokens (shown), terse 1412 tokens
+Files: packages/core/src/store.ts (f3, 61240 chars, code; TypeScript, 1637 lines; 18 top-level declaration(s): class LcmStore, ...)
+Children: #7, #9
+Parents: #15
+Child costs:
+  #7 leaf depth 0, 1820 tokens, source 1820, e104 .. e118
+  #9 leaf depth 0, 2400 tokens, source 2400, e119 .. e140
+```
+
+Children, parents, per-child costs, tiers, and the files its subtree covers are what make the choice between "read this" and "read the thing under it" an informed one.
+
+<RecallFlow />
+
+## Reading originals runs in a reader with its own context
+
+Reading originals goes through `lcm_expand_query`, which runs a reader in its own context and returns findings. Paper Appendix C restricts raw expansion to a sub-agent; Pi has no `Task` tool, so the reader is an in-process loop with its own context and no write access to the store.
+
+- default budget: 10,000 tokens of retrieved content (`max_tokens` changes it per call)
+- at most 6 reader turns
+- one reader window is 20,000 characters, and the reader pages inside a single message, so nothing stored is out of reach
+- findings are returned, so a 200,000-character message is readable without that text entering the main conversation
+
+The reader's output is tagged when it needs to be: a finding from a past session is labelled as that session's history, a removed branch carries its marker, and masked text comes back masked.
+
+## Two tools answer inline; only the third delegates
+
+`lcm_grep` and `lcm_describe` run in the main loop and return a bounded view. Only the third tool delegates. That split is deliberate: listing hits and pricing a node are cheap enough to inline, while reading a wall of stored bytes is not.
+
+## Related
+
+- [Reference: tools](/reference/tools): every parameter, and the bounds each path enforces.
+- [Cross-session recall](/guides/cross-session-recall): pointers into sessions that already ended.
+- [How it works](/concepts/how-it-works): how the DAG that these addresses point into is built.

@@ -1,0 +1,89 @@
+---
+title: How it works
+description: The three regimes, the recursive summary DAG, the escalation ladder, file handles, removed branches, and the integrity checks behind them.
+search:
+  tags: ["concept", "mechanism"]
+---
+
+A session's context is a projection over a store. LCM changes the projection, never the store, and never Pi's session file.
+
+The [Lossless Context Management paper](https://papers.voltropy.com/LCM), by Clint Ehrlich and Theodore Blackman, specifies the mechanisms below, and the section numbers beside them point into it.
+
+`lossless-core` is the engine that does this, and it names no agent SDK. [The engine and its harness](/concepts/engine-and-harness) says where the Pi-specific code lives.
+
+## Three regimes, chosen by occupancy
+
+| Regime | When | What happens |
+| --- | --- | --- |
+| Passive | Always | Every turn is ingested idempotently into SQLite with an FTS5 index. Nothing is summarized below the swap point. |
+| Async | Above the swap point | The `context` hook replaces the aged head with a summary pointer between turns. |
+| Blocking | At Pi's own compaction limit | LCM replaces default compaction with escalated summaries. It never cancels, and falls back to Pi's default on failure. |
+
+Swaps are commit-batched and append-only: the projection stays byte-identical between cuts, which is what keeps a provider's cached prefix valid. Past the recut line the projection re-cuts once, monotonically, to a smaller shape.
+
+## The DAG never summarizes the same text twice
+
+Each pass summarizes only the messages no leaf covers yet, then condenses the frontier one depth at a time (the paper's §2.1).
+
+- A group is a run of adjacent nodes that share a depth: the oldest such run at the shallowest depth that has one.
+- A group takes at most 8 children (`MAX_DAG_FANOUT`), repeated while the pointer block is over the summary budget.
+- Nothing is summarized twice. Every node expands back to its verbatim messages through provenance.
+- The depth cap of 8 is a structural assert, not policy. With 8 children per node it covers 8^8 leaf chunks.
+- A frontier that is still over budget is reported rather than resolved by eviction. The projection carries every frontier id: when the text does not fit the budget it is stubbed (header, a 200-character slice, and a note naming `lcm_describe`) rather than dropped. A pass that cannot meet its budget records `condensation-stalled`.
+
+The engine writes a header next to every summary the model sees (paper §2.4):
+
+```text
+[lcm:summary #12 depth 1 span e104..e238]
+```
+
+`#12` is the address for `lcm_describe` and `lcm_expand_query`, `depth` is how many condensation levels sit under it, and the span names the first and last entry it covers.
+
+<DagFigure />
+
+## A call that misses its budget tries again
+
+A summarizer call that cannot meet its budget escalates (paper Fig. 3).
+
+<EscalationLadder />
+
+A node whose text lands over twice its target earns one level-2 make-smaller pass; the smaller text becomes the primary one and the thorough text is kept as the node's rich tier.
+
+## A node can keep two summaries
+
+When the ladder picks its terse rung over a thorough one, the node keeps the thorough text as a second tier. The projection serves the richest tier that fits its budget, so a frontier under pressure drops a node to its shorter text before it drops to a stub, and the pointer survives every rung. `lcm_describe` returns the thorough text and names both sizes.
+
+## Big tool results become file handles [#file-handles]
+
+Paper §2.2. A tool result above `largeFileChars` (default 32,000) whose call named a path becomes a file:
+
+- the store keeps a descriptor beside the verbatim text: path, content id, the kind the body turned out to be, an exploration summary, and a bounded head of the body
+- the summarizer reads the descriptor instead of a clipped wall of text
+- the handle propagates up the DAG, so `lcm_describe` on a condensed node lists the files its children cover, each with the first line of its summary
+
+The exploration summary is built by rule, with no model call and no parser: code names its top-level declarations, JSON names its shape and one level of nesting, JSONL names its row keys, a table names its columns, Markdown names its headings, and text names its size and first line. A family with no rule reports its size rather than guessing, names are capped at 12 with `(+N more)`, and the summary line stays under a line of the preview.
+
+A body that large with no path is stored as ordinary text and recorded as `large-inline`, so "no files here" is told apart from a trigger that missed.
+
+## Raw blocks are stored, not indexed
+
+The derived text is what the index and the summarizer read, and it is not always the whole message. A thinking block, an image, a signature, or a block type the renderer does not know is kept as a payload on the row and returned by a read. A message whose derived text is complete carries no payload, so the common case stays one copy. `/lcm doctor` reports payload size. A row written before this build keeps only the derived text; deleting the store and restarting rebuilds it from the session file. See [Limits](/concepts/limits#derived-text).
+
+## An abandoned branch keeps its bytes
+
+Pi's session tree can move the leaf, which takes entries out of context without deleting them. Those entries are marked and their bytes are kept:
+
+- `lcm_grep` skips them unless `include_removed` is set
+- an included hit is labelled `[removed]`
+- an addressed read returns the text with a marker
+- navigating back clears the mark, so an abandoned branch becomes visible again
+
+## What /lcm doctor checks
+
+`/lcm doctor` checks the full-text index, summary spans, node shape, children a committed node names, duplicate spans, foreign keys, the recorded schema version, runs whose writer is gone, and how many messages have no leaf yet. `--repair` rebuilds the index, drops summaries whose span names a missing entry or whose child is gone, removes duplicate span rows while keeping the expandable one, and reaps rows a dead run left behind. A run this process wrote is left alone, and a row whose pid an unrelated process now holds reads as live.
+
+## Related
+
+- [Compaction zones](/concepts/compaction-zones): where the cut lines sit and how they are resolved.
+- [Configuration](/guides/configuration): `leafChunkTokens`, `summaryTokens`, `maxAsyncChunks`, and the rest.
+- [Limits](/concepts/limits): the bounds this design accepts.

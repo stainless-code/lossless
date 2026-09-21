@@ -1,0 +1,79 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+import Icon from "blume/components/Icon.astro";
+import CopyCommand from "./CopyCommand.astro";
+import SectionHeader from "./SectionHeader.astro";
+
+const packages = [
+	{
+		name: "pi-lossless",
+		title: "The Pi extension",
+		body: "The recall tools, the cockpit and the commands, with the engine inlined so the installed package stays a single artifact.",
+		bullets: [
+			"lcm_grep · lcm_describe · lcm_expand_query",
+			"Cockpit and slash commands",
+			"Escalated compaction at the limit",
+		],
+		command: "pi install npm:pi-lossless",
+	},
+	{
+		name: "lossless-core",
+		title: "The engine",
+		body: "Ingest, compaction and retrieval behind a two-port host contract. A harness implements ModelHost and Reader, and names no agent SDK.",
+		bullets: [
+			"Verbatim ingest with FTS5",
+			"Summary pointers and a DAG frontier",
+			"Escalated summaries that converge",
+		],
+		command: "npm install lossless-core",
+	},
+];
+---
+
+<section class="bg-muted landing-gutter py-16 sm:py-[100px]">
+  <div class="mx-auto max-w-[1160px]">
+    <SectionHeader
+      eyebrow="INSTALL"
+      title="One extension, or one engine."
+      sub="The extension is what a Pi user installs. The engine is what another harness drives, behind two ports and no agent SDK."
+    />
+
+    <div class="mt-12 grid gap-5 md:grid-cols-2">
+      {
+        packages.map((pkg) => (
+          <div class="flex flex-col rounded-2xl border border-border bg-[var(--landing-surface)] p-6">
+            <p class="font-mono text-accent text-sm">{pkg.name}</p>
+            <h3 class="mt-3 font-display font-semibold text-foreground text-2xl tracking-tight">
+              {pkg.title}
+            </h3>
+            <p class="mt-4 text-muted-foreground text-sm leading-relaxed">
+              {pkg.body}
+            </p>
+            <ul class="mt-4 flex flex-col gap-2">
+              {pkg.bullets.map((bullet) => (
+                <li class="flex items-center gap-2.5 text-muted-foreground text-sm">
+                  <Icon class="shrink-0 text-accent" name="check" size={14} />
+                  {bullet}
+                </li>
+              ))}
+            </ul>
+            <div class="flex-1"></div>
+            <div class="mt-6 [&>[data-landing-command]]:w-full">
+              <CopyCommand command={pkg.command} tone="muted" />
+            </div>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="mt-8 text-center">
+      <a
+        class="inline-flex items-center gap-1.5 font-medium text-accent transition-opacity hover:opacity-80"
+        href={contentHref("/guides/getting-started")}
+      >
+        Getting started
+        <Icon name="arrow-right" size={16} />
+      </a>
+    </div>
+  </div>
+</section>

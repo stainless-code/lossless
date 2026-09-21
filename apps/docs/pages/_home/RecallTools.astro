@@ -1,0 +1,66 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+import Icon from "blume/components/Icon.astro";
+import SectionHeader from "./SectionHeader.astro";
+
+const tools = [
+	{
+		tool: "lcm_grep",
+		title: "Search the archive",
+		body: "Keyword or pattern search across every stored message and summary. The model asks a question and gets the message addresses that match.",
+		snippet: 'lcm_grep({ query: "swap point" })',
+	},
+	{
+		tool: "lcm_describe",
+		title: "Inspect a summary",
+		body: "Kind, depth, covered span, and the cost of expanding it. The model gets this without pulling the original text into the loop.",
+		snippet: "lcm_describe({ id: 12 })",
+	},
+	{
+		tool: "lcm_expand_query",
+		title: "Read the originals",
+		body: "Expands the stored messages and answers from them, so the history is available without being replayed in full.",
+		snippet: "lcm_expand_query({ prompt, id })",
+	},
+];
+---
+
+<section class="landing-gutter py-16 sm:py-[100px]">
+  <div class="mx-auto max-w-[1160px]">
+    <SectionHeader
+      eyebrow="RECALL"
+      title="Reading an original costs one tool call."
+      sub="Searching and inspecting run in the main loop. The read goes to a bounded reader, so a 200,000-character message can be read without the text entering the conversation."
+    />
+
+    <div class="mt-12 grid gap-5 md:grid-cols-3">
+      {
+        tools.map((item) => (
+          <div class="flex flex-col rounded-2xl border border-border bg-[var(--landing-surface)] p-6">
+            <p class="font-mono text-accent text-sm">{item.tool}</p>
+            <h3 class="mt-3 font-display font-semibold text-foreground text-xl tracking-tight">
+              {item.title}
+            </h3>
+            <p class="mt-3 text-muted-foreground text-sm leading-relaxed">
+              {item.body}
+            </p>
+            <div class="flex-1"></div>
+            <code class="mt-6 block w-fit max-w-full truncate rounded-lg bg-muted px-4 py-3 font-mono text-muted-foreground text-sm">
+              {item.snippet}
+            </code>
+          </div>
+        ))
+      }
+    </div>
+
+    <div class="mt-8 text-center">
+      <a
+        class="inline-flex items-center gap-1.5 font-medium text-accent transition-opacity hover:opacity-80"
+        href={contentHref("/concepts/how-it-works#file-handles")}
+      >
+        Turn a big read into a file handle
+        <Icon name="arrow-right" size={16} />
+      </a>
+    </div>
+  </div>
+</section>

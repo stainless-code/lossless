@@ -1,0 +1,20 @@
+{
+  "name": "@stainless-code/lossless-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "audit": "blume audit --fail-on error",
+    "build": "blume build",
+    "check": "blume check",
+    "dev": "blume dev",
+    "preview": "blume preview",
+    "validate": "blume validate",
+    "prebuild": "bun scripts/build-comparison.ts",
+    "precheck": "bun scripts/build-comparison.ts",
+    "predev": "bun scripts/build-comparison.ts",
+    "prevalidate": "bun scripts/build-comparison.ts"
+  },
+  "dependencies": {
+    "blume": "1.7.3"
+  }
+}

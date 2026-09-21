@@ -1,0 +1,105 @@
+---
+title: Troubleshooting
+description: What to run when swaps never happen, when the gauge disagrees with Pi, when the summarizer keeps failing, and how to file a useful report.
+search:
+  tags: ["guide", "troubleshooting"]
+---
+
+Start with two commands. `/lcm status` says what the projection is doing right now, and `/lcm doctor` says what the store holds and which thresholds and summarizer chain are actually in effect.
+
+| Symptom | First command |
+| --- | --- |
+| Nothing has been swapped | `/lcm status`, then `/lcm doctor` |
+| The context percentage looks wrong | `/lcm status` (the `window:` line) |
+| Swaps stopped after a config edit | `/lcm status` (`(clamped)` on the thresholds line) |
+| Summaries are missing or shallow | `/lcm report`, then `/lcm doctor` |
+| Token spend on summarizer calls looks too high | `/lcm report` |
+| The model cannot find something it knew | `lcm_grep`, then `lcm_describe` on the covering summary |
+| The store looks inconsistent | `/lcm doctor --repair` |
+| Cross-session search finds nothing | `/lcm migrate`, then `/lcm gc` |
+| You need to file a bug | `/lcm diagnose --save lcm-diagnose.txt` |
+
+## Nothing has been swapped
+
+`projection: none` with an occupancy below the swap line is the normal state, not a fault. Below the line LCM only logs.
+
+If occupancy is clearly past the swap line and the projection is still empty, the usual causes are:
+
+- **Assembly is off.** `/lcm doctor` prints `assembly off` in its first line when `assemblyEnabled` is `false`.
+- **The window is unknown.** Without a window or token thresholds, ratios have nothing to multiply. `/lcm status` prints `window: unknown` and `thresholds: window unknown`.
+- **The threshold was set in the wrong vocabulary.** Ratios, `smartZone`, and explicit tokens are OR-mode with tokens winning. `/lcm doctor` prints the thresholds and the config they came from.
+- **The session is ephemeral.** A session with no session file never opens a store; `/lcm` says so instead of printing a projection.
+
+## The gauge disagrees with Pi
+
+`/lcm status` prints two different numbers on purpose:
+
+```text
+context: 68% of 400.0k
+window: Pi believes 400.0k, corrected to 1.0M (stated)
+```
+
+The percentage is Pi's own usage divided by the window Pi reports. The `window:` line says whether LCM has a stored correction for that model, where it came from (`provider-error`: a provider refused an over-window request and stated the real limit), and which value the thresholds use. A first session against a new model shows `(Pi's belief, uncorrected)` because no correction exists yet.
+
+Estimated token counts are also not exact. [Token estimation](/concepts/token-estimation) explains the calibration that narrows the gap and the band it is refused outside of.
+
+## Summaries are missing or shallow
+
+```bash
+/lcm report
+```
+
+The report tallies what the summarizer did: `model-fallback` means the chain had to substitute a model, `summarizer-capped` means a budget stopped a pass and the remaining chunks used the mechanical truncate, and `condensation-stalled` means a pass could not meet its summary budget. Each is a different fix:
+
+- `model-fallback`: name a chain whose first entry is reliable, or pin one model.
+- `summarizer-capped`: raise `summarizerTokensPerCall` or `summarizerTokensPerPass`, or lower `leafChunkTokens` so each chunk is smaller.
+- `condensation-stalled`: the frontier is over budget at the depth cap. Lower `summaryTokens`, or accept the stubs the projection reports.
+
+`/lcm doctor` prints the depth histogram, the pinned projection, and the summarizer chain that runs.
+
+## The store looks inconsistent
+
+```bash
+/lcm doctor                 # checks and findings
+/lcm doctor --repair        # rebuild the index, drop unreachable rows
+```
+
+The checks cover the full-text index, summary spans, node shape, children a committed node names, duplicate spans, foreign keys, the recorded schema version, runs whose writer is gone, and how many messages have no leaf yet. A bounded sample of offending ids is printed for each finding.
+
+`--repair` rebuilds the index, drops summaries whose span names an entry the store does not hold or whose child is gone, removes duplicate span rows while keeping the expandable one, and reaps rows a dead run left behind. A run this process wrote is left alone, and a row whose pid an unrelated process now holds reads as live, so it waits for that process to exit.
+
+## Cross-session search finds nothing
+
+- **The session has not been committed yet.** The newest session's messages reach its store as it runs; a session that ended cleanly is fully readable.
+- **The store is older-generation.** Cross-session search counts it as unreadable rather than migrating it. `/lcm migrate` lists and upgrades them.
+- **The store was deleted by gc.** `/lcm gc --apply` removes the store of a session whose session file is gone, and with it that session's reachability. The transcript export remains, and nothing re-indexes it.
+- **The scope is too narrow.** `"sessions"` matches by working directory; `"all_sessions"` does not.
+
+## A test process refuses to touch the real home
+
+A process that looks like a test run (`NODE_ENV=test`, `VITEST`, or the guard the test setup sets) refuses to use a home directory outside its temp dir, and says so. A live session that inherits a test signal for another reason can set `LCM_ALLOW_REAL_HOME=1` to override the refusal.
+
+## Reporting a problem
+
+```bash
+/lcm diagnose                     # one pasteable block
+/lcm diagnose --save lcm-bug.txt  # the same bytes, written at mode 0600
+```
+
+The block is capped at 8 KB and carries:
+
+- this package's version, Pi's version, node, platform, arch, and the mode the session runs in
+- the store tag (the `session` field on every metric row), the session file's basename, and its format version
+- what `/lcm doctor` prints: counts, size, integrity findings, depth histogram, pinned projection, thresholds, model, summarizer chain
+- the effective config merged over defaults, as JSON, and the config path
+- this session's metric rows: the count, a tally by kind, the last context decision, and up to 25 of the most recent rows as JSONL, with the number left out always printed
+
+It carries no message body, no summary text, no search query, and no absolute path outside your home directory. Provider and host error text is masked, so a key in a failure message cannot leave. Read it once before posting, and strip anything personal.
+
+A notification is rendered, not written, so a terminal can wrap it and a copy carries those breaks. `--save <path>` (or `--save=<path>`) writes the exact bytes instead, plus a final newline. `--save` with no path is refused rather than quietly printing the block.
+
+## Related
+
+- [Diagnostics and metrics](/reference/files#metrics): what is logged, and where.
+- [Limits](/concepts/limits): the accepted bounds, so you know which ones you are hitting.
+- [The /lcm command](/reference/command): every flag used on this page.

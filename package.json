@@ -1,0 +1,36 @@
+{
+  "name": "lossless-workspace",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "vp check",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "lint:ci": "vp lint --quiet",
+    "test": "vp test",
+    "test:coverage": "vp test --coverage --coverage.reporter=lcov",
+    "coverage:codemap": "codemap ingest-coverage coverage/lcov.info && node -e \"fs.rmSync('coverage',{recursive:true,force:true})\"",
+    "pack": "vp run --filter ./packages/core prepack && vp run --filter ./packages/pi prepack",
+    "changeset": "changeset",
+    "version": "changeset version && vp fmt packages/*/CHANGELOG.md",
+    "release": "changeset publish",
+    "prepare": "vp config || true",
+    "eval": "bun scripts/eval-long-context.ts"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^3.0.2",
+    "@types/node": "^22",
+    "@vitest/coverage-v8": "4.1.11",
+    "typescript": "^5.7.0",
+    "vite-plus": "^0.3.1"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "bun@1.4.2"
+}

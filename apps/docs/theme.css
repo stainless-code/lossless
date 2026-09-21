@@ -1,0 +1,93 @@
+:root {
+  --blume-background: #fafafa;
+  --blume-foreground: #18181b;
+  --blume-muted: #f4f4f5;
+  --blume-muted-foreground: #52525b;
+  --blume-border: #e4e4e7;
+  --blume-accent: #6d28d9;
+  --blume-accent-foreground: #ffffff;
+  --blume-success: #15803d;
+
+  --landing-surface: #ffffff;
+  --landing-faint: #6b6b75;
+  --landing-zone-quiet: #b4b4be;
+  --landing-zone-swapped: #8b5cf6;
+  --landing-zone-recut: #3b1080;
+  --landing-zone-track: #82828c;
+}
+
+:root[data-theme="dark"] {
+  --blume-background: #18181b;
+  --blume-foreground: #fafafa;
+  --blume-muted: #27272a;
+  --blume-muted-foreground: #a1a1aa;
+  --blume-border: #3f3f46;
+  --blume-accent: #c4b5fd;
+  --blume-accent-foreground: #18181b;
+  --blume-success: #4ade80;
+
+  --landing-surface: #202024;
+  --landing-faint: #96969f;
+  --landing-zone-quiet: #7a7a86;
+  --landing-zone-swapped: #a78bfa;
+  --landing-zone-recut: #ddd3fb;
+  --landing-zone-track: #82828c;
+}
+
+/* The mark carries the claim in three levels: the outer ticks are the whole
+   record, the brackets are the span handed to the model, the accent node is the
+   message being read. On hover both spans open, the coarser one leading, and the
+   node between them swells.
+
+   The favicon set in public/ is this geometry in each scheme's ink, rendered once
+   from a color-substituted copy of `logo.svg`, and the names are load-bearing:
+   Blume pairs `favicon-dark.svg` with `favicon.svg` and emits the pair behind
+   `prefers-color-scheme`. A tab is browser chrome rather than a page, so it
+   follows the system scheme and not `data-theme`, which is why `favicon.svg`
+   carries its own `prefers-color-scheme` block as well, for browsers that style
+   the icon themselves instead of reading `media` on the link.
+
+   The touch and manifest icons have no scheme to follow, so they take the dark
+   surface as a full-bleed plate, with the ticks lifted to 0.62 because the
+   page's 0.42 melts into a plate at that size. */
+.logo-tick-out,
+.logo-open,
+.logo-close {
+  transition: transform 220ms ease;
+}
+
+.logo-node {
+  transition: transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+a:has(> span > .logo-svg):hover .logo-tick-out:nth-of-type(1) {
+  transform: translateX(-2.2px);
+}
+
+a:has(> span > .logo-svg):hover .logo-tick-out:nth-of-type(2) {
+  transform: translateX(2.2px);
+}
+
+a:has(> span > .logo-svg):hover .logo-open {
+  transform: translateX(-1.1px);
+}
+
+a:has(> span > .logo-svg):hover .logo-close {
+  transform: translateX(1.1px);
+}
+
+a:has(> span > .logo-svg):hover .logo-node {
+  transform: scale(1.16);
+}
+
+/* Landing measure: every band of the landing export (hero, sections, stats,
+   footer) sits in 140px gutters on a 1440 artboard, i.e. one shared 1160px
+   (72.5rem) content column. Fluid gutters reproduce that exactly at 1440,
+   hold a 24px floor on small screens, and keep the column capped and centered
+   above 1440 so the page always reads as contained. Opt-in: only landing
+   bands use this class. */
+.landing-gutter {
+  padding-inline: max(1.5rem, calc((100vw - 72.5rem) / 2));
+}

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" class="logo-svg" aria-hidden="true">
+  <path class="logo-tick-out" d="M4.2 5.8v12.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" opacity="0.42" />
+  <path class="logo-tick-out" d="M19.8 5.8v12.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" opacity="0.42" />
+  <path class="logo-open" d="M10.2 6h-1.3a1.3 1.3 0 0 0-1.3 1.3v9.4a1.3 1.3 0 0 0 1.3 1.3h1.3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  <path class="logo-close" d="M13.8 6h1.3a1.3 1.3 0 0 1 1.3 1.3v9.4a1.3 1.3 0 0 1-1.3 1.3h-1.3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  <circle class="logo-node" cx="12" cy="12" r="2.2" fill="var(--blume-accent, #6d28d9)" />
+</svg>

@@ -1,0 +1,107 @@
+---
+title: Getting started
+description: Install pi-lossless, confirm the store is live, and set the point where aged history starts being swapped for summaries.
+search:
+  tags: ["guide", "install"]
+---
+
+You already have a session that grows. You want the model to keep working past the point where it would normally forget, without giving up the ability to read what it forgot.
+
+## Install
+
+```bash
+pi install npm:pi-lossless
+```
+
+Nothing else runs at install time. There is no service, no daemon, and no configuration file to create.
+
+## What starts on its own
+
+On the first turn of every session, LCM ingests the messages into a SQLite store beside a full-text index. Ingestion is idempotent, so a resumed session, a replayed turn, or a restarted process does not duplicate a row.
+
+Below the swap point nothing is summarized and the model sees the conversation itself. This is the passive regime: the session pays for continuity, not for compaction.
+
+:::note[Zero config is the intended default]
+Passive logging and the default thresholds (swap at 70% of the model's window, keep the last 20,000 tokens verbatim) are the whole default configuration. `~/.pi/agent/lcm.json` only exists if you want to move those lines.
+:::
+
+## Confirm the store is live
+
+```bash
+/lcm status
+```
+
+That prints the projection, the current occupancy, and the thresholds in effect:
+
+```text
+LCM: 412 messages, 9 summaries, 2140 KB
+projection: pinned at cut 3 (applied at 71%)
+context: 68% of 400.0k
+thresholds: swap 70% / recut 85%
+window: 400.0k (Pi's belief, uncorrected)
+```
+
+`projection: none` means nothing has been swapped yet, which is correct until the first cut. `window: ... (Pi's belief, uncorrected)` is also normal: Pi reports the window it last measured, and LCM records the window a provider states for a model the first time it sees one. When both exist, the stored correction wins and the line says so.
+
+## Set the cut line
+
+```bash
+/lcm settings
+```
+
+Opens the cockpit: every threshold, the summarizer chain, the file-handle trigger, and the two toggles, each editable in place with the value and its effect next to it. Changes apply to the running session; the same values can be written to `~/.pi/agent/lcm.json` for every session after it. The [configuration page](/guides/configuration) documents each key.
+
+The one-line version, for a session whose context window you know:
+
+```bash
+/lcm settings    # then set "smart zone (easy)" to your token budget
+```
+
+`smartZone` is a token count, not a ratio: swap when the estimated context reaches it, and re-cut at 1.18 times it. Explicit token thresholds win over ratios.
+
+## Watch what a compaction costs
+
+```bash
+/lcm report
+```
+
+Summarizes the metrics for this session: what each swap moved, what the summarizer calls cost, which model answered, and whether a fallback was needed. Metrics are appended to `~/.pi/agent/lcm/metrics.jsonl` as they happen, so the report is a view over the log rather than a separate store.
+
+## Prove that what was compacted is still readable
+
+Ask the model to recall something from a part of the session that is no longer in its context, or run the recall path yourself in a session where swaps have happened:
+
+```text
+lcm_grep({ query: "the retry policy we settled on" })
+lcm_describe({ id: 12 })
+lcm_expand_query({ query: "the retry policy we settled on", summary_id: 12 })
+```
+
+The first returns hits with an entry id and the summary that covers them, the second prices that summary against its originals, and the third reads the stored text and answers from it. [Recall tools](/reference/tools) documents the parameters.
+
+## Keep a copy before you experiment
+
+```bash
+/lcm backup                 # <store>.db.backup-<timestamp>, beside the store
+/lcm export lcm-export.jsonl   # full verbatim transcript, mode 0600
+```
+
+Both are store surfaces: they carry the stored bytes, secrets included. Treat them like the session file they came from. See [Security](/concepts/security).
+
+## Rebuild or remove
+
+The store is derived, so the session file can always rebuild it.
+
+```bash
+/lcm doctor --repair        # rebuild the index, drop summaries nothing can reach
+rm ~/.pi/agent/lcm/*.db     # rebuild from scratch on the next start of each session
+```
+
+`/lcm gc` lists stores whose session file is gone (and scratch stores older than 30 days); `--apply` exports each transcript and then deletes the database. Backups are never deleted by LCM.
+
+## Where next
+
+- [How it works](/concepts/how-it-works): the three regimes, the recursive DAG, and what a pointer guarantees.
+- [The engine and its harness](/concepts/engine-and-harness): which part belongs to `lossless-core`, and which part is Pi's.
+- [Compaction zones](/concepts/compaction-zones): the four lines that decide what the model sees.
+- [The /lcm command](/reference/command): every subcommand and flag.

@@ -1,0 +1,67 @@
+---
+import { contentHref } from "blume/components/content/base-href.ts";
+import Icon from "blume/components/Icon.astro";
+import DagFigure from "../../components/visuals/DagFigure.astro";
+import SectionHeader from "./SectionHeader.astro";
+
+const steps = [
+	{
+		title: "Log",
+		body: "Every turn is written to SQLite behind a full-text index. Below the swap point the model still sees the conversation itself.",
+	},
+	{
+		title: "Swap",
+		body: "Past the swap point the aged head becomes one summary pointer. Nothing else in the context moves.",
+	},
+	{
+		title: "Condense",
+		body: "Deeper passes fold the frontier into a DAG, up to 8 children per node. Every node expands back to the messages under it.",
+	},
+	{
+		title: "Recall",
+		body: "The model greps, describes, and reads the originals by address, and only the read leaves the main loop.",
+	},
+];
+---
+
+<section class="landing-gutter py-16 sm:py-[100px]">
+  <div class="mx-auto max-w-[1160px]">
+    <SectionHeader
+      eyebrow="HOW IT WORKS"
+      title="Four moves, one store."
+      sub="The first three steps run without the model asking. The fourth is a tool call the model makes."
+    />
+
+    <ol class="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+      {
+        steps.map((step, i) => (
+          <li class="border-foreground border-t-2 pt-6">
+            <p class="font-mono text-accent text-xs">
+              {String(i + 1).padStart(2, "0")}
+            </p>
+            <h3 class="mt-3 font-display font-semibold text-foreground text-xl tracking-tight">
+              {step.title}
+            </h3>
+            <p class="mt-3 text-muted-foreground text-sm leading-relaxed">
+              {step.body}
+            </p>
+          </li>
+        ))
+      }
+    </ol>
+
+    <div class="mt-12">
+      <DagFigure />
+    </div>
+
+    <div class="mt-8 text-center">
+      <a
+        class="inline-flex items-center gap-1.5 font-medium text-accent transition-opacity hover:opacity-80"
+        href={contentHref("/concepts/how-it-works")}
+      >
+        The full mechanism
+        <Icon name="arrow-right" size={16} />
+      </a>
+    </div>
+  </div>
+</section>

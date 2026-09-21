@@ -1,0 +1,4 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["blume.config.ts", "components/**/*.ts", "content/**/meta.ts", "scripts/**/*.ts"]
+}

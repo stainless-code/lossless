@@ -1,0 +1,66 @@
+---
+title: Compaction zones
+description: The four lines that decide what the model sees, how ratios, smartZone and explicit tokens resolve, and what the safety clamp protects.
+search:
+  tags: ["concept", "thresholds"]
+---
+
+Occupancy, not the window limit, is what drives LCM. Four lines divide the session into zones.
+
+| Line | Default | Crossing it |
+| --- | --- | --- |
+| `keepRecentTokens` | 20,000 | Messages newer than this stay in the projection as raw text. |
+| Swap | 70% of the window | The aged head becomes a summary pointer, between turns. |
+| Re-cut | 85% of the window | The projection re-cuts once, monotonically, to a smaller shape. |
+| Clamp | 90% / 95% | Hard ceilings the two ratios are folded under. |
+
+<WindowFigure />
+
+Below the swap line the projection is the conversation. Between the swap line and the re-cut line, swaps are appends: the model sees one more pointer and the rest of its context byte for byte, which is what a provider's cached prefix needs. Past the re-cut line, one cut replaces the previous shape.
+
+## Why the soft point is not the window
+
+Model quality degrades at a token budget rather than at the context-window limit, so LCM compacts on a line you set. The default is 70%, which leaves room for a large turn, a tool result, and the summarizer's own output without a blocking compaction mid-turn.
+
+## Three vocabularies, and explicit tokens win
+
+Three vocabularies, OR-mode per level, with explicit tokens winning over everything else:
+
+| Kind | Config | Swap at | Re-cut at |
+| --- | --- | --- | --- |
+| Ratios (default) | `swapAtRatio`, `recutAtRatio` | the ratio | the ratio |
+| Smart zone | `smartZone: N` | `N` tokens | `N x 1.18` tokens |
+| Token pair | `swapAtTokens`, `recutAtTokens` | the token count | the token count |
+
+`smartZone` derives the re-cut point from the swap point so the two cannot cross. A token pair lets you set them independently, and the re-cut value is folded up if it lands at or below the swap value. Per-model `zones` entries merge over the global config for the model that is running.
+
+## An unreachable line is clamped, and status says so
+
+The resolved swap fraction is capped at 0.9 and the re-cut fraction is folded into `(swap, 0.95]`. Without that, a line above 100% is unreachable: the projection would never re-cut, the raw tail would grow past the window while LCM reported `stable` and, on a small window, the loop would stop making progress. `/lcm status` prints `(clamped)` when either value moved, so a threshold you set is never silently different from the threshold in effect.
+
+## `/lcm status` names the pin, the window, and the resolved lines
+
+```bash
+/lcm status
+```
+
+```text
+LCM: 412 messages, 9 summaries, 2140 KB
+projection: pinned at cut 3 (applied at 71%)
+context: 68% of 400.0k
+thresholds: swap 70% / recut 85%
+window: Pi believes 400.0k, corrected to 1.0M (provider-error)
+```
+
+- **projection** is the current pin: which cut is applied and at what occupancy it was applied. `none` means nothing has been swapped.
+- **context** is Pi's own usage over the window Pi reports.
+- **thresholds** are the resolved fractions after merging zones, smart zone, tokens, and the clamp.
+- **window** is the value the thresholds were resolved against, and where a stored correction came from.
+
+The cockpit (`/lcm settings`) exposes the same numbers as editable rows: swap trigger as a ratio and in tokens, smart zone, re-cut line in both units, keep-recent, summary target, leaf chunk, and the asynchronous chunk cap. Each row shows its current value next to its effect, and a change applies to the running session immediately.
+
+## Related
+
+- [Token estimation](/concepts/token-estimation): what "70%" is a percentage of.
+- [Configuration](/guides/configuration): every key, default, and range.
+- [How it works](/concepts/how-it-works): what actually happens at a cut.

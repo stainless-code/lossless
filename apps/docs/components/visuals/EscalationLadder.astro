@@ -1,0 +1,73 @@
+---
+const rungs = [
+	{
+		level: "Level 1",
+		style: "Preserve details",
+		note: "The default request.",
+		state: "Over budget → escalate",
+	},
+	{
+		level: "Level 2",
+		style: "Bullets",
+		note: "Keeps level 1's output budget, so a reasoning model does not answer nothing.",
+		state: "Over budget → escalate",
+	},
+	{
+		level: "Level 3",
+		style: "Mechanical truncate",
+		note: "Stored like any other level, tagged [lcm:truncated]. This is what guarantees convergence.",
+		state: "Always accepted",
+	},
+];
+---
+
+<figure class="not-prose mx-auto w-full max-w-5xl @container">
+  <div class="grid gap-6 @3xl:grid-cols-[1fr_auto] @3xl:gap-10">
+    <div class="flex flex-col gap-3">
+      {
+        rungs.map((rung) => (
+          <div class="rounded-blume border border-border p-4">
+            <p class="font-medium text-foreground text-sm">
+              {rung.level}
+              <span class="text-muted-foreground"> · {rung.style}</span>
+            </p>
+            <p class="mt-1 font-mono text-muted-foreground text-xs">
+              {rung.state}
+            </p>
+            <p class="mt-2 text-muted-foreground text-sm leading-relaxed">
+              {rung.note}
+            </p>
+          </div>
+        ))
+      }
+    </div>
+
+    <div
+      class="flex flex-col gap-5 rounded-blume border border-border bg-muted/30 p-4 @3xl:w-64"
+    >
+      <div>
+        <p class="font-mono text-foreground text-xs">gate</p>
+        <p class="mt-1 text-muted-foreground text-sm leading-relaxed">
+          A result is accepted only when it is strictly smaller than its input.
+        </p>
+      </div>
+      <div>
+        <p class="font-mono text-foreground text-xs">rich tier</p>
+        <p class="mt-1 text-muted-foreground text-sm leading-relaxed">
+          A node over its target keeps the thorough text beside the terse one.
+        </p>
+      </div>
+      <div>
+        <p class="font-mono text-foreground text-xs">budget</p>
+        <p class="mt-1 text-muted-foreground text-sm leading-relaxed">
+          The cap comes from the engine's arithmetic, not the model's own count,
+          so a pass cannot pass itself.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <figcaption class="mt-4 text-muted-foreground text-sm">
+    Three levels, in the order a pass tries them.
+  </figcaption>
+</figure>

@@ -1,0 +1,29 @@
+---
+title: Roadmap
+description: "Planned work in plain words: what comes next, what waits, and what stays out. Evidence gates and deferred items live in the repo roadmap."
+search:
+  tags: ["reference", "roadmap"]
+sidebar:
+  badge: "Planned"
+---
+
+Shipped behavior lives in [Guides](/guides) and [Concepts](/concepts). This page is the forward-looking list. Pull requests welcome. Open an issue first for anything below so we can agree on shape.
+
+## Next
+
+- **Measured proof that recall survives compaction.** A procedural long-context harness with frozen seeds checks fidelity by address after many passes. This is the evidence the rest of the list builds on.
+- **One call searches more past sessions.** A per-session digest index lifts the current caps of 20 stores, 1.5 seconds, and 40 hits. It ships once a measurement asks for it.
+
+## Later
+
+- **Cheaper compaction from deterministic briefs.** A benchmark on our own long transcripts decides whether rule-written briefs replace model-written summaries. The bar is indistinguishable recall at meaningfully lower cost.
+- **Cleaner recovery when the window overflows.** Branch back to the last transmissible message, compact, then retry, instead of falling back to the host default. This ships only if overflow frequency matters.
+
+## Out of scope
+
+- **Pi only.** No adapter for other harnesses is planned; [Comparison](/reference/comparison) explains why the work stays Pi-only.
+- **No paper benchmark numbers.** The paper's headline figures come from pieces this build leaves out, so they are not claimed here.
+- **No vector recall, no curated memory tier.** Deliberate gaps, with the reasons in [Comparison](/reference/comparison).
+- **Secrets mask on exit instead of blocking the write.** Deliberate; same pointer.
+
+Maintainer detail (evidence gates, deferred items, rejected ideas) lives in the repo's [`docs/roadmap.md`](https://github.com/stainless-code/lossless/blob/main/docs/roadmap.md).
