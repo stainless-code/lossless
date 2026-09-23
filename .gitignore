@@ -22,3 +22,4 @@ coverage/
 
 # local, uncommitted working notes for agent passes
 .agents/local/
+.vitest/

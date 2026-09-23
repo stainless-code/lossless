@@ -11,6 +11,9 @@ export default defineConfig({
     alias: { "lossless-core": engine },
   },
   pack: {
+    deps: {
+      resolveDepSubpath: true,
+    },
     entry: ["src/index.ts"],
     format: ["esm"],
     dts: true,
