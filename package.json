@@ -25,12 +25,24 @@
   "devDependencies": {
     "@changesets/cli": "^3.0.2",
     "@types/node": "^22",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "catalog:",
     "typescript": "^5.7.0",
-    "vite-plus": "^0.3.1"
+    "vite": "catalog:",
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
+  },
+  "overrides": {
+    "vite": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": ">=22.19.0"
   },
-  "packageManager": "bun@1.4.2"
+  "packageManager": "bun@1.4.2",
+  "catalog": {
+    "@vitest/coverage-v8": "5.0.1",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
+    "vitest": "5.0.1",
+    "vite-plus": "1.0.0-rc.0"
+  }
 }
