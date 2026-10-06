@@ -3,6 +3,12 @@ title: How it works
 description: The three regimes, the recursive summary DAG, the escalation ladder, file handles, removed branches, and the integrity checks behind them.
 search:
   tags: ["concept", "mechanism"]
+  boost: 3
+  keywords: [DAG, projection, summary, regimes]
+related:
+  - /concepts/compaction-zones
+  - /guides/configuration
+  - /concepts/limits
 ---
 
 A session's context is a projection over a store. LCM changes the projection, never the store, and never Pi's session file.
@@ -81,9 +87,3 @@ Pi's session tree can move the leaf, which takes entries out of context without 
 ## What /lcm doctor checks
 
 `/lcm doctor` checks the full-text index, summary spans, node shape, children a committed node names, duplicate spans, foreign keys, the recorded schema version, runs whose writer is gone, and how many messages have no leaf yet. `--repair` rebuilds the index, drops summaries whose span names a missing entry or whose child is gone, removes duplicate span rows while keeping the expandable one, and reaps rows a dead run left behind. A run this process wrote is left alone, and a row whose pid an unrelated process now holds reads as live.
-
-## Related
-
-- [Compaction zones](/concepts/compaction-zones): where the cut lines sit and how they are resolved.
-- [Configuration](/guides/configuration): `leafChunkTokens`, `summaryTokens`, `maxAsyncChunks`, and the rest.
-- [Limits](/concepts/limits): the bounds this design accepts.

@@ -15,6 +15,6 @@
     "prevalidate": "bun scripts/build-comparison.ts"
   },
   "dependencies": {
-    "blume": "1.7.3"
+    "blume": "2.1.3"
   }
 }

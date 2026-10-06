@@ -3,6 +3,12 @@ title: Configuration
 description: Every key in ~/.pi/agent/lcm.json, the three vocabularies that set the cut line, and what LCM does with a value it cannot use.
 search:
   tags: ["guide", "config"]
+  boost: 3
+  keywords: [config, lcm.json, thresholds, settings]
+related:
+  - /concepts/compaction-zones
+  - /reference/config
+  - /guides/troubleshooting
 ---
 
 The file is optional and lives at `~/.pi/agent/lcm.json`. It must be strict JSON: `//` comments and trailing commas are rejected. A file that does not parse is left untouched, defaults apply, and the problem is reported at session start (or recorded as a `config-problem` metric when there is no UI).
@@ -88,9 +94,3 @@ The defaults sit far above what a healthy pass spends. A pass that respects `sum
 ## Turn assembly off and keep the store
 
 `assemblyEnabled: false` stops per-turn projection assembly: ingestion, recall, the report, and the metrics stay, and the context hook stops swapping. It is the switch for a session where you want the store but not the substitution, for example while comparing Pi's own compaction against LCM on the same work.
-
-## Related
-
-- [Compaction zones](/concepts/compaction-zones): what each line does when it is crossed.
-- [Config reference](/reference/config): the same keys with their on-disk effects and the parse rules.
-- [Troubleshooting](/guides/troubleshooting): what a rejected value looks like from the outside.

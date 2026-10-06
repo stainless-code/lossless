@@ -3,6 +3,10 @@ title: Cross-session recall
 description: How lcm_grep reaches sessions that already ended, what it reads from them, and why nothing from a past session is ever injected into this one.
 search:
   tags: ["guide", "recall"]
+related:
+  - /concepts/recall-and-provenance
+  - /concepts/security
+  - /reference/tools
 ---
 
 A new session starts empty. The work you did yesterday is in a different store, and the model cannot see it unless it asks.
@@ -64,9 +68,3 @@ It is the only path in LCM that writes to a past session's store, it reports bef
 ## Deleting a past session's store
 
 `/lcm gc --apply` deletes the stores whose session file is gone. Those stores are not only that session's index: they are a past session the cross-session scope can no longer read. The transcript export gc writes before deleting keeps the bytes, and nothing re-indexes it. The export lands beside the stores it protects, never in the directory Pi was started from, because it holds stored bytes, secrets included.
-
-## Related
-
-- [Recall and provenance](/concepts/recall-and-provenance): the pointer format, spans, and what a reader is allowed to read.
-- [Security](/concepts/security): what cross-session reads touch, and the redaction that applies to their findings.
-- [Reference: tools](/reference/tools): every parameter of the three recall tools.

@@ -3,6 +3,11 @@ title: Compaction zones
 description: The four lines that decide what the model sees, how ratios, smartZone and explicit tokens resolve, and what the safety clamp protects.
 search:
   tags: ["concept", "thresholds"]
+  keywords: [swap, recut, zones, thresholds]
+related:
+  - /concepts/token-estimation
+  - /guides/configuration
+  - /concepts/how-it-works
 ---
 
 Occupancy, not the window limit, is what drives LCM. Four lines divide the session into zones.
@@ -58,9 +63,3 @@ window: Pi believes 400.0k, corrected to 1.0M (provider-error)
 - **window** is the value the thresholds were resolved against, and where a stored correction came from.
 
 The cockpit (`/lcm settings`) exposes the same numbers as editable rows: swap trigger as a ratio and in tokens, smart zone, re-cut line in both units, keep-recent, summary target, leaf chunk, and the asynchronous chunk cap. Each row shows its current value next to its effect, and a change applies to the running session immediately.
-
-## Related
-
-- [Token estimation](/concepts/token-estimation): what "70%" is a percentage of.
-- [Configuration](/guides/configuration): every key, default, and range.
-- [How it works](/concepts/how-it-works): what actually happens at a cut.

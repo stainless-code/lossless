@@ -3,6 +3,10 @@ title: Troubleshooting
 description: What to run when swaps never happen, when the gauge disagrees with Pi, when the summarizer keeps failing, and how to file a useful report.
 search:
   tags: ["guide", "troubleshooting"]
+related:
+  - /reference/files#metrics
+  - /concepts/limits
+  - /reference/command
 ---
 
 Start with two commands. `/lcm status` says what the projection is doing right now, and `/lcm doctor` says what the store holds and which thresholds and summarizer chain are actually in effect.
@@ -97,9 +101,3 @@ The block is capped at 8 KB and carries:
 It carries no message body, no summary text, no search query, and no absolute path outside your home directory. Provider and host error text is masked, so a key in a failure message cannot leave. Read it once before posting, and strip anything personal.
 
 A notification is rendered, not written, so a terminal can wrap it and a copy carries those breaks. `--save <path>` (or `--save=<path>`) writes the exact bytes instead, plus a final newline. `--save` with no path is refused rather than quietly printing the block.
-
-## Related
-
-- [Diagnostics and metrics](/reference/files#metrics): what is logged, and where.
-- [Limits](/concepts/limits): the accepted bounds, so you know which ones you are hitting.
-- [The /lcm command](/reference/command): every flag used on this page.

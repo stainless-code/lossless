@@ -3,6 +3,10 @@ title: Recall and provenance
 description: What a summary header carries, how an address is resolved, what a bounded reader is allowed to read, and where recall runs.
 search:
   tags: ["concept", "recall"]
+related:
+  - /reference/tools
+  - /guides/cross-session-recall
+  - /concepts/how-it-works
 ---
 
 Every summary the model sees arrives with a header the engine wrote, and every hit the model gets names the entry it matched. Addresses are how the model gets from a projection back to the bytes.
@@ -63,9 +67,3 @@ The reader's output is tagged when it needs to be: a finding from a past session
 ## Two tools answer inline; only the third delegates
 
 `lcm_grep` and `lcm_describe` run in the main loop and return a bounded view. Only the third tool delegates. That split is deliberate: listing hits and pricing a node are cheap enough to inline, while reading a wall of stored bytes is not.
-
-## Related
-
-- [Reference: tools](/reference/tools): every parameter, and the bounds each path enforces.
-- [Cross-session recall](/guides/cross-session-recall): pointers into sessions that already ended.
-- [How it works](/concepts/how-it-works): how the DAG that these addresses point into is built.
