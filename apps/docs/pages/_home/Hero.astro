@@ -2,6 +2,33 @@
 import { contentHref } from "blume/components/content/base-href.ts";
 import Icon from "blume/components/Icon.astro";
 import CopyCommand from "./CopyCommand.astro";
+import { OPENCODE_ICON } from "../../harness-icons.ts";
+
+const hosts = [
+  {
+    id: "pi",
+    label: "Pi",
+    icon: "/logos/pi-color.svg",
+    command: "pi install npm:pi-lossless",
+    start: "/guides/pi/getting-started",
+  },
+  {
+    id: "opencode",
+    label: "OpenCode v2",
+    icon: OPENCODE_ICON,
+    command: "opencode plugin add opencode-lossless",
+    start: "/guides/opencode/getting-started",
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    icon: "/logos/deepseek.svg",
+    next: true,
+  },
+];
+
+const selectedChip = "border-accent bg-accent/10 font-semibold text-accent";
+const idleChip = "border-border font-medium text-muted-foreground hover:text-foreground";
 ---
 
 <section class="landing-gutter pt-16 pb-14 sm:pt-24 sm:pb-24">
@@ -10,7 +37,7 @@ import CopyCommand from "./CopyCommand.astro";
       class="mx-auto flex w-fit items-center gap-2 rounded-full border border-border bg-[var(--landing-surface)] px-4 py-2 font-mono text-muted-foreground text-xs"
     >
       <span aria-hidden="true" class="size-[7px] rounded-full bg-accent"></span>
-      Pi extension · SQLite + FTS5 · MIT
+      SQLite + FTS5 · local-first · MIT
     </p>
 
     <h1
@@ -25,14 +52,50 @@ import CopyCommand from "./CopyCommand.astro";
       behind them stays in a local store, searchable and readable in full.
     </p>
 
-    <div class="mt-8 flex justify-center">
-      <CopyCommand command="pi install npm:pi-lossless" />
+    <div class="mt-8 flex flex-col items-center gap-3">
+      <div
+        aria-label="Choose a host"
+        class="flex flex-wrap items-center justify-center gap-2"
+        role="group"
+      >
+        {
+          hosts.map((host) => (
+            <button
+              aria-pressed={host.id === "pi" ? "true" : "false"}
+              class:list={[
+                "inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors",
+                host.next
+                  ? "border-border font-medium text-[var(--landing-faint)]"
+                  : host.id === "pi"
+                    ? selectedChip
+                    : idleChip,
+              ]}
+              data-command={host.command}
+              data-host-switch={host.id}
+              data-start-href={host.start ? contentHref(host.start) : undefined}
+              disabled={host.next}
+              type="button"
+            >
+              <Icon name={host.icon} size={13} />
+              <span>{host.label}</span>
+              {host.next && (
+                <span class="font-mono text-[9px] tracking-[0.08em]">NEXT</span>
+              )}
+            </button>
+          ))
+        }
+      </div>
+
+      <div aria-live="polite">
+        <CopyCommand command="pi install npm:pi-lossless" hostCommand />
+      </div>
     </div>
 
     <div class="mt-6 flex flex-wrap items-center justify-center gap-4">
       <a
         class="inline-flex h-11 items-center gap-2 rounded-[9px] bg-accent px-5 font-medium text-base text-[var(--landing-surface)] transition-opacity hover:opacity-90"
-        href={contentHref("/guides/getting-started")}
+        data-host-start
+        href={contentHref("/guides/pi/getting-started")}
       >
         Get started
         <Icon name="arrow-right" size={14} />
@@ -47,3 +110,47 @@ import CopyCommand from "./CopyCommand.astro";
     </div>
   </div>
 </section>
+
+<script is:inline>
+  (() => {
+    if (document.documentElement.dataset.hostSwitchBound === "true") return;
+    document.documentElement.dataset.hostSwitchBound = "true";
+    const selected = ["border-accent", "bg-accent/10", "font-semibold", "text-accent"];
+    const idle = ["border-border", "font-medium", "text-muted-foreground"];
+    const select = (button) => {
+      for (const candidate of document.querySelectorAll("[data-host-switch]")) {
+        if (candidate.disabled) continue;
+        const active = candidate === button;
+        candidate.setAttribute("aria-pressed", active ? "true" : "false");
+        candidate.classList.remove(...selected, ...idle, "hover:text-foreground");
+        candidate.classList.add(
+          ...(active ? selected : [...idle, "hover:text-foreground"]),
+        );
+      }
+      const command = button.dataset.command;
+      if (command) {
+        for (const scope of document.querySelectorAll("[data-host-command]")) {
+          const code = scope.querySelector("[data-landing-command-text]");
+          if (code) code.textContent = command;
+          const copy = scope.querySelector("[data-landing-copy]");
+          if (copy) {
+            copy.dataset.command = command;
+            copy.setAttribute("aria-label", `Copy ${command}`);
+          }
+        }
+      }
+      const href = button.dataset.startHref;
+      if (href) {
+        for (const link of document.querySelectorAll("[data-host-start]")) {
+          link.setAttribute("href", href);
+        }
+      }
+    };
+    document.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const button = target?.closest("[data-host-switch]");
+      if (!(button instanceof HTMLButtonElement) || button.disabled) return;
+      select(button);
+    });
+  })();
+</script>

@@ -10,38 +10,38 @@ const leaves = [
 	{ id: "#8", span: "e41..e103" },
 	{ id: "#9", span: "e104..e170" },
 	{ id: "#10", span: "e171..e238" },
-].map((leaf, index) => ({ ...leaf, x: 70 + index * 180 }));
+].map((leaf, index) => ({ ...leaf, x: 112 + index * 228 }));
 
 const condensed = [
-	{ id: "#11", span: "e12..e103", x: 139 },
-	{ id: "#12", span: "e104..e238", x: 499 },
+	{ id: "#11", span: "e12..e103", x: 112 },
+	{ id: "#12", span: "e104..e238", x: 578 },
 ];
 
 const frontier = { id: "#15", span: "e12..e238" };
 
 const edges = [
-	["149,288", "239,172"],
-	["329,288", "239,172"],
-	["509,288", "599,172"],
-	["689,288", "599,172"],
-	["239,172", "419,100"],
-	["599,172", "419,100"],
+	["568,72", "335,172"],
+	["568,72", "801,172"],
+	["335,244", "221,344"],
+	["335,244", "449,344"],
+	["801,244", "687,344"],
+	["801,244", "915,344"],
 ] as const;
 
 const depthLabels = [
-	{ label: "depth 0", y: 315 },
-	{ label: "depth 1", y: 200 },
-	{ label: "depth 2", y: 76 },
+	{ label: "depth 2", y: 42 },
+	{ label: "depth 1", y: 214 },
+	{ label: "depth 0", y: 386 },
 ];
 ---
 
-<figure class="not-prose mx-auto w-full max-w-[50rem] @container">
+<figure class="not-prose mx-auto w-full max-w-[65rem] pt-10 pb-4 @container">
   <div class="hidden @min-[40rem]:block">
     <svg
     aria-label="A summary DAG drawn as a reduced example: four depth-0 leaves over raw messages, two depth-1 nodes (#11 and #12) over those leaves, and one depth-2 frontier node (#15) carried by the projection"
-    class="dag w-full"
+    class="dag w-full overflow-visible"
     role="img"
-    viewBox="0 0 800 380"
+    viewBox="0 0 1040 416"
     xmlns="http://www.w3.org/2000/svg"
   >
     {
@@ -52,7 +52,7 @@ const depthLabels = [
 
     {
       depthLabels.map((depth) => (
-        <text class="dag-depth" x="8" y={depth.y}>
+        <text class="dag-depth" x="0" y={depth.y}>
           {depth.label}
         </text>
       ))
@@ -61,11 +61,11 @@ const depthLabels = [
     {
       leaves.map((leaf) => (
         <g>
-          <rect class="dag-node" height="46" rx="8" width="158" x={leaf.x} y="288" />
-          <text class="dag-title" x={leaf.x + 14} y="308">
+          <rect class="dag-node" height="72" rx="12" width="218" x={leaf.x} y="344" />
+          <text class="dag-title" x={leaf.x + 24} y="375">
             {leaf.id} · leaf
           </text>
-          <text class="dag-meta" x={leaf.x + 14} y="324">
+          <text class="dag-meta" x={leaf.x + 24} y="398">
             3,000 tok · {leaf.span}
           </text>
         </g>
@@ -75,11 +75,11 @@ const depthLabels = [
     {
       condensed.map((node) => (
         <g>
-          <rect class="dag-node" height="48" rx="8" width="200" x={node.x} y="172" />
-          <text class="dag-title" x={node.x + 16} y="193">
+          <rect class="dag-node" height="72" rx="12" width="446" x={node.x} y="172" />
+          <text class="dag-title" x={node.x + 24} y="203">
             {node.id} · depth 1
           </text>
-          <text class="dag-meta" x={node.x + 16} y="210">
+          <text class="dag-meta" x={node.x + 24} y="226">
             1,412 tok · {node.span}
           </text>
         </g>
@@ -89,20 +89,20 @@ const depthLabels = [
     <g>
       <rect
         class="dag-node dag-node--frontier"
-        height="56"
-        rx="9"
-        width="250"
-        x="294"
-        y="44"
+        height="72"
+        rx="12"
+        width="446"
+        x="345"
+        y="0"
       />
-      <text class="dag-title" x="314" y="67">{frontier.id} · depth 2</text>
-      <text class="dag-meta" x="314" y="86">
+      <text class="dag-title" x="369" y="31">{frontier.id} · depth 2</text>
+      <text class="dag-meta" x="369" y="54">
         1,930 tok · {frontier.span}
       </text>
     </g>
 
-    <text class="dag-note" x="556" y="60">frontier</text>
-    <text class="dag-meta" x="556" y="76">carried in the window</text>
+    <text class="dag-note" x="803" y="29">frontier</text>
+    <text class="dag-note-sub" x="803" y="50">carried in the window</text>
     </svg>
   </div>
 
@@ -119,7 +119,7 @@ const depthLabels = [
       <p class="font-mono text-muted-foreground text-xs">depth 1</p>
       <div class="mt-2 flex flex-wrap gap-2">
         {condensed.map((node) => (
-          <span class="rounded-md border border-border px-2 py-1 font-mono text-[11px] text-foreground">
+          <span class="rounded-md border border-border bg-[var(--landing-surface)] px-2 py-1 font-mono text-[11px] text-foreground">
             {node.id} · 1,412 tok · {node.span}
           </span>
         ))}
@@ -129,7 +129,7 @@ const depthLabels = [
       <p class="font-mono text-muted-foreground text-xs">depth 0 · leaves</p>
       <div class="mt-2 flex flex-wrap gap-2">
         {leaves.map((leaf) => (
-          <span class="rounded-md border border-border px-2 py-1 font-mono text-[11px] text-muted-foreground">
+          <span class="rounded-md border border-border bg-[var(--landing-surface)] px-2 py-1 font-mono text-[11px] text-muted-foreground">
             {leaf.id} · {leaf.span}
           </span>
         ))}
@@ -137,52 +137,65 @@ const depthLabels = [
     </div>
   </div>
 
-  <figcaption class="mt-4 text-center text-muted-foreground text-sm">
+  <figcaption class="mx-auto mt-4 max-w-[700px] text-center text-muted-foreground text-sm leading-[22px]">
     The shape behind a window pointer, drawn with four leaves. Real sessions
     carry many more. Schematic, not to scale.
   </figcaption>
 </figure>
 
 <style>
-  .dag text {
-    font-family: inherit;
+  .dag {
+    overflow: visible;
   }
 
   .dag-edge {
-    stroke: var(--blume-muted-foreground);
-    stroke-opacity: 0.45;
+    stroke: var(--landing-faint);
+    stroke-linecap: round;
     stroke-width: 1.5;
   }
 
   .dag-node {
-    fill: var(--blume-background);
+    fill: var(--landing-surface);
     stroke: var(--blume-border);
-    stroke-width: 1.5;
+    stroke-width: 1;
   }
 
   .dag-node--frontier {
-    fill: var(--blume-muted);
-    fill: color-mix(in oklab, var(--blume-accent) 12%, var(--blume-background));
+    fill: var(--landing-surface);
     stroke: var(--blume-accent);
-    stroke-width: 2;
+    stroke-width: 1.5;
   }
 
   .dag-title {
     fill: var(--blume-foreground);
-    font-size: 13px;
-    font-weight: 500;
+    font-family: var(--blume-font-display), ui-sans-serif, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
   }
 
-  .dag-meta,
-  .dag-depth {
+  .dag-meta {
     fill: var(--blume-muted-foreground);
-    font-family: var(--blume-font-mono, ui-monospace), ui-monospace, monospace;
-    font-size: 10px;
+    font-family: var(--blume-font-mono), ui-monospace, monospace;
+    font-size: 12px;
+  }
+
+  .dag-depth {
+    fill: var(--landing-faint);
+    font-family: var(--blume-font-mono), ui-monospace, monospace;
+    font-size: 12px;
   }
 
   .dag-note {
-    fill: var(--blume-accent);
-    font-family: var(--blume-font-mono, ui-monospace), ui-monospace, monospace;
-    font-size: 11px;
+    fill: var(--blume-foreground);
+    font-family: var(--blume-font-display), ui-sans-serif, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .dag-note-sub {
+    fill: var(--blume-muted-foreground);
+    font-family: var(--blume-font-body), ui-sans-serif, sans-serif;
+    font-size: 14px;
   }
 </style>

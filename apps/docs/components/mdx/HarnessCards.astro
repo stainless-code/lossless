@@ -1,0 +1,57 @@
+---
+import Card from "blume/components/content/Card.astro";
+import CardGroup from "blume/components/content/CardGroup.astro";
+
+import { OPENCODE_ICON, PI_ICON } from "../../harness-icons.ts";
+
+interface Props {
+  variant: "guides" | "comparison";
+}
+
+const { variant } = Astro.props;
+
+const cards =
+  variant === "guides"
+    ? [
+        {
+          title: "Pi",
+          href: "/guides/pi/getting-started",
+          icon: PI_ICON,
+          cta: "Install pi-lossless",
+          body: "The extension, the cockpit, and the three recall tools.",
+        },
+        {
+          title: "OpenCode v2",
+          href: "/guides/opencode/getting-started",
+          icon: OPENCODE_ICON,
+          cta: "Install opencode-lossless",
+          body: "The plugin, the lifecycle commands, and the four recall tools.",
+        },
+      ]
+    : [
+        {
+          title: "Pi",
+          href: "/reference/pi/comparison",
+          icon: PI_ICON,
+          cta: "View comparison",
+          body: "Four Pi compaction engines on one matrix, with where each one leads and the gaps this package keeps.",
+        },
+        {
+          title: "OpenCode v2",
+          href: "/reference/opencode/comparison",
+          icon: OPENCODE_ICON,
+          cta: "View comparison",
+          body: "Context engines and memory services in two matrices, because they solve different problems.",
+        },
+      ];
+---
+
+<CardGroup cols={2}>
+  {
+    cards.map((card) => (
+      <Card title={card.title} href={card.href} icon={card.icon} cta={card.cta}>
+        {card.body}
+      </Card>
+    ))
+  }
+</CardGroup>

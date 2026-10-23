@@ -134,7 +134,7 @@ stored bytes, secrets included.
   entries are dropped, and an entry the registry cannot find is reported once
   per session and recorded as a `summarizer-model` event. A chain that needed
   more than one model records a `summarizer-fallback` event, which `/lcm
-report` shows as `model-fallback`. `/lcm doctor` prints the chain that
+  report` shows as `model-fallback`. `/lcm doctor` prints the chain that
   actually runs, next to the config it came from, so `auto` expansion and the
   appended session model are visible rather than implied. A substitution also
   raises one UI warning per session.
@@ -265,7 +265,7 @@ refused rather than quietly printing the block.
   depth cap of 8 is a structural assert, not a policy, and with 8 children per
   node it covers 8^8 leaf chunks; a pass that cannot meet its budget records
   `condensation-stalled`. The engine writes `[lcm:summary #id depth d span
-a..b]` next to every summary the model sees (paper §2.4).
+  a..b]` next to every summary the model sees (paper §2.4).
 - **Three-level escalation** (paper Fig. 3): preserve-details → bullets →
   deterministic truncate of the source text, accepted only on strict token
   reduction. Level 3 is stored like any other level (tagged
@@ -306,8 +306,8 @@ a..b]` next to every summary the model sees (paper §2.4).
   with the first line of its summary. The exploration summary is built by rule,
   with no model call and no parser: code names its top-level declarations
   (`TypeScript, 240 lines; 18 top-level declaration(s): function compact, class
-Engine, ...`), JSON names its shape and one level of nesting (`array of 412
-objects, keys: id, name`), JSONL names its row keys, a table names its columns,
+  Engine, ...`), JSON names its shape and one level of nesting (`array of 412
+  objects, keys: id, name`), JSONL names its row keys, a table names its columns,
   Markdown names its headings, and text names its size and first line. A family
   with no rule reports its size rather than guessing, names are capped at 12 with
   `(+N more)`, and the whole summary line stays under a line of the preview. A body that large with no path is

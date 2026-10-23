@@ -53,9 +53,15 @@ test("package: the engine depends on its schema library and nothing else", () =>
   for (const field of DEPENDENCY_FIELDS) {
     const named = Object.keys(manifest[field] ?? {});
     assert.deepEqual(
-      named.filter((name) => name.startsWith("@earendil-works/") || name === "pi-lossless"),
+      named.filter(
+        (name) =>
+          name.startsWith("@earendil-works/") ||
+          name === "pi-lossless" ||
+          name.startsWith("@opencode/") ||
+          name === "opencode-lossless",
+      ),
       [],
-      `${field} names the adapter or the Pi SDK`,
+      `${field} names an adapter or a host SDK`,
     );
   }
   assert.deepEqual(Object.keys(manifest.exports ?? {}), ["."]);

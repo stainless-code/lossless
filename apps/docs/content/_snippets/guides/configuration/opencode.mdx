@@ -1,0 +1,24 @@
+The OpenCode adapter reads its options from the `plugins` entry in `opencode.json`. It has no separate config file and no interactive settings panel.
+
+```json
+{
+  "plugins": [
+    {
+      "package": "opencode-lossless",
+      "options": {
+        "sidecarDir": "/absolute/path/to/lossless-sidecars",
+        "assembly": true,
+        "swapAtRatio": 0.7,
+        "recutAtRatio": 0.85,
+        "keepRecentTokens": 20000,
+        "summaryTokens": 1500,
+        "contextWindow": 128000
+      }
+    }
+  ]
+}
+```
+
+The threshold vocabularies are the same: ratios, `smartZone`, and token pairs. `zones` maps `provider/model` to any of `smartZone`, `swapAtRatio`, `swapAtTokens`, `recutAtRatio`, and `recutAtTokens`. Token thresholds win over `smartZone`, which wins over ratios. The engine clamps the swap ratio to 0.9 and folds a re-cut into `(swap, 0.95]`.
+
+`assembly: false` keeps the mirror and recall tools and leaves compaction to the host. Edit the options and reload the plugin to change them; there is no live settings panel. [Config](/reference/opencode/config) lists every key and default.

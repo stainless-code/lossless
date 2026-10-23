@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdirSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
@@ -403,6 +403,7 @@ export class LcmStore {
     parentSummaryIds: StatementSync;
     childSummaryIds: StatementSync;
     countMessages: StatementSync;
+    countEntryPrefix: StatementSync;
     countSummaries: StatementSync;
     pageBytes: StatementSync;
     entrySpan: StatementSync;
@@ -432,7 +433,15 @@ export class LcmStore {
     // database whose shared memory file is gone, which is what a clean exit
     // leaves, so the fallback opens normally and bans writes with `query_only`.
     this.readOnly = opts?.readOnly === true || opts?.queryOnly === true;
-    if (!this.readOnly) mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
+    if (!this.readOnly && dbPath !== ":memory:") {
+      mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
+      // Create the database file owner-only before SQLite opens it. SQLite
+      // copies the database's mode onto the WAL and shared-memory files, so a
+      // 0644 file here would leave plaintext message text readable by others.
+      closeSync(openSync(dbPath, "a", 0o600));
+      // `open` leaves the mode of an existing file alone, so repair it.
+      chmodSync(dbPath, 0o600);
+    }
     this.dbPath = dbPath;
     this.db = new DatabaseSync(dbPath, opts?.readOnly === true ? { readOnly: true } : {});
     if (opts?.queryOnly === true) this.db.exec("PRAGMA query_only = ON;");
@@ -662,6 +671,9 @@ export class LcmStore {
         "SELECT child_id AS id FROM provenance WHERE child_type = 'summary' AND summary_id = ? ORDER BY child_id ASC",
       ),
       countMessages: prep("SELECT COUNT(*) c FROM messages"),
+      countEntryPrefix: prep(
+        "SELECT COUNT(*) c FROM messages WHERE entry_id >= ? AND entry_id < ?",
+      ),
       payloadMessages: prep("SELECT COUNT(*) c FROM messages WHERE payload IS NOT NULL"),
       payloadBytes: prep("SELECT COALESCE(SUM(length(payload)), 0) b FROM messages"),
       countSummaries: prep(
@@ -684,9 +696,11 @@ export class LcmStore {
              FROM cover c JOIN messages m ON c.child_type = 'message' AND m.id = c.child_id`,
       ),
     };
-    try {
-      chmodSync(dbPath, 0o600);
-    } catch {}
+    if (!this.readOnly && dbPath !== ":memory:") {
+      for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+        if (existsSync(path)) chmodSync(path, 0o600);
+      }
+    }
   }
 
   /** Close the handle: no run of this handle survives it, and the connection is
@@ -1348,6 +1362,13 @@ export class LcmStore {
 
   messageCount(): number {
     return Number((this.stmts.countMessages.get() as { c: number }).c);
+  }
+
+  /** Number of stored messages whose entry id starts with `prefix`. Used by
+   * status reporting to count a family of rows (for example compaction marks
+   * and summaries) without scanning the table. */
+  entryCountWithPrefix(prefix: string): number {
+    return Number((this.stmts.countEntryPrefix.get(prefix, `${prefix}\uffff`) as { c: number }).c);
   }
 
   backup(backupPath: string): void {

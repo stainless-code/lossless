@@ -1,0 +1,40 @@
+## What starts on its own
+
+On the first turn of a session, the adapter mirrors prompts, assistant text, and tool traffic into a SQLite store with a full-text index. Ingestion is idempotent: a resumed session, a replayed turn, or a restarted process does not duplicate a row.
+
+Below the swap point nothing is summarized and the model sees the conversation itself. The defaults swap at 70% of the model window and keep the last 20,000 tokens verbatim. The adapter also mirrors compaction boundaries, so summary text stays searchable.
+
+## Prove a compacted detail is still readable
+
+Ask the model to recall something no longer in its context, or run the recall path yourself after a swap:
+
+```text
+lcm_grep({ query: "the retry policy we settled on" })
+lcm_describe({ id: 12 })
+lcm_expand_query({ query: "the retry policy we settled on", summary_id: 12 })
+```
+
+The first call returns hits with an entry id and the summary that covers them. The second prices that summary against its originals. The third reads the stored text and answers from it. [Recall tools]({{reference_prefix}}/tools) documents the parameters.
+
+## Where next
+
+<CardGroup cols={2}>
+  <Card title="How it works" href="/concepts/how-it-works" icon="workflow">
+    The three regimes, the recursive DAG, and what a pointer guarantees.
+  </Card>
+  <Card title="The engine and its adapters" href="/concepts/engine-and-harness" icon="layers">
+    Which part belongs to `lossless-core`, and which part each adapter supplies.
+  </Card>
+  <Card title="Configuration" href="{{guide_prefix}}/configuration" icon="sliders-horizontal">
+    The keys and the threshold vocabularies.
+  </Card>
+  <Card title="Troubleshooting" href="{{guide_prefix}}/troubleshooting" icon="life-buoy">
+    What to run when swaps do not happen, or the diagnostics disagree with the host.
+  </Card>
+  <Card title="Comparison" href="{{reference_prefix}}/comparison" icon="scale">
+    The audited peer pages for this adapter.
+  </Card>
+  <Card title="Recall tools" href="{{reference_prefix}}/tools" icon="search">
+    Every parameter and the bounds each path enforces.
+  </Card>
+</CardGroup>

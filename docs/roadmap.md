@@ -3,8 +3,9 @@
 Forward-looking work only. What the current release does is in the
 [README](../README.md) and on the
 [docs site](https://stainless-code.com/lossless/); behavior lives in the code,
-and the peer comparison with its verified cells is in
-[`COMPARISON.md`](../apps/docs/COMPARISON.md). Each item below names the evidence
+and the peer comparisons with their verified cells are in
+[`pi/comparison.mdx`](../apps/docs/content/reference/pi/comparison.mdx) for Pi and
+[`opencode/comparison.mdx`](../apps/docs/content/reference/opencode/comparison.mdx) for OpenCode v2. Each item below names the evidence
 that would close it and what it costs. Nothing here is built before it has a
 measurement or a defect behind it.
 
@@ -78,7 +79,7 @@ Where this implementation departs from the paper, and what it does not claim:
 3. **C2: deterministic briefs against LLM summaries.** No published peer
    benchmark establishes that runtime-written deterministic briefs match LLM DAG
    summaries (the one that exists has 1 to 4 runs per condition, author-built and
-   author-scored; see [`COMPARISON.md`](../apps/docs/COMPARISON.md)). Protocol:
+   author-scored; see [`pi/comparison.mdx`](../apps/docs/content/reference/pi/comparison.mdx)). Protocol:
    corpora are our own long session transcripts; arms are the host default, this
    build's LLM DAG, this build's deterministic briefs, and the
    deterministic-folding peer; metrics are recall accuracy on withheld
@@ -109,16 +110,25 @@ Where this implementation departs from the paper, and what it does not claim:
    paper property rather than a number.
 9. **A claimed range.** A range another live run claimed is still paid for
    before the claim is known.
-10. **A second consumer.** Reopening this is an owner decision, plus the harness
-    facts that decide it: the peer harnesses' compaction hooks are append-only
-    where Pi's can replace the result, and the source check run on OpenCode's
-    hook came back low-confidence, so that stays a question to answer before any
-    work rather than a finding to build on. Until then `COMPARISON.md` stays
-    Pi-only and no second adapter is written.
-11. **The gallery asset, at release.** A `video` (mp4, hover-autoplay) or
+10. **A third consumer: DeepSeek.** OpenCode v2 shipped on its own adapter
+    (`packages/opencode`); the live gate and the two host limits (a child-session
+    reader, estimated summarizer usage) are recorded in that package's README.
+    The next consumer is the DeepSeek harness. It stays on the spike branch
+    until it is proven live and extracted on its own branch; the open questions
+    are its plugin surface, its reader substitute, and whether its summarizer
+    reports usage. The comparison has an audited page for each shipping adapter,
+    [Pi](../apps/docs/content/reference/pi/comparison.mdx) and
+    [OpenCode v2](../apps/docs/content/reference/opencode/comparison.mdx).
+11. **The gallery asset.** A `video` (mp4, hover-autoplay) or
     `image` field per the Pi packages documentation: a long session, context
     filling, the swap notification, then `lcm_expand_query` recovering verbatim
     content. Highest-leverage item for adoption, zero functional ROI.
+12. **An OpenCode cockpit.** The promise plugin API has no interactive TUI
+    surface, so the six lifecycle commands cover backup, export, import,
+    diagnose, migrate, and gc, but not the editable settings panel Pi has. A
+    separate TUI plugin could reuse the same command core. Evidence gate: the
+    host exposes a promise TUI extension point, and a live session can change
+    one option and persist it without a restart.
 
 ## Considered and deferred
 
@@ -160,21 +170,25 @@ Each of these was verified in peer source and is worth doing only with a reason.
 
 ## Names
 
-**Both packages are unscoped.** `pi-lossless` is the adapter and `lossless-core`
+**All three packages are unscoped.** `pi-lossless` is the Pi adapter,
+`opencode-lossless` is the OpenCode v2 adapter, and `lossless-core`
 is the engine. A `@stainless-code/` scope arrives only on a real collision, and
-then it arrives once, for every package at the same time. Both names are
-unpublished and free; the unscoped `lossless` on npm is an unrelated published
+then it arrives once, for every package at the same time. All three names are
+published. The unscoped `lossless` on npm is an unrelated published
 package, which is what the harness prefix is for; and the docs app is already
 scoped and private (`@stainless-code/lossless-docs`), so scoping stays a
 decision available rather than one made by accident. What would force the scope
-is a squat on any of the three names before the first release, or a cost that
+is a squat on any of the four names, or a cost that
 the engine's adjacency to the unrelated `lossless` package inflicts on a consumer
-once it publishes on its own.
+of the published engine.
 
 **The core names no host SDK.** The port is `packages/core/src/host.ts`,
-`packages/pi/**` is the only Pi-aware code, and a check over
-`packages/core/src/**` fails on the first host import. What it does not claim:
-no second consumer exists, so nothing in the boundary is validated by one.
+`packages/pi/**` is the only Pi-aware code, `packages/opencode/**` is the
+only OpenCode-aware code, and a check over
+`packages/core/src/**` fails on the first host import. The OpenCode adapter
+validates the boundary from a second side: its published bundle and
+declarations carry no host import, and a compile-time guard pins its local
+API subset against the real host types.
 
 ## Rejected / already-superseded
 

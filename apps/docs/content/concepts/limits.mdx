@@ -50,19 +50,21 @@ The index and the summarizer read a message's derived text, which is not always 
 | Summary target | `summaryTokens`, default 1500 | What a node aims for. |
 | Leaf chunk | `leafChunkTokens`, default 3000 | How much source text one leaf covers. |
 | Summarizer call budget | `summarizerTokensPerCall`, default 60,000 | Refused before the provider is called. |
-| Summarizer pass budget | `summarizerTokensPerPass`, default 250,000 | Crossed, the rest of the pass uses the mechanical truncate. |
+| Summarizer pass budget | `summarizerTokensPerPass`, default 250,000 | Once crossed, the rest of the pass uses the mechanical truncate. |
 
-A pass that cannot meet its summary budget records `condensation-stalled` rather than evicting a frontier node. The projection reports the problem instead of hiding it.
+A pass that cannot meet its summary budget records `condensation-stalled` rather than evicting a frontier node.
 
 ## One engine per session
 
-LCM replaces Pi's default compaction. Running a second compaction engine over the same context produces a projection neither engine can explain, so pick one.
+LCM replaces the host's default compaction when assembly is on. Running a second compaction engine over the same context produces a projection neither engine can explain, so pick one.
 
-## One harness ships today
+## Two harnesses ship today [#one-harness-ships-today]
 
-Pi is the only harness with an adapter, and `pi-lossless` is the package that runs the engine inside it. The paths (stores, metrics, and `lcm.json` under `~/.pi/agent/`), the session file that cross-session recall reads, and the commands are all Pi's. A second harness needs an adapter of its own, and [The engine and its harness](/concepts/engine-and-harness) says what that adapter supplies.
+Pi and OpenCode v2 each have an adapter, and both run the same engine. The Pi adapter uses Pi's paths (`~/.pi/agent/` for stores, metrics, and `lcm.json`), Pi's session file for cross-session recall, and Pi's command names. The OpenCode plugin writes one SQLite sidecar per session under `sidecarDir`, keeps its config in the plugin options, and scans that one directory for cross-session recall, so its `sessions` and `all_sessions` scopes are equivalent today. Each adapter is installed on its own; [The engine and its adapters](/concepts/engine-and-harness) lists what each supplies.
 
-If Pi is the harness you run, this limit costs you nothing.
+OpenCode's summarizer calls return text without usage, so its summarizer spend is estimated; Pi reports the provider's counters. The stored history is the same either way.
+
+A third harness would need its own adapter. It would not need a second engine.
 
 ## Where it does not help
 
@@ -74,4 +76,4 @@ If Pi is the harness you run, this limit costs you nothing.
 
 - [Security](/concepts/security): the store, redaction, and the surfaces that carry bytes.
 - [Compaction zones](/concepts/compaction-zones): the threshold values above.
-- [Troubleshooting](/guides/troubleshooting): which limit you are hitting, and what to run.
+- [Troubleshooting](/guides/pi/troubleshooting): which limit you are hitting, and what to run.

@@ -23,7 +23,7 @@ A calibrated ratio is used when:
 
 Outside the band or the spread, the ratio is refused rather than clamped, and the constant stays. A refused measurement is a state the estimator reads as "keep the constant", and `/lcm report` names it.
 
-Calibration changes budgets, not just the gauge. A model whose real ratio is 6 needs 1.5 times the configured tokens accumulated before it has kept the context you asked for, so `keepRecentTokens` and the token thresholds are scaled by the measured ratio. Without a ratio, the configured number is used unchanged.
+A model whose real ratio is 6 needs 1.5 times the configured tokens accumulated before it has kept the context you asked for, so calibration scales `keepRecentTokens` and the token thresholds by the measured ratio. Without a ratio, the configured number is used unchanged.
 
 ## A provider refusal teaches the real window, per model
 
@@ -45,5 +45,5 @@ When a count looks wrong, the answer is almost always the cache: `/lcm status` p
 ## Related
 
 - [Compaction zones](/concepts/compaction-zones): how the resolved window turns into a swap line.
-- [Troubleshooting](/guides/troubleshooting#the-gauge-disagrees-with-pi): reading the two numbers in `/lcm status`.
-- [Diagnostics and metrics](/reference/files#metrics): the rows that record window corrections and calibration.
+- [Troubleshooting](/guides/pi/troubleshooting#the-gauge-disagrees-with-pi): reading the two numbers in `/lcm status`.
+- [Diagnostics and metrics](/reference/pi/files#metrics): the rows that record window corrections and calibration.

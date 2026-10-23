@@ -1,0 +1,5 @@
+OpenCode keeps one global sidecar directory, so `scope: "sessions"` and `"all_sessions"` scan the same files. The scan reads at most 20 stores and stops at 40 hits or 1.5 seconds, and names the cap that stopped it.
+
+A hit is labelled `[lcm:session <id>]`. Read it with `lcm_expand({ session, entry_id })`, which opens that past sidecar read-only and labels the text as a past session's history. Nothing from a past session is injected into the current one.
+
+There is no project index and no past-session reader. `lcm_describe` reads the calling session only, and `lcm_expand_query` is session-scoped. Delete a sidecar to remove that session from the scan.

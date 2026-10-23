@@ -1,0 +1,171 @@
+---
+import NavTree from "blume/components/layout/NavTree.astro";
+import Icon from "blume/components/Icon.astro";
+import { withBase } from "blume/components/islands/base-path.ts";
+import type { UIStrings } from "blume/core/i18n-ui.ts";
+import type { NavNode } from "blume/core/types.ts";
+
+import { HOSTS, hostFromRoute, type HostId } from "../../harness-nav.ts";
+
+interface Props {
+  items: NavNode[];
+  currentRoute: string;
+  fragmentBase?: string;
+  ids?: Map<NavNode, string>;
+  strings?: UIStrings["nav"];
+}
+
+const { items, currentRoute, fragmentBase, ids, strings } = Astro.props;
+
+const nextHost = {
+  label: "DeepSeek",
+  description: "Coming next",
+  icon: withBase("/logos/deepseek.svg"),
+};
+
+const active: HostId = hostFromRoute(currentRoute) ?? "pi";
+
+const harnessOf = (node: NavNode): HostId | undefined =>
+  node.kind === "group" && node.path !== undefined
+    ? hostFromRoute(node.path)
+    : undefined;
+
+const hasHarness = (nodes: NavNode[]): boolean =>
+  nodes.some(
+    (node) =>
+      harnessOf(node) !== undefined ||
+      (node.kind === "group" && hasHarness(node.children)),
+  );
+
+const showSwitcher = hasHarness(items);
+const activeGroup = items.find((node) => harnessOf(node) === active);
+
+const filtered = !showSwitcher
+  ? items
+  : activeGroup?.kind === "group"
+    ? [
+        ...activeGroup.children,
+        ...items.filter((node) => harnessOf(node) === undefined),
+      ]
+    : items.filter((node) => {
+        const harness = harnessOf(node);
+        return harness === undefined || harness === active;
+      });
+
+const current = HOSTS.find((host) => host.id === active) ?? HOSTS[0];
+
+const firstRoute = (nodes: NavNode[]): string | undefined => {
+  for (const node of nodes) {
+    if (node.kind === "page") return node.route;
+  }
+  for (const node of nodes) {
+    if (node.kind === "group") {
+      if (node.route) return node.route;
+      const nested = firstRoute(node.children);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+};
+
+const hrefFor = (host: HostId): string => {
+  const match = /^\/(guides|reference)\/(pi|opencode)(\/.*)?$/.exec(currentRoute);
+  if (match) return `/${match[1]}/${host}${match[3] ?? ""}`;
+
+  // A neutral page keeps the current section: switching from `/reference/...`
+  // lands on the other host's reference entry, not its guides entry.
+  const group = items.find((node) => harnessOf(node) === host);
+  const first = group?.kind === "group" ? firstRoute(group.children) : undefined;
+  if (first) return first;
+
+  return `/guides/${host}/getting-started`;
+};
+
+const currentHref = (host: HostId): string =>
+  host === active ? currentRoute : hrefFor(host);
+---
+
+{
+  showSwitcher && (
+    <div class="mb-4">
+      <details class="relative" data-host-switcher>
+    <summary
+      aria-label={`Host: ${current.label}`}
+      class="flex w-full cursor-pointer list-none items-center justify-between gap-2 rounded-xl border border-border bg-muted/40 px-3 py-2.5 text-sm transition-colors hover:border-foreground [&::-webkit-details-marker]:hidden"
+    >
+      <span class="flex min-w-0 items-center gap-2">
+        <Icon name={current.icon} size={16} />
+        <span class="truncate font-medium">{current.label}</span>
+      </span>
+      <Icon
+        class="shrink-0 text-muted-foreground"
+        name="chevrons-up-down"
+        size={14}
+      />
+    </summary>
+
+    <div
+      class="absolute inset-x-0 top-full z-50 mt-2 flex max-h-[min(60vh,20rem)] flex-col gap-0.5 overflow-y-auto rounded-xl border border-border bg-background p-1.5 shadow-xl"
+    >
+      {
+        HOSTS.map((host) => (
+          <a
+            aria-current={host.id === active ? "true" : undefined}
+            class="flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground aria-[current=true]:bg-muted"
+            href={currentHref(host.id)}
+          >
+            <Icon name={host.icon} size={16} />
+            <span class="flex min-w-0 flex-1 flex-col">
+              <span class="truncate font-medium text-foreground text-sm">{host.label}</span>
+              <span class="truncate text-muted-foreground text-xs">{host.description}</span>
+            </span>
+            {host.id === active && <Icon class="text-accent" name="check" size={14} />}
+          </a>
+        ))
+      }
+
+      <div
+        aria-disabled="true"
+        class="flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 opacity-60"
+      >
+        <Icon name={nextHost.icon} size={16} />
+        <span class="flex min-w-0 flex-1 flex-col">
+          <span class="truncate font-medium text-foreground text-sm">{nextHost.label}</span>
+          <span class="truncate text-muted-foreground text-xs">{nextHost.description}</span>
+        </span>
+        <span class="font-mono text-[9px] text-[var(--landing-faint)] tracking-[0.08em]">
+          NEXT
+        </span>
+      </div>
+    </div>
+      </details>
+    </div>
+  )
+}
+
+<NavTree
+  currentRoute={currentRoute}
+  fragmentBase={fragmentBase}
+  ids={ids}
+  items={filtered}
+  strings={strings}
+/>
+
+<script is:inline>
+  (() => {
+    if (document.documentElement.dataset.hostSwitcherBound === "true") return;
+    document.documentElement.dataset.hostSwitcherBound = "true";
+    document.addEventListener("pointerdown", (event) => {
+      const target = event.target instanceof Node ? event.target : null;
+      for (const open of document.querySelectorAll("details[data-host-switcher][open]")) {
+        if (target !== null && !open.contains(target)) open.open = false;
+      }
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      for (const open of document.querySelectorAll("details[data-host-switcher][open]")) {
+        open.open = false;
+      }
+    });
+  })();
+</script>

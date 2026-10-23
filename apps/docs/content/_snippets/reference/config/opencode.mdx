@@ -1,0 +1,39 @@
+The config is the plugin's `options` object in `opencode.json`; there is no separate config file.
+
+## Keys
+
+| Key                | Type               | Default         | Range                                 | Effect                                                                                                                                         |
+| ------------------ | ------------------ | --------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`          | boolean            | `true`          | `true` or `false`                     | Master flag. `false` registers nothing.                                                                                                        |
+| `sidecarDir`       | string             | `"./.lossless"` | any path                              | One SQLite file per session; resolved from the server working directory.                                                                       |
+| `assembly`         | boolean            | `true`          | `true` or `false`                     | Build the DAG, project the frontier, and return the checkpoint. `false` keeps the mirror and recall tools.                                     |
+| `summarizer`       | string or string[] | `"auto"`        | one id, or an ordered chain           | Summarizer chain. `auto` is the session model; a concrete id falls back to the session model because the host has no synchronous model lookup. |
+| `swapAtRatio`      | number             | `0.7`           | `> 0`, `<= 1`                         | Swap line as a share of the window; the engine clamps it to 0.9.                                                                               |
+| `recutAtRatio`     | number             | `0.85`          | `> 0`, `<= 1`                         | Re-cut line as a share of the window.                                                                                                          |
+| `smartZone`        | number             | unset           | `> 0`                                 | Swap at this many tokens; re-cut at `x 1.18`.                                                                                                  |
+| `zones`            | object             | unset           | map of `provider/model` to thresholds | Per-model threshold overrides.                                                                                                                 |
+| `keepRecentTokens` | number             | `20000`         | `>= 1`                                | Tokens kept verbatim after the cut.                                                                                                            |
+| `summaryTokens`    | number             | `1500`          | `>= 1`                                | Target size of one summary.                                                                                                                    |
+| `contextWindow`    | number             | `128000`        | `>= 1`                                | Window used when the host catalogue cannot name the model's limit.                                                                             |
+| `readerTimeoutMs`  | number             | `120000`        | `>= 1`                                | How long one `lcm_expand_query` child may run before it is interrupted.                                                                        |
+
+`zones` accepts only the five threshold keys: `smartZone`, `swapAtTokens`, `recutAtTokens`, `swapAtRatio`, `recutAtRatio`. Global token pairs are not options; set them per model under `zones`. Anything else is dropped.
+
+## Threshold resolution
+
+| Vocabulary | Set                                                | Swap            | Re-cut             |
+| ---------- | -------------------------------------------------- | --------------- | ------------------ |
+| Ratios     | `swapAtRatio`, `recutAtRatio`                      | the ratio       | the ratio          |
+| Smart zone | `smartZone`                                        | the token count | `smartZone x 1.18` |
+| Tokens     | `zones.<model>.swapAtTokens`, `.recutAtTokens`     | the token count | the token count    |
+
+Explicit tokens win over `smartZone`, which wins over ratios. Per-model `zones` values merge over the global config. The engine clamps the swap ratio to 0.9 and folds the re-cut into `(swap, 0.95]`.
+
+## Parse rules
+
+- A value of the wrong type or range keeps its default; the plugin load never fails on options.
+- `enabled` disables everything only when it is exactly `false`.
+- `assembly` stays on unless it is exactly `false`.
+- `summarizer` accepts one string or an array of strings. An empty or malformed value falls back to `auto`.
+- `zones` entries with no valid threshold key are dropped. `swapAtTokens` and `recutAtTokens` are accepted there only, not at the top level.
+- The options are read once at setup. Edit `opencode.json` and reload the plugin to change them.

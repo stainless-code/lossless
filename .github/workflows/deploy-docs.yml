@@ -38,9 +38,6 @@ jobs:
       - name: Setup Bun
         uses: ./.github/actions/setup
 
-      - name: Generate the comparison page from COMPARISON.md
-        run: bun apps/docs/scripts/build-comparison.ts
-
       - name: Validate docs links
         run: vp run --filter ./apps/docs validate --strict
 

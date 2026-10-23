@@ -1,0 +1,141 @@
+---
+title: OpenCode v2 comparison
+description: "opencode-lossless against the OpenCode v2 context engines and memory services: two matrices, where each one leads, and what is not comparable."
+sidebar:
+  label: "Comparison"
+search:
+  tags: ["reference", "comparison"]
+---
+
+opencode-lossless is the OpenCode v2 adapter for a lossless context engine. It
+mirrors every prompt, assistant reply, and tool exchange into a per-session
+SQLite sidecar and summarizes the aged prefix into a DAG. The next request sees
+that frontier, and the host receives it as its compaction checkpoint. The
+original bytes stay addressable, so what compaction removed can be read back.
+
+**Scope.** OpenCode v2 plugins only. The field splits into two categories,
+compared separately because they solve different problems:
+
+- **Context engines** rewrite or replace what the model sees when the window
+  fills. They compete with this adapter.
+- **Memory services** store derived memories, observations, or shared facts
+  across sessions. They add a layer beside the context engine and do not own
+  compaction.
+
+A single matrix would mark most cells as not applicable and would compare a
+verbatim context engine with a memory product. The two matrices keep the
+categories separate.
+
+Cells are read from source at the commits named in the verification note, never
+from a project's README. This package's own cells are read from this repository.
+
+Last verified: 2026-10-22.
+
+## The context engines
+
+Legend: ✅ full · 🟡 partial · ❌ none.
+
+| Dimension                          | opencode-lossless                                                                                   | magic-context                                                                                   | opencode-lossless-context                                                   | fast-opencode-compaction                                                                   |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Owns the compaction boundary       | ✅ returns the DAG frontier from `session.compaction`; `session.context` projects the same frontier | ✅ owns the boundary and refuses to run beside native compaction rather than double-compress    | ❌ rewrites `session.context`; no compaction checkpoint                     | ❌ prunes tool traffic inside `session.context`; no checkpoint                             |
+| Model-visible history after a pass | aged head becomes summary pointers; the retained tail is untouched                                  | compartments replace aged history with tiered summaries                                         | old large blocks become stubs; exact bytes move to plugin storage           | stale tool calls and results are dropped or truncated; the session transcript is untouched |
+| Own store of the thread            | ✅ every user, assistant, and tool message verbatim in SQLite plus FTS5                             | ✅ one `context.db` with compartments, raw history, memories, notes, and embeddings             | 🟡 the blocks it externalizes, content-addressed; not the full transcript   | ❌ no history store; a decision ledger keyed by `tool_use_id`                              |
+| Verbatim original reachable        | ✅ any stored entry by id, any summary by id, character-windowed reads                              | ✅ `ctx_expand` pulls a compressed range back to the original transcript                        | ✅ `context_recall(id)` returns the exact bytes                             | ❌ pruned content is not addressable                                                       |
+| Recall mechanism                   | FTS5 `lcm_grep`, `lcm_describe`, `lcm_expand`, and child-session `lcm_expand_query`                 | `ctx_search` over five sources with embeddings and FTS fallback, plus `ctx_expand`              | `context_recall` and `context_stats`                                        | none; decisions only                                                                       |
+| Cross-session scope                | one global sidecar directory; a 20-store, 40-hit, 1.5 s scan; no project index                      | project identity; history search across past sessions; project memory inherited by new sessions | per-session archive; no cross-session index                                 | none                                                                                       |
+| Child sessions                     | ✅ a real child reader, deny-all permissions, removed with its transcript sidecar                   | ✅ hidden `historian` and `dreamer` children, removed after the run                             | ❌ none                                                                     | ❌ none                                                                                    |
+| Runtime dependencies               | none shipped; `node:sqlite`; the engine inlines `typebox`                                           | Rust module, CLI, dashboard, and a config wizard                                                | one TypeScript file with no package imports                                 | a remote decision endpoint; the plugin itself has no runtime dependency                    |
+| Failure mode                       | fails closed to raw history or native compaction; redacts secrets at every read seam                | refuses to co-run rather than producing two projections                                         | one JSON index blob rewritten on a throttle; 32-bit content ids can collide | a network call of up to 20 s inside `context`; the prompt cache breaks at the first drop   |
+
+## The memory services
+
+Legend: ✅ full · 🟡 partial · ❌ none.
+
+| Dimension                | opencode-mem                                                                                    | claude-mem                                                                                      | icm                                                              | hindsight                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| What is stored           | LLM-written memory summaries and a learned user profile                                         | typed observations and session summaries                                                        | durable project memories                                         | extracted facts, entities, relationships, and mental models                |
+| Store                    | Turso/libSQL shards per project, with vectors                                                   | SQLite for observations plus Chroma vectors, behind a local worker                              | one SQLite file shared across agents, through a Rust CLI         | external PostgreSQL with pgvector, or Oracle 23ai                          |
+| Recall surface           | one `memory` tool with modes for add, search, list, profile, forget, export, and import         | `search`, then `timeline`, then `get_observations`; progressive disclosure                      | `icm wake-up` and `icm recall-project`                           | `retain`, `recall`, and `reflect`                                          |
+| Cross-session scope      | project shards, with an opt-in `all-projects` scope                                             | project keys with merges and platform-source filtering                                          | `basename(cwd)` as the project scope                             | a bank per project and harness                                             |
+| Compaction behavior      | lets the host compact, then injects up to 10 memories as a synthetic prompt                     | clears its cached block on compaction, then summarizes after `session.compaction.ended`         | harvests assistant text from the compaction request              | no compaction hook; recalls on each prompt and writes back                 |
+| Exact original reachable | ❌ the summary is the only copy; tool results are not in the capture context                    | ❌ observations; tool results are truncated to 1000 characters, and assistant text is not a row | 🟡 project memories, not the transcript                          | ❌ extracted facts                                                         |
+| Capture                  | `session.prompt` plus an idle-time auto-capture pass                                            | `tool.execute.after` and `session.prompt`; an observer model writes observations                | `tool.execute.after` every 10 calls, plus the compaction request | per-prompt recall and write-back after each assistant turn                 |
+| Runtime dependencies     | Turso, ONNX runtime, Hugging Face transformers, and a local embedding model                     | a Bun worker, Chroma, and a Python toolchain for vectors                                        | an `icm` binary on `PATH`                                        | a server plus PostgreSQL and pgvector                                      |
+| Failure mode             | `<private>` covers manual writes only; auto-capture bypasses it, and there is no secret scanner | opt-in redaction; a worker process and Chroma are prerequisites                                 | a synchronous CLI call inside hooks; silent `catch {}`           | an external service and database are prerequisites; no verbatim transcript |
+
+## Where each one leads
+
+**opencode-lossless.** Verbatim recall with provenance, a checkpoint that
+replaces the host summary, a projection that stays cache-stable between cuts,
+and a bundle with no runtime dependencies and no host SDK.
+
+**magic-context.** The closest context peer. It adds project identity,
+embeddings over history and memory, one store with compartments, and hidden
+child sessions with cleanup tests.
+
+**opencode-lossless-context.** It externalizes old blocks instead of summarizing
+them, with a refcounted, content-addressed store and a real deletion path. Exact
+recall without a DAG; the frontier grows with the number of distinct blocks.
+
+**fast-opencode-compaction.** It prunes stale tool traffic from a typed decision
+model, remembers decisions by `tool_use_id`, and counts dropped tool calls that
+return. That counter is a safety signal this package does not measure.
+
+**opencode-mem.** Project identity, a learned user profile, a memory tool with
+curation modes, a web UI, and export/import. Its memory is derived, not the
+transcript.
+
+**claude-mem.** The most mature multi-harness memory service. Its search,
+timeline, then observations chain is the closest analogue to grep, describe,
+expand, and its v1 to v2 mapping is the clearest in the field.
+
+**icm.** One SQLite file shared across many agents, fail-open by capability
+probe, with a benchmark and a stated loss.
+
+**hindsight.** Facts and entities rather than messages, with several retrieval
+strategies in parallel.
+
+## Not comparable
+
+- **Context engine versus memory service.** This package and magic-context
+  compete on what the model sees inside a session. Memory services compete on
+  what survives between sessions. Running one of each is coherent; treating
+  them as substitutes is not.
+- **Verbatim recovery versus semantic recall.** This package returns the original
+  bytes by address. Memory services return a summary, an observation, or a
+  fact. A query with no token overlap with the original favors a memory service;
+  an exact tool output does not.
+- **No head-to-head benchmark.** No package here ships a benchmark of another.
+  The comparison covers mechanisms read in source, not measured recall quality.
+
+## When to pick which
+
+| You want                                                                              | Reach for                 |
+| ------------------------------------------------------------------------------------- | ------------------------- |
+| A lossless transcript, a navigable frontier, and ownership of the compaction boundary | **opencode-lossless**     |
+| The closest context alternative, with project memory and embeddings                   | magic-context             |
+| Exact recall of externalized blocks, with no summarization                            | opencode-lossless-context |
+| Cheap pruning of stale tool traffic without owning compaction                         | fast-opencode-compaction  |
+| Curated project memory, a user profile, and a UI                                      | opencode-mem              |
+| Multi-harness memory with progressive disclosure and observations                     | claude-mem                |
+| One memory file shared across many agents                                             | icm                       |
+| A fact and entity layer backed by an external vector database                         | hindsight                 |
+
+## Verification note
+
+Method and coverage:
+
+- Context engines were read at magic-context `b4d1b1071` (2026-10-22, v0.49.19),
+  opencode-lossless-context (2026-10-17), and fast-opencode-compaction
+  (2026-09-23). Hook sets, store, recall surface, and compaction behavior came
+  from plugin source.
+- Memory services were read at opencode-mem `1ddfdad` (2026-10-21, v2.33.0),
+  claude-mem `bbb3379` (2026-10-20, v15.0.1), icm (2026-10-21), and hindsight
+  `626cdbe` (2026-10-22). Stores, capture paths, and compaction behavior came
+  from source.
+- This package's cells came from this branch. The adapter has no runtime
+  dependencies, the engine inlines `typebox`, and the published bundle and
+  declarations name no host SDK.
+- Peer versions and dates come from their manifests and clone commits. Tarball
+  metadata was not re-checked for every peer. Re-verify a cell before relying
+  on it.

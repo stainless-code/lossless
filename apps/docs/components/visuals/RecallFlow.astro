@@ -4,7 +4,7 @@ import { contentHref } from "blume/components/content/base-href.ts";
 const steps = [
 	{
 		tool: "lcm_describe",
-		href: "/reference/tools#lcm_describe",
+		href: "/reference/pi/tools#lcm_describe",
 		call: `lcm_describe({ id: 15 })`,
 		output: `Costs: source 41,200 tok across 34 messages
 Children: #11, #12
@@ -13,7 +13,7 @@ Files: packages/core/src/store.ts (TypeScript, 1,637 lines)`,
 	},
 	{
 		tool: "lcm_grep",
-		href: "/reference/tools#lcm_grep",
+		href: "/reference/pi/tools#lcm_grep",
 		call: `lcm_grep({ query: "retry policy", summary_id: 15 })`,
 		output: `e231  … retries: 3, backoff 250ms …   [#12]
 e188  … the timeout we rejected …     [#15]`,
@@ -21,7 +21,7 @@ e188  … the timeout we rejected …     [#15]`,
 	},
 	{
 		tool: "lcm_expand_query",
-		href: "/reference/tools#lcm_expand_query",
+		href: "/reference/pi/tools#lcm_expand_query",
 		call: `lcm_expand_query({ entry_id: "e231" })`,
 		output: `findings from the stored originals,
 read in the reader's own context,

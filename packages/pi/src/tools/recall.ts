@@ -1,6 +1,5 @@
 import { join } from "node:path";
 
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { AgentToolUpdateCallback, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { LcmStore } from "lossless-core";
 import type { Reader, Usage } from "lossless-core";
@@ -59,11 +58,14 @@ const GrepParams = Type.Object({
       description: "Include matches from a branch that left the active path (excluded by default)",
     }),
   ),
-  // StringEnum rather than a union of literals: Pi's own guidance is that an
-  // anyOf schema does not survive Google's API, and this parameter decides which
-  // store the call reads.
+  // Unsafe rather than a union of literals: an anyOf schema does not survive
+  // Google's API, and this parameter decides which store the call reads. Built
+  // with this package's typebox so the emitted declaration names a portable
+  // type, since Pi's StringEnum helper carries the host's copy.
   scope: Type.Optional(
-    StringEnum(["session", "sessions", "all_sessions"] as const, {
+    Type.Unsafe<"session" | "sessions" | "all_sessions">({
+      type: "string",
+      enum: ["session", "sessions", "all_sessions"],
       description: SEARCH_SCOPE_HELP,
     }),
   ),

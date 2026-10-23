@@ -282,7 +282,11 @@ function renderTool(
     case "lcm_grep": {
       const query = asString(args["query"]);
       if (query === undefined) return { ok: false, text: "lcm_grep needs a string query." };
-      return grepView(store, redact, { query, limit: asInt(args["limit"]) ?? 20 });
+      return grepView(store, redact, {
+        query,
+        limit: asInt(args["limit"]) ?? 20,
+        expandTool: "lcm_expand",
+      });
     }
     case "lcm_describe": {
       const id = asInt(args["id"]);

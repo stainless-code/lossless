@@ -1,0 +1,95 @@
+Four tools reach stored history. `lcm_expand` is a direct read; `lcm_expand_query` runs in a child session when `assembly` is on.
+
+| Question                                                  | Tool               |
+| --------------------------------------------------------- | ------------------ |
+| "Where did we talk about X?"                              | `lcm_grep`         |
+| "What is in summary #12, and what would reading it cost?" | `lcm_describe`     |
+| "Read the originals."                                     | `lcm_expand`       |
+| "Read the originals and answer from them."                | `lcm_expand_query` |
+
+## lcm_grep
+
+Searches stored history, including content already compacted out of the visible context.
+
+| Parameter | Type                                        | Default     | Meaning                                                                                                           |
+| --------- | ------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| `query`   | string                                      | required    | FTS5 search: words, quoted phrases, `AND`/`OR`, prefix `*`. Matches the first 100,000 characters of a message.     |
+| `limit`   | integer `1..50`                             | `20`        | Hits one page holds.                                                                                              |
+| `scope`   | `"session" \| "sessions" \| "all_sessions"` | `"session"` | Which sidecar to read. The last two are equivalent because the sidecar directory is global.                       |
+
+Bounds, each named in the output that hits it:
+
+| Bound                               | Value                                |
+| ----------------------------------- | ------------------------------------ |
+| Indexed characters per message      | 100,000                              |
+| One hit line                        | 400 characters, whitespace collapsed |
+| Cross-session sidecars scanned      | 20 most recent, newest first         |
+| Cross-session search deadline       | 1.5 seconds                          |
+| Cross-session hits                  | 40                                   |
+
+Every hit names the entry id that `lcm_expand` reads in full, and the summary (`#N`) that covers it. This adapter does not expose the `pattern`, `include_removed`, or `case_sensitive` options.
+
+## lcm_describe
+
+```text
+lcm_describe({ id: 12 })
+```
+
+`id` is the `N` in an `[lcm:summary #N ...]` header. Returns a node without expanding it:
+
+- kind, depth, and token count
+- the covered span (`e104 .. e238`)
+- costs: the source text behind it, in tokens and messages, and the whole subtree
+- tiers, when the node keeps a thorough text beside its terse one
+- the files its children cover, each with the first line of its exploration summary
+- children and parents, with a per-child cost line
+
+The thorough tier is what a describe returns when both exist, and both sizes are named. This reads the calling session only. An id the store does not hold is refused.
+
+## lcm_expand
+
+Reads one stored message, or lists a summary's messages, without a model call.
+
+| Parameter    | Type                  | Default | Meaning                                                                 |
+| ------------ | --------------------- | ------- | ----------------------------------------------------------------------- |
+| `id`         | integer               | none    | List this summary's messages, or check that an entry is covered.        |
+| `entry_id`   | string                | none    | Read this one message.                                                  |
+| `session`    | string                | none    | Read an entry from this past session's sidecar.                         |
+| `offset`     | integer `>= 0`        | `0`     | Message index to start listing from.                                    |
+| `limit`      | integer `1..50`       | `25`    | Messages to list.                                                       |
+| `char_offset`| integer `>= 0`        | `0`     | Character offset inside `entry_id`.                                     |
+| `max_chars`  | integer `200..20000`  | `20000` | Characters to read from `entry_id`.                                     |
+
+Pass `entry_id` to read one message, or `id` to list a summary. `session` reads that past sidecar read-only and labels the text as a past session's history.
+
+Bounds:
+
+| Bound          | Value                |
+| -------------- | -------------------- |
+| One read       | 20,000 characters    |
+| Messages listed| 50 per call          |
+
+## lcm_expand_query
+
+Reads stored originals in a child session and answers from them.
+
+| Parameter    | Type                 | Default  | Meaning                                                                                              |
+| ------------ | -------------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `query`      | string               | required | What to search for in the stored history.                                                            |
+| `prompt`     | string               | required | What to find out, and the form the answer takes. Ask for a verbatim quote when the exact words matter. |
+| `summary_id` | integer              | none     | Read this node's originals, from an `[lcm:summary #N ...]` header.                                   |
+| `entry_id`   | string               | none     | Read one stored message, from a grep hit.                                                            |
+| `max_tokens` | integer `500..40000` | `10000`  | Retrieved content budget, in estimated tokens.                                                       |
+
+Pass `summary_id` or `entry_id`, not both. With neither, the reader searches. Findings come back; the stored text does not enter this conversation.
+
+The reader is a child session limited to `lcm_grep`, `lcm_describe`, and `lcm_expand`; it cannot recurse. It is session-scoped, so it cannot read a past session. `readerTimeoutMs` (default 120,000 ms) bounds the child's run.
+
+## Failure modes
+
+| Result                                                 | Cause                                                              |
+| ------------------------------------------------------ | ------------------------------------------------------------------ |
+| `No stored history for this session yet`               | Nothing has been ingested, or the session is ephemeral.            |
+| `No summary with id N`                                 | The address is not in this store.                                  |
+| `Message eNNN is not covered by summary #N`            | The entry and summary were mismatched.                             |
+| `LCM: the reader is session-scoped`                    | The reader child tried a past-session scope.                       |

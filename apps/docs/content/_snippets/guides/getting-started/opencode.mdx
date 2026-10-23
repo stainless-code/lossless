@@ -1,0 +1,86 @@
+Verified against OpenCode v2.1.3.
+
+## Install and run
+
+<Steps>
+  <Step title="Install the plugin">
+    ```bash
+    opencode plugin add opencode-lossless
+    ```
+
+    The CLI writes the `plugins` entry:
+
+    <Expandable title="Config entry">
+      ```json
+      {
+        "plugins": [
+          {
+            "package": "opencode-lossless",
+            "options": { "sidecarDir": "/absolute/path/to/lossless-sidecars" }
+          }
+        ]
+      }
+      ```
+    </Expandable>
+
+    <Callout type="note" title="Assembly is on by default">
+      The adapter builds the DAG, replaces aged history in `session.context` with the summary frontier, and returns the same frontier as the host compaction checkpoint. `assembly: false` keeps the mirror and recall tools and leaves compaction to the host.
+    </Callout>
+
+  </Step>
+
+  <Step title="Confirm the store is live">
+    ```bash
+    /lossless-status
+    /lossless-report
+    ```
+
+    The first reports message and summary counts for the live sidecars. The second summarizes this session's projection, checkpoint, pass, recall, and reader rows. Each session has one SQLite sidecar under `sidecarDir`; ingestion is idempotent.
+
+  </Step>
+
+<Step title="Set the cut line">
+  The plugin's `options` in `opencode.json` are the config: `swapAtRatio` (0.7), `recutAtRatio`
+  (0.85), `keepRecentTokens` (20000), `summaryTokens` (1500), and `contextWindow` (128000). `zones`
+  sets per-model token or ratio thresholds. Set `assembly: false` for recall-only mode.
+</Step>
+
+  <Step title="Try the commands and tools">
+    **Commands**
+
+    ```bash
+    /lossless-status
+    /lossless-report
+    /lossless-pass
+    /lossless-backup
+    /lossless-export
+    /lossless-import
+    /lossless-diagnose
+    /lossless-migrate
+    /lossless-gc
+    ```
+
+    **Tools**
+
+    ```text
+    lcm_grep
+    lcm_describe
+    lcm_expand
+    lcm_expand_query
+    ```
+
+    The reader is a child session limited to the three recall tools, so a read never puts the originals in the parent's context. It is removed with its transcript sidecar after it answers.
+
+  </Step>
+
+  <Step title="Back up and remove">
+    ```bash
+    /lossless-backup
+    /lossless-export
+    /lossless-gc --older-than 30
+    ```
+
+    `/lossless-backup` copies the sidecar. `/lossless-export` writes the transcript as JSONL. `/lossless-gc --older-than 30 --apply` exports and deletes old sidecars without touching this one. `opencode plugin remove opencode-lossless` removes the entry. To load a local build, point the entry at a checkout's `packages/opencode/dist`; the [package README](https://github.com/stainless-code/lossless/blob/main/packages/opencode/README.md) documents the live loop.
+
+  </Step>
+</Steps>

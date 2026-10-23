@@ -10,7 +10,10 @@ import { SEARCH_SCOPE_HELP } from "../src/sessions.ts";
  * schema states in one sentence. The prose stays human; this test only pins
  * that every scope the schema promises is documented, with its meaning. */
 const GUIDE = fileURLToPath(
-  new URL("../../../apps/docs/content/guides/cross-session-recall.mdx", import.meta.url),
+  new URL(
+    "../../../apps/docs/content/_snippets/guides/cross-session-recall/pi.mdx",
+    import.meta.url,
+  ),
 );
 
 function scopes(): string[] {

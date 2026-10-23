@@ -11,14 +11,15 @@ description: Voice and pipeline for the published docs site (apps/docs): heading
 
 ## Surfaces and their modes
 
-| Surface                              | Mode        | Boundary                                                                  |
-| ------------------------------------ | ----------- | ------------------------------------------------------------------------- |
-| `pages/_home/*`, `pages/index.astro` | copy        | Opinion and pitch are allowed. No claim the page cannot show.             |
-| `content/concepts/**`                | explanation | Opinion allowed. A heading tolerates "About ..." in front.                |
-| `content/guides/**`                  | how-to      | Commands, conditions, expected output. No teaching.                       |
-| `content/reference/**`               | reference   | Dry. No "you", no persuasion, spec tables only.                           |
-| `content/reference/comparison.mdx`   | generated   | Never hand-edited; `apps/docs/COMPARISON.md` is the only writer's source. |
-| `content/**/index.mdx`               | routing     | Help the reader choose, do not summarize.                                 |
+| Surface                                          | Mode        | Boundary                                                                                                                                                         |
+| ------------------------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pages/_home/*`, `pages/index.astro`             | copy        | Opinion and pitch are allowed. No claim the page cannot show.                                                                                                    |
+| `content/concepts/**`                            | explanation | Opinion allowed. A heading tolerates "About ..." in front.                                                                                                       |
+| `content/guides/**`                              | how-to      | Commands, conditions, expected output. No teaching.                                                                                                              |
+| `content/reference/**`                           | reference   | Dry. No "you", no persuasion, spec tables only.                                                                                                                  |
+| `content/reference/{pi,opencode}/comparison.mdx` | reference   | Audited peer comparison; the page is the source, so the verification note and date live with the cells.                                                          |
+| `apps/docs/content/_snippets/**`                 | source      | Shared fragments, plus one partial per harness where the page differs. The wrapper pages under `content/{guides,reference}/` hold frontmatter and includes only. |
+| `content/**/index.mdx`                           | routing     | Help the reader choose, do not summarize.                                                                                                                        |
 
 ## Headings carry the point
 
@@ -65,8 +66,8 @@ If anything links to it, take the new text and pin the slug.
 `blume audit` reads the built `apps/docs/dist`, and an isolated build omits `robots.txt` and `llms.txt`, so an isolated build cannot be audited. A non-isolated build refuses to run while `blume dev` is up.
 
 1. Stop the dev server.
-2. From `apps/docs`: `rm -rf dist && bunx blume build`.
-3. `bunx blume validate --strict`.
+2. From `apps/docs`: `rm -rf dist && bun run build`.
+3. `bun run validate --strict`.
 4. `bunx blume audit --fail-on error`.
 5. Restart `bunx blume dev`.
 
