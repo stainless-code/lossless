@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 
 import {
+  DEFAULT_CONFIG,
   parseLcmConfig,
   passConditions,
   changedPassConditions,
@@ -23,6 +24,7 @@ const COCKPIT_CONFIG = {
   maxAsyncChunks: 6,
   summarizerTokensPerCall: 60_000,
   summarizerTokensPerPass: 250_000,
+  summarizerTokensPerHeal: 120_000,
   redactSecrets: false,
   assemblyEnabled: true,
   zones: { "one/model": { swapAtRatio: 0.9, swapAtTokens: 0, smartZone: 0 } },
@@ -35,6 +37,10 @@ test("config-io: the values the cockpit writes all survive the parse", () => {
   assert.deepEqual(config, COCKPIT_CONFIG);
 });
 
+test("config-io: the heal budget defaults to 120k", () => {
+  assert.equal(DEFAULT_CONFIG.summarizerTokensPerHeal, 120_000);
+});
+
 test("config-io: a number outside its range is dropped by key, not coerced", () => {
   const cases: Array<[string, number]> = [
     ["summaryTokens", 0],
@@ -45,6 +51,9 @@ test("config-io: a number outside its range is dropped by key, not coerced", () 
     ["summarizerTokensPerCall", 0],
     ["summarizerTokensPerPass", 0],
     ["summarizerTokensPerPass", -1],
+    ["summarizerTokensPerHeal", 0],
+    ["summarizerTokensPerHeal", -1],
+    ["summarizerTokensPerHeal", 1.5],
     ["keepRecentTokens", -1],
     ["smartZone", -1],
     ["swapAtTokens", -1],
@@ -66,6 +75,7 @@ test("config-io: the edges of every range are kept", () => {
     summaryTokens: 1,
     leafChunkTokens: 1,
     maxAsyncChunks: 1,
+    summarizerTokensPerHeal: 1,
     keepRecentTokens: 0,
     smartZone: 0,
     swapAtTokens: 0,

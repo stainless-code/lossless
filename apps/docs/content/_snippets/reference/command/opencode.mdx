@@ -2,6 +2,7 @@
 /lossless-status
 /lossless-report
 /lossless-pass
+/lossless-heal [--apply] [--max-nodes <n>]
 /lossless-backup [path]
 /lossless-export [path]
 /lossless-import <path>
@@ -10,7 +11,7 @@
 /lossless-gc [--older-than <days>] [--session <id>] [--apply]
 ```
 
-Nine commands. `/lossless-pass` is absent with `assembly: false`.
+Ten commands. `/lossless-pass` is absent with `assembly: false`; `/lossless-heal` stays available.
 
 ## Settings
 
@@ -30,7 +31,7 @@ Message and compaction-summary counts for the live sidecars. A command cannot re
 /lossless-report
 ```
 
-Projection, checkpoint, pass, recall, and reader rows for this session. It says so when the session has no rows.
+Projection, checkpoint, pass, summary, heal, recall, and reader rows for this session. It says so when the session has no rows.
 
 ## pass
 
@@ -39,6 +40,16 @@ Projection, checkpoint, pass, recall, and reader rows for this session. It says 
 ```
 
 One DAG pass over the stored span, on demand. Mounted only with `assembly` on.
+
+## heal
+
+```text
+/lossless-heal                  # dry-run: name the tainted nodes and their ancestors
+/lossless-heal --apply          # re-summarize them from their stored source
+/lossless-heal --apply --max-nodes 8
+```
+
+A non-clean summary is a candidate. A mechanical level-3 node starts with `[lcm:truncated]`; a clipped leaf or a derived parent may not. Heal reads the exact source rows that node points at, re-summarizes the tainted node, then recomputes every ancestor whose child changed. It rejects another level-3 answer, an empty answer, or an answer over twice the target, so a failed repair keeps the old text. `--max-nodes` bounds one run; `summarizerTokensPerHeal` bounds its spend. The dry run makes no provider call.
 
 ## backup
 

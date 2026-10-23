@@ -175,6 +175,8 @@ function options(keepRecentTokens: number): ProjectionOptions {
     keepRecentTokens,
     summaryTokens: 400,
     contextWindow: CONTEXT_WINDOW,
+    summarizerTokensPerCall: 4321,
+    summarizerTokensPerPass: 8765,
   };
 }
 
@@ -295,6 +297,10 @@ describe("checkpoint adoption", () => {
       expect(captured[0]?.previousSummary).toBe(CHECKPOINT_TEXT);
       expect(captured[0]?.stage).toBe("async");
       expect(captured[0]?.targetTokens).toBe(400);
+      expect(captured[0]?.summarizer).toMatchObject({
+        summarizerTokensPerCall: 4321,
+        summarizerTokensPerPass: 8765,
+      });
       // The pinned checkpoint still fronts the request while the pass runs.
       expect((first.messages[0] as { content: Array<{ text?: string }> }).content[0]?.text).toBe(
         CHECKPOINT_TEXT,

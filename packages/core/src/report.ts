@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { fmtTokens } from "./format.ts";
+import { fmtDuration, fmtTokens } from "./format.ts";
 import { metricsLogFiles, type MetricRecord } from "./metrics.ts";
 
 type Row = MetricRecord;
@@ -42,6 +42,19 @@ const NUMBER_FIELDS = [
   "fromGeneration",
   "toGeneration",
   "nodes",
+  "candidates",
+  "taintedNodes",
+  "maxNodes",
+  "maxCalls",
+  "attempted",
+  "repaired",
+  "blocked",
+  "skipped",
+  "changedCount",
+  "notAttempted",
+  "calls",
+  "levelBefore",
+  "levelAfter",
   "renderedTokens",
   "budgetTokens",
   "spentTokens",
@@ -59,6 +72,7 @@ const NUMBER_FIELDS = [
   "condensed",
   "ingested",
   "elapsedMs",
+  "durationMs",
   "queued",
   "sizeBytes",
   "bytes",
@@ -115,6 +129,10 @@ const STRING_FIELDS = [
   "fingerprint",
   "category",
   "source",
+  "nodeKind",
+  "quality",
+  "qualityBefore",
+  "qualityAfter",
 ] as const;
 const BOOLEAN_FIELDS = [
   "committed",
@@ -122,6 +140,9 @@ const BOOLEAN_FIELDS = [
   "retried",
   "timedOut",
   "tokensEstimated",
+  "estimated",
+  "dryRun",
+  "tainted",
 ] as const;
 
 type AssertNever<T extends never> = T;
@@ -208,6 +229,13 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+function percentile(values: readonly number[], p: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, rank))]!;
 }
 
 function dayOf(ts: number | undefined): string {
@@ -403,7 +431,91 @@ export function buildReport(events: readonly MetricsEvent[]): string {
         `${rejected} of ${summarizerUsage.length} calls were rejected by the provider (a length or error stop), and their tokens are included above.`,
       );
     }
+    const estimatedRows = summarizerUsage.filter((e) => e.estimated === true);
+    if (estimatedRows.length > 0) {
+      const estimatedCost = sums(estimatedRows).cost;
+      lines.push(
+        `${estimatedRows.length} of ${summarizerUsage.length} calls report estimated usage, not provider counters: $${estimatedCost.toFixed(4)} of the $${total.cost.toFixed(4)} above is a bounded estimate.`,
+      );
+    }
     lines.push("");
+  }
+
+  const nodeRows: Array<{ row: MetricsEvent; ms: number }> = [];
+  for (const e of events) {
+    if (e.event !== "lcm") continue;
+    if (
+      e.kind !== "summary-stored" &&
+      e.kind !== "summary-replaced" &&
+      e.kind !== "summary-skipped-existing"
+    ) {
+      continue;
+    }
+    if (typeof e.durationMs !== "number") continue;
+    nodeRows.push({ row: e, ms: e.durationMs });
+  }
+  if (nodeRows.length > 0) {
+    const byStage = new Map<string, number[]>();
+    for (const node of nodeRows) {
+      const stage = typeof node.row.stage === "string" ? node.row.stage : "(unrecorded)";
+      const values = byStage.get(stage) ?? [];
+      values.push(node.ms);
+      byStage.set(stage, values);
+    }
+    lines.push(
+      `## Summary node latency (${nodeRows.length} timed ${nodeRows.length === 1 ? "node" : "nodes"})`,
+      "",
+      "| stage | nodes | p50 | p95 |",
+      "| ----- | ----- | --- | --- |",
+    );
+    for (const [stage, values] of [...byStage.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      lines.push(
+        `| ${stage} | ${values.length} | ${fmtDuration(percentile(values, 50))} | ${fmtDuration(percentile(values, 95))} |`,
+      );
+    }
+    const writeCount = events.filter(
+      (e) => e.event === "lcm" && (e.kind === "summary-stored" || e.kind === "summary-replaced"),
+    ).length;
+    const fallbacks = events.filter(
+      (e) => e.event === "lcm" && e.kind === "summary-fallback-stored",
+    ).length;
+    lines.push("");
+    lines.push(
+      writeCount > 0
+        ? `Level-3 fallback share: ${fallbacks} of ${writeCount} stored-node writes (${((fallbacks / writeCount) * 100).toFixed(1)}%).`
+        : "Level-3 fallback share: no stored-node writes in these rows.",
+    );
+    const slowest = nodeRows.reduce((best, node) => (node.ms > best.ms ? node : best));
+    const stage = typeof slowest.row.stage === "string" ? slowest.row.stage : "(unrecorded)";
+    const id = typeof slowest.row.summaryId === "number" ? ` #${slowest.row.summaryId}` : "";
+    const span = Array.isArray(slowest.row.span)
+      ? ` (span ${slowest.row.span[0]}..${slowest.row.span[1]})`
+      : "";
+    lines.push(
+      `Slowest node: ${slowest.row.kind} ${stage}${id}${span} at ${fmtDuration(slowest.ms)}.`,
+      "",
+    );
+  }
+
+  const healRuns = events.filter((e) => e.event === "lcm" && e.kind === "heal-complete");
+  if (healRuns.length > 0) {
+    const count = (key: string) =>
+      healRuns.reduce((n, e) => n + (typeof e[key] === "number" ? (e[key] as number) : 0), 0);
+    const stops = new Map<string, number>();
+    for (const run of healRuns) {
+      const stop = typeof run.stop === "string" ? run.stop : "(unrecorded)";
+      stops.set(stop, (stops.get(stop) ?? 0) + 1);
+    }
+    lines.push(
+      `## Summary heal (${healRuns.length} ${healRuns.length === 1 ? "run" : "runs"})`,
+      "",
+      "| repaired | failed | blocked | skipped | calls | estimated tokens |",
+      "| -------- | ------ | ------- | ------- | ----- | ---------------- |",
+      `| ${count("repaired")} | ${count("failed")} | ${count("blocked")} | ${count("skipped")} | ${count("calls")} | ${fmtTokens(count("tokens"))} |`,
+      "",
+      `Stop reasons: ${[...stops.entries()].map(([stop, n]) => `${stop} ${n}`).join(", ")}.`,
+      "",
+    );
   }
 
   // The publish-gate question is whether the `[lcm:*]` pointers in a

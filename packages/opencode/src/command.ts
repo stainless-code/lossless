@@ -155,6 +155,53 @@ export function formatMetricsReport(rows: readonly unknown[], sessionID: string)
       `${leaf} leaf, ${condensed} condensed`,
   );
 
+  const nodes = mine.filter((row) => row.kind === "summary-stored");
+  const replaced = mine.filter((row) => row.kind === "summary-replaced");
+  const skippedExisting = mine.filter((row) => row.kind === "summary-skipped-existing");
+  const nodeWrites = nodes.length + replaced.length;
+  const fallbacks = mine.filter((row) => row.kind === "summary-fallback-stored").length;
+  const leafNodes = nodes.filter((row) => row.stage === "leaf").length;
+  const condensedNodes = nodes.filter((row) => row.stage === "condensed").length;
+  lines.push(
+    `summary nodes: ${nodes.length} stored (${leafNodes} leaf, ${condensedNodes} condensed), ` +
+      `${replaced.length} replaced, ${skippedExisting.length} skipped-existing; ` +
+      (nodeWrites === 0
+        ? "level-3 fallback none (no stored-node writes)"
+        : `level-3 fallback ${fallbacks} of ${nodeWrites} stored-node writes (${((fallbacks / nodeWrites) * 100).toFixed(1)}%)`),
+  );
+  const timed = [...nodes, ...replaced, ...skippedExisting]
+    .map((row) => numberOf(row.durationMs))
+    .filter((value): value is number => value !== undefined);
+  if (timed.length > 0) {
+    lines.push(
+      `summary latency: p50 ${Math.round(percentile(timed, 50))} ms, ` +
+        `p95 ${Math.round(percentile(timed, 95))} ms over ${timed.length} timed node(s)`,
+    );
+  }
+
+  const usage = mine.filter((row) => row.kind === "summarizer-usage");
+  const estimated = usage.filter((row) => row.estimated === true).length;
+  const summarizerErrors = mine.filter((row) => row.kind === "summarizer-error").length;
+  const capped = mine.filter((row) => row.kind === "summarizer-capped").length;
+  lines.push(
+    `summarizer: ${usage.length} call(s), ${estimated} estimated; ` +
+      `${summarizerErrors} error(s), ${capped} capped`,
+  );
+
+  const abandoned = mine.filter((row) => row.kind === "compaction-abandoned");
+  lines.push(
+    `abandoned: ${abandoned.length} pass(es), ${sumField(abandoned, "dropped")} row(s) dropped`,
+  );
+
+  const heals = mine.filter((row) => row.kind === "heal-complete");
+  if (heals.length > 0) {
+    lines.push(
+      `heal: ${heals.length} run(s), ${sumField(heals, "repaired")} repaired, ` +
+        `${sumField(heals, "failed")} failed, ${sumField(heals, "blocked")} blocked; ` +
+        `${sumField(heals, "calls")} call(s)`,
+    );
+  }
+
   const recall = mine.filter((row) => row.kind === "recall");
   const byTool = new Map<string, Map<string, number>>();
   for (const row of recall) {
@@ -230,6 +277,12 @@ function numbersOf(value: unknown): number[] {
 
 function sumField(rows: readonly Record<string, unknown>[], key: string): number {
   return rows.reduce((sum, row) => sum + (numberOf(row[key]) ?? 0), 0);
+}
+
+function percentile(values: readonly number[], p: number): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, rank))] ?? 0;
 }
 
 function countsOf(values: readonly (string | undefined)[]): Map<string, number> {

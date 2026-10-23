@@ -63,7 +63,7 @@ A chain entry is tried in order and skipped when the registry cannot find it, wh
 
 ## Cap what a pass may spend
 
-`summarizerTokensPerCall` and `summarizerTokensPerPass` stop a provider that answers and never stops. A request's size is known before the call, so a refusal costs nothing: the pass finishes its remaining chunks with the mechanical truncate and records `summarizer-capped` with `source: "budget"`.
+`summarizerTokensPerCall` and `summarizerTokensPerPass` stop a provider that answers and never stops. A request's size is known before the call, so a refusal costs nothing: the pass finishes its remaining chunks with the mechanical truncate and records `summarizer-capped` with `source: "budget"`. `summarizerTokensPerHeal` bounds an on-demand `/lcm heal --apply` repair.
 
 The defaults sit far above what a healthy pass spends. A pass that respects `summaryTokens` and `leafChunkTokens` costs a fraction of either cap.
 

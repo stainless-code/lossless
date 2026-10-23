@@ -71,6 +71,86 @@ const ROWS: ReadonlyArray<Record<string, unknown>> = [
   { ts: 12, session: SESSION, kind: "recall", tool: "lcm_expand", outcome: "hit" },
   { ts: 13, session: SESSION, kind: "reader", outcome: "answered", durationMs: 1200 },
   { ts: 14, session: SESSION, kind: "reader", outcome: "failed", durationMs: 800 },
+  {
+    ts: 16,
+    session: SESSION,
+    kind: "summary-stored",
+    stage: "leaf",
+    level: 1,
+    durationMs: 250,
+    summaryId: 20,
+  },
+  {
+    ts: 17,
+    session: SESSION,
+    kind: "summary-stored",
+    stage: "condensed",
+    level: 2,
+    durationMs: 750,
+    summaryId: 21,
+  },
+  {
+    ts: 18,
+    session: SESSION,
+    kind: "summary-replaced",
+    stage: "leaf",
+    durationMs: 500,
+    summaryId: 22,
+  },
+  {
+    ts: 19,
+    session: SESSION,
+    kind: "summary-skipped-existing",
+    stage: "leaf",
+    durationMs: 1000,
+    summaryId: 19,
+  },
+  {
+    ts: 20,
+    session: SESSION,
+    kind: "summary-fallback-stored",
+    stage: "leaf",
+    summaryId: 23,
+  },
+  {
+    ts: 21,
+    session: SESSION,
+    kind: "summarizer-usage",
+    model: "test/model",
+    stage: "direct",
+    outcome: "ok",
+    estimated: true,
+    input: 1000,
+    output: 100,
+  },
+  {
+    ts: 22,
+    session: SESSION,
+    kind: "summarizer-usage",
+    model: "test/model",
+    stage: "direct",
+    outcome: "ok",
+    input: 500,
+    output: 50,
+  },
+  {
+    ts: 23,
+    session: SESSION,
+    kind: "summarizer-error",
+    level: 1,
+    reason: "threw",
+    category: "unknown",
+  },
+  {
+    ts: 24,
+    session: SESSION,
+    kind: "summarizer-capped",
+    stage: "direct",
+    category: "unknown",
+    source: "pass",
+  },
+  { ts: 25, session: SESSION, kind: "compaction-abandoned", stage: "direct", dropped: 3 },
+  { ts: 26, session: SESSION, kind: "compaction-abandoned", stage: "async", dropped: 2 },
   { ts: 15, session: "ses_other", kind: "projection", action: "swap", occupancy: 0.99 },
 ];
 
@@ -84,7 +164,7 @@ describe("lossless report", () => {
   it("renders one bounded summary of this session's rows", () => {
     const { text } = seeded();
 
-    expect(text).toContain("LCM metrics: 14 row(s) for this session (15 in the log).");
+    expect(text).toContain("LCM metrics: 25 row(s) for this session (26 in the log).");
     expect(text).toContain("projections: 5 (quiet 1, swap 1, kick 2, bail 1)");
     expect(text).toContain("kick: summary-missing 2");
     expect(text).toContain("bail: host-checkpoint 1");
@@ -92,12 +172,38 @@ describe("lossless report", () => {
       "checkpoints: 1 written, 1 skipped, 0 failed; last #12,#13 (4180 chars)",
     );
     expect(text).toContain("passes: 2 (stored 1, nothing 0, failed 1); 2 leaf, 1 condensed");
+    expect(text).toContain(
+      "summary nodes: 2 stored (1 leaf, 1 condensed), 1 replaced, 1 skipped-existing; " +
+        "level-3 fallback 1 of 3 stored-node writes (33.3%)",
+    );
+    expect(text).toContain("summary latency: p50 500 ms, p95 1000 ms over 4 timed node(s)");
+    expect(text).toContain("summarizer: 2 call(s), 1 estimated; 1 error(s), 1 capped");
+    expect(text).toContain("abandoned: 2 pass(es), 5 row(s) dropped");
     expect(text).toContain("lcm_grep 2 (hit 1, miss 1)");
     expect(text).toContain("lcm_expand 1 (hit 1)");
     expect(text).toContain("reader: 2 (1 answered, 1 failed, 0 timeout); avg 1000 ms");
     expect(text).toContain("last decision: swap at 0.720 occupancy (92000 tokens)");
     expect(text).not.toContain("ses_other");
     expect(text.length).toBeLessThan(2048);
+  });
+
+  it("summarizes heal runs", () => {
+    const text = formatMetricsReport(
+      [
+        {
+          ts: 1,
+          session: SESSION,
+          kind: "heal-complete",
+          stop: "done",
+          repaired: 2,
+          failed: 1,
+          blocked: 0,
+          calls: 3,
+        },
+      ],
+      SESSION,
+    );
+    expect(text).toContain("heal: 1 run(s), 2 repaired, 1 failed, 0 blocked; 3 call(s)");
   });
 
   it("says so when the session has no rows", () => {

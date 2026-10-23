@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 
 import { test } from "vite-plus/test";
 
-import { EXPORT_VERSION, exportTranscript } from "../src/export.ts";
+import { EXPORT_VERSION, exportTranscript, type ExportSummaryRow } from "../src/export.ts";
 import { importTranscript, parseExport } from "../src/import.ts";
 import { ingestEntries } from "../src/ingest.ts";
-import { LcmStore } from "../src/store.ts";
+import { LcmStore, TRUNCATED_SUMMARY_PREFIX } from "../src/store.ts";
 
 function seeded(n = 6): LcmStore {
   const s = new LcmStore(":memory:");
@@ -96,6 +96,71 @@ test("import: a re-import of the same file writes nothing", async () => {
   assert.equal(again.summariesInserted, 0);
   assert.equal(again.summariesSkipped, 3);
   target.close();
+  source.close();
+});
+
+test("import: summary quality round-trips, and a missing field falls back to the text", () => {
+  const source = new LcmStore(":memory:");
+  ingestEntries(source, [
+    { entryId: "e00", role: "user", text: "first", timestamp: 0 },
+    { entryId: "e01", role: "assistant", text: "second", timestamp: 1 },
+  ]);
+  const messageIds = source.messagesInSpan("e00", "e01").map((message) => message.id);
+  const leaf = source.insertSummary({
+    kind: "leaf",
+    text: `${TRUNCATED_SUMMARY_PREFIX}\nmechanical`,
+    tokens: 5,
+    depth: 0,
+    quality: "mechanical",
+    firstEntryId: "e00",
+    lastEntryId: "e01",
+    messageIds,
+  }).id;
+  source.insertSummary({
+    kind: "condensed",
+    text: "parent over a mechanical leaf",
+    tokens: 6,
+    depth: 1,
+    quality: "derived",
+    firstEntryId: "e00",
+    lastEntryId: "e01",
+    childSummaryIds: [leaf],
+  });
+  const parsed = parseExport(exportTranscript(source).toJSONL());
+  assert.ok("rows" in parsed);
+
+  const target = new LcmStore(":memory:");
+  const result = importTranscript(target, parsed.rows);
+  assert.equal(result.refused, undefined);
+  assert.deepEqual(
+    target.allSummaries().map((node) => [node.id, node.quality]),
+    [
+      [1, "mechanical"],
+      [2, "derived"],
+    ],
+  );
+
+  const legacy = parsed.rows.map((row) => {
+    if (row.rowType !== "summary") return row;
+    const copy: ExportSummaryRow = { ...row };
+    delete copy.quality;
+    return copy;
+  });
+  const oldTarget = new LcmStore(":memory:");
+  const oldResult = importTranscript(oldTarget, legacy);
+  assert.equal(oldResult.refused, undefined);
+  assert.equal(
+    oldTarget.getSummary(1)?.quality,
+    "mechanical",
+    "a missing quality falls back to the prefix",
+  );
+  assert.equal(
+    oldTarget.getSummary(2)?.quality,
+    "clean",
+    "a parent without a prefix and without the field defaults clean",
+  );
+  target.close();
+  oldTarget.close();
   source.close();
 });
 

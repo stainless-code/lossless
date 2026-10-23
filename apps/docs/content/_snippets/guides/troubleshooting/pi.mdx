@@ -45,7 +45,7 @@ Estimated token counts are not exact either. [Token estimation](/concepts/token-
 The report tallies what the summarizer did. `model-fallback` means the chain had to substitute a model, `summarizer-capped` means a budget stopped a pass and the remaining chunks used the mechanical truncate, and `condensation-stalled` means a pass could not meet its summary budget. Each has a different fix:
 
 - `model-fallback`: name a chain whose first entry is reliable, or pin one model.
-- `summarizer-capped`: raise `summarizerTokensPerCall` or `summarizerTokensPerPass`, or lower `leafChunkTokens` so each chunk is smaller.
+- `summarizer-capped`: raise `summarizerTokensPerCall` or `summarizerTokensPerPass`, or lower `leafChunkTokens` so each chunk is smaller. A pass that already stored a `[lcm:truncated]` node can be repaired with `/lcm heal --apply`.
 - `condensation-stalled`: the frontier is over budget at the depth cap. Lower `summaryTokens`, or accept the stubs the projection reports.
 
 `/lcm doctor` prints the depth histogram, the pinned projection, and the summarizer chain that runs.

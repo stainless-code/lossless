@@ -73,6 +73,9 @@ function harness(overrides: Partial<LifecycleDeps> = {}): Harness {
     record: (row) => {
       records.push(row);
     },
+    heal: async () => {
+      throw new Error("heal is not scripted in this harness");
+    },
     ...overrides,
   };
   return { dir, sidecars, deps, texts, records };

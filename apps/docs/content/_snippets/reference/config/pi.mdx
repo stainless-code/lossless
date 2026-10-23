@@ -26,6 +26,7 @@ Strict JSON: comments and trailing commas are rejected. A file that does not par
 | `externalizeFiles`        | boolean            | `true`   |                                      | Turns the file-handle path on or off.                                       |
 | `summarizerTokensPerCall` | number             | `60000`  | `>= 1`                               | Ceiling on one summarizer request, estimate plus output cap.                |
 | `summarizerTokensPerPass` | number             | `250000` | `>= 1`                               | Ceiling on one pass across its calls.                                       |
+| `summarizerTokensPerHeal` | number             | `120000` | `>= 1`                               | Ceiling on one `/lcm heal --apply` repair run.                              |
 
 `zones` accepts only the five threshold keys: `smartZone`, `swapAtTokens`, `recutAtTokens`, `swapAtRatio`, `recutAtRatio`. Anything else under a model key is dropped and named.
 

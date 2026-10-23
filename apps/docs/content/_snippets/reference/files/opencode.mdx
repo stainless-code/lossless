@@ -28,13 +28,14 @@ The host's session record remains the source of truth for the conversation. The 
 | ----------- | ---------------------------------------- |
 | Projection  | `projection`                             |
 | Checkpoint  | `compaction-checkpoint`                  |
-| Pass        | `pass`                                   |
+| Pass        | `pass`, `summary-*`, `compaction-complete`, `compaction-abandoned`, `summarizer-*` |
+| Heal        | `heal-start`, `heal-node`, `heal-complete` |
 | Recall      | `recall`                                 |
 | Reader      | `reader`                                 |
 | Ingest      | `ingest`                                 |
 | Lifecycle   | `migrate`, `gc`                          |
 
-`/lossless-report` is a view over these rows. The log rotates at 5 MB, keeps three generations, and is created 0600.
+A pass sends its engine and summarizer rows through the same sidecar sink, so `summary-stored`, `summarizer-usage`, and cap rows appear beside the adapter's own pass row. `/lossless-report` is a view over these rows. The log rotates at 5 MB, keeps three generations, and is created 0600.
 
 ## Exports, backups, and gc
 

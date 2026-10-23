@@ -2,7 +2,8 @@
  * no options, so the core's `maxTokens` request is not forwarded and the host
  * decides the cap from its own model limits. It returns text alone, so `usage`
  * is estimated from characters and a cut answer cannot be told from a complete
- * one, which is why `capped` stays false. The estimate keeps the summarizer
+ * one: `usage.estimated` says so, `stop` stays `unknown` because the host named
+ * no stop reason, and `capped` stays false. The estimate keeps the summarizer
  * budget and metrics populated without claiming a billed figure. */
 
 import type {
@@ -63,6 +64,7 @@ function estimateUsage(prompt: string, text: string): Usage {
     output,
     cacheRead: 0,
     cacheWrite: 0,
+    estimated: true,
     totalTokens: input + output,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
@@ -90,7 +92,7 @@ async function complete(
     return {
       outcome: "answer",
       text: answer.text,
-      stop: "end",
+      stop: "unknown",
       usage: estimateUsage(request.prompt, answer.text),
     };
   } catch (error) {

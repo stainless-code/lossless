@@ -348,6 +348,8 @@ describe("recall metrics", () => {
     const host = fakeHost({ sidecarDir: dir });
     const model = { providerID: "test", id: "model" } as const;
     const rows: Array<Record<string, unknown>> = [];
+    const passRows = (): Array<Record<string, unknown>> =>
+      rows.filter((row) => row.kind === "pass");
     const first = seedPassStore(dir, "ses_pass");
     try {
       const stored = await runLosslessPass(
@@ -362,7 +364,10 @@ describe("recall metrics", () => {
         { targetTokens: 200 },
       );
       expect(stored.kind).toBe("stored");
-      expect(rows[0]).toMatchObject({
+      const storedRow = passRows().find(
+        (row) => row.session === "ses_pass" && row.outcome === "stored",
+      );
+      expect(storedRow).toMatchObject({
         session: "ses_pass",
         kind: "pass",
         stage: "blocking",
@@ -371,7 +376,7 @@ describe("recall metrics", () => {
         condensed: 0,
         answers: 1,
       });
-      expect(typeof rows[0]?.durationMs).toBe("number");
+      expect(typeof storedRow?.durationMs).toBe("number");
     } finally {
       first.store.close();
     }
@@ -394,12 +399,13 @@ describe("recall metrics", () => {
           { targetTokens: 200 },
         ),
       ).rejects.toThrow(/summarizer did not answer/);
-      expect(rows[1]).toMatchObject({
+      const failedRow = passRows().find((row) => row.session === "ses_fail");
+      expect(failedRow).toMatchObject({
         kind: "pass",
         stage: "blocking",
         outcome: "failed",
       });
-      expect(String(rows[1]?.error)).toContain("summarizer did not answer");
+      expect(String(failedRow?.error)).toContain("summarizer did not answer");
     } finally {
       second.store.close();
     }

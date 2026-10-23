@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { redactSecrets } from "lossless-core";
 import { ingestEntries } from "lossless-core";
 import { hashSessionPath } from "lossless-core";
-import { LcmStore } from "lossless-core";
+import { LcmStore, SCHEMA_VERSION } from "lossless-core";
 import {
   formatSessionHits,
   listSessions,
@@ -699,7 +699,7 @@ test("a store at the current generation opens read-only outside a session", () =
     const opened = openSessionStore(ref);
     assert.equal(opened.kind, "opened");
     if (opened.kind === "opened") {
-      assert.equal(opened.store.generation, 1);
+      assert.equal(opened.store.generation, SCHEMA_VERSION);
       assert.equal(opened.store.grep("needle").length, 1);
       opened.store.close();
     }

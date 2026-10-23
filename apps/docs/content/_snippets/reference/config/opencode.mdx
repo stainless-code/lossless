@@ -8,6 +8,9 @@ The config is the plugin's `options` object in `opencode.json`; there is no sepa
 | `sidecarDir`       | string             | `"./.lossless"` | any path                              | One SQLite file per session; resolved from the server working directory.                                                                       |
 | `assembly`         | boolean            | `true`          | `true` or `false`                     | Build the DAG, project the frontier, and return the checkpoint. `false` keeps the mirror and recall tools.                                     |
 | `summarizer`       | string or string[] | `"auto"`        | one id, or an ordered chain           | Summarizer chain. `auto` is the session model; a concrete id falls back to the session model because the host has no synchronous model lookup. |
+| `summarizerTokensPerCall` | number      | `60000`         | `>= 1`                                | Ceiling on one summarizer request, estimate plus output cap, refused before the provider is called.                                            |
+| `summarizerTokensPerPass` | number      | `250000`        | `>= 1`                                | Ceiling on one pass across its calls.                                                                                                          |
+| `summarizerTokensPerHeal` | number      | `120000`        | `>= 1`                                | Ceiling on one `/lossless-heal --apply` repair run.                                                                                            |
 | `swapAtRatio`      | number             | `0.7`           | `> 0`, `<= 1`                         | Swap line as a share of the window; the engine clamps it to 0.9.                                                                               |
 | `recutAtRatio`     | number             | `0.85`          | `> 0`, `<= 1`                         | Re-cut line as a share of the window.                                                                                                          |
 | `smartZone`        | number             | unset           | `> 0`                                 | Swap at this many tokens; re-cut at `x 1.18`.                                                                                                  |
@@ -35,5 +38,6 @@ Explicit tokens win over `smartZone`, which wins over ratios. Per-model `zones` 
 - `enabled` disables everything only when it is exactly `false`.
 - `assembly` stays on unless it is exactly `false`.
 - `summarizer` accepts one string or an array of strings. An empty or malformed value falls back to `auto`.
+- The three summarizer token budgets must be positive integers; a malformed value keeps the default.
 - `zones` entries with no valid threshold key are dropped. `swapAtTokens` and `recutAtTokens` are accepted there only, not at the top level.
 - The options are read once at setup. Edit `opencode.json` and reload the plugin to change them.

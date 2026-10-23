@@ -10,12 +10,13 @@ import {
   type AlignedEntry,
   type CompactionOutcome,
   type LcmStore,
+  type MetricsSink,
   type ModelHost,
-  type SummarizerConfig,
 } from "lossless-core";
 
 import type { ModelRef, OpencodeContext } from "./host.ts";
 import { opencodeModelHost } from "./model-host.ts";
+import { summarizerConfig, type SummarizerOptions } from "./summarizer.ts";
 
 export interface PassDeps {
   /** The sidecar that holds this session's history. */
@@ -36,7 +37,7 @@ export type PassStage = "blocking" | "async" | "direct";
 export interface PassOptions {
   readonly targetTokens?: number;
   readonly previousSummary?: string;
-  readonly summarizer?: SummarizerConfig;
+  readonly summarizer?: SummarizerOptions;
   /** Which regime started this pass. `blocking` is the default; the manual
    * command passes `direct` and the context hook schedules `async` passes. */
   readonly stage?: PassStage;
@@ -75,6 +76,13 @@ export async function runLosslessPass(
   opts.signal?.throwIfAborted();
   const started = Date.now();
   const stage = opts.stage ?? "blocking";
+  // Every engine and completer row belongs to this pass, so they go through the
+  // same record callback as the pass row. Without one this is a deliberate
+  // no-op, never core's log: an OpenCode pass must not write the Pi metrics
+  // file just because its test or caller supplied no sink.
+  const sink: MetricsSink = (row) => {
+    deps.record?.({ ...row });
+  };
   const tally: ModelTally = { answers: 0 };
   const record = (
     row:
@@ -99,11 +107,12 @@ export async function runLosslessPass(
   }
   const llm = makeLlm(
     tallyingHost(opencodeModelHost(deps.ctx, deps.model), tally),
-    opts.summarizer ?? {},
+    summarizerConfig(opts.summarizer ?? {}),
     {
       session: sessionID,
-      stage: stage === "async" ? "async" : "blocking",
+      stage,
       span: { firstEntryId: first.entryId, lastEntryId: last.entryId },
+      sink,
     },
   );
   if (llm === null) throw new Error("lcm: no summarizer model is available for this pass");
@@ -123,9 +132,9 @@ export async function runLosslessPass(
         ...(opts.targetTokens === undefined ? {} : { targetTokens: opts.targetTokens }),
       },
       llm,
-      // The manual command is a direct pass; a pass the context hook schedules
-      // reports the async regime so the metric rows tell the two apart.
-      { redact: redactSecrets, stage: stage === "async" ? "async" : "direct" },
+      // The pass stage is the engine's own vocabulary, so a direct pass labels
+      // its completer rows and its engine rows alike.
+      { redact: redactSecrets, session: sessionID, stage },
     );
     if (outcome.kind === "stored") {
       // A stored outcome with no model answer is the ladder's mechanical
@@ -147,6 +156,16 @@ export async function runLosslessPass(
     return outcome;
   } catch (error) {
     record({ outcome: "failed", answers: tally.answers, error: messageOf(error) });
+    const dropped = store.abandonRun(token);
+    if (dropped > 0) {
+      sink({
+        event: "lcm",
+        kind: "compaction-abandoned",
+        session: sessionID,
+        stage,
+        dropped,
+      });
+    }
     throw error;
   } finally {
     store.abandonRun(token);

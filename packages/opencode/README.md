@@ -116,9 +116,15 @@ verbatim tail, `summaryTokens` (default 1500) the render budget, `contextWindow`
 and `zones` override the thresholds, and `summarizer` names the model chain,
 where `auto` is the session model. This host exposes no synchronous model
 lookup, so a concrete model id in the chain falls back to the session model.
-`readerTimeoutMs` (default 120000) is how
-long one expand-query child may run before it is interrupted. Set
-`assembly: false` to leave compaction to the host.
+`summarizerTokensPerCall` (default 60000) caps one request, estimate plus output
+cap, before it is refused rather than paid for; `summarizerTokensPerPass`
+(default 250000) caps what one pass may spend across its calls.
+`summarizerTokensPerHeal` (default 120000) caps what one
+`/lossless-heal --apply` run may spend across its calls; a dry run spends
+nothing.
+`readerTimeoutMs` (default 120000) is how long one expand-query child may run
+before it is interrupted. A malformed value keeps its default rather than
+failing the plugin load. Set `assembly: false` to leave compaction to the host.
 
 ## What the model gets
 
@@ -161,7 +167,7 @@ before a child exists. The reader is session-scoped, so there is no past-session
 reader, and there is no per-child token or step cap: the child's model decides
 how much it reads within the brief.
 
-Nine commands by default; `/lossless-pass` is absent with `assembly: false`:
+Ten commands by default; `/lossless-pass` is absent with `assembly: false`:
 
 - `/lossless-status`: report the message and compaction summary counts per live
   sidecar. A command cannot return text directly, so the status arrives as a
@@ -169,10 +175,15 @@ Nine commands by default; `/lossless-pass` is absent with `assembly: false`:
 - `/lossless-report`: summarize this session's rows in `metrics.jsonl`:
   projection decisions with their top bail and kick reasons, checkpoints with
   the last summary ids and text size, pass outcomes with leaf and condensed
-  totals, recall calls per tool, reader runs with their average duration, and
+  totals, summary node counts with the level-3 fallback share and node latency,
+  summarizer usage, errors, caps, and estimated counts, abandoned pass counts,
+  heal runs, recall calls per tool, reader runs with their average duration, and
   the last decision's action and occupancy.
 - `/lossless-pass`: run one DAG pass over the aged span now, without waiting for
   the swap threshold.
+- `/lossless-heal [--apply] [--max-nodes <n>]`: repair tainted summaries from
+  their stored sources. Dry-run by default and makes no model call; `--apply`
+  spends model calls, and `--max-nodes` overrides the engine's 32-node cap.
 - `/lossless-backup [path]`: copy this session's sidecar beside it, or to the
   path you name.
 - `/lossless-export [path]`: write the verbatim transcript and summaries as
@@ -225,7 +236,11 @@ Every seam writes a row to `metrics.jsonl` beside the sidecars: one
 `projection` decision per request, one `compaction-checkpoint` per boundary,
 one `pass` per summarizer run, one `recall` per recall-tool call, and one
 `reader` per expand-query child with its outcome, duration, answer size, and
-cited ids. The log is created 0600 in a 0700 directory, rotates to
+cited ids. The engine and summarizer rows a pass causes (`summary-stored`,
+`summarizer-usage`, `compaction-complete`, summarizer errors and caps, and
+abandoned counts) land in that same OpenCode log through the pass's sink, not
+in Pi's metrics file. A heal writes `heal-start`, `heal-node`, and
+`heal-complete` rows to the same log. The log is created 0600 in a 0700 directory, rotates to
 `metrics.jsonl.<timestamp>` at 5 MB, keeps three generations, and a read skips
 a missing file or a malformed line. `/lossless-report` renders it per session.
 

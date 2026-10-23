@@ -26,6 +26,8 @@ import type { ModelHost, Reader } from "lossless-core";
   deleted: the store still holds the verbatim text.
 - **Retrieval.** A reader answers a question by calling `lcm_grep`,
   `lcm_describe`, and `lcm_expand`, so the answer cites what was read.
+- **Repair.** `runHeal` re-derives a mechanically truncated summary and its
+  ancestors from the provenance rows it still points at.
 - **Redaction.** Secret-shaped text is masked on its way to a model and never
   at the door, so an export or a read can still return what was stored.
 

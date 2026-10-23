@@ -631,7 +631,16 @@ export default function (pi: ExtensionAPI) {
           }
           return result;
         } finally {
-          store.abandonRun(token);
+          const dropped = store.abandonRun(token);
+          if (dropped > 0) {
+            appendMetric({
+              event: "lcm",
+              kind: "compaction-abandoned",
+              session: sessionTag,
+              stage: "blocking",
+              dropped,
+            });
+          }
         }
       })();
 
@@ -814,7 +823,16 @@ export default function (pi: ExtensionAPI) {
         });
       })
       .finally(() => {
-        db.abandonRun(runToken);
+        const dropped = db.abandonRun(runToken);
+        if (dropped > 0 && generation === storeGeneration) {
+          appendMetric({
+            event: "lcm",
+            kind: "compaction-abandoned",
+            session: sessionTag,
+            stage: "async",
+            dropped,
+          });
+        }
         if (token !== passToken) return;
         passInFlight = null;
         drainPendingPass();

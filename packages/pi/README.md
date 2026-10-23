@@ -40,6 +40,8 @@ once context crosses the soft threshold (default: 70% of the model's window).
                 # stores as lcm-export-gc-<timestamp>.jsonl before any deletion)
 /lcm migrate    # dry-run list of stores left at an older schema; add --apply to
                 # upgrade them in place so cross-session search can read them
+/lcm heal       # dry-run repair of tainted summaries; add --apply to spend
+                # model calls, --max-nodes <n> to bound the run
 /lcm diagnose   # one pasteable block for a bug report (see Reporting a problem);
                 # add --save <path> to write it to a file instead
 ```
@@ -134,7 +136,7 @@ stored bytes, secrets included.
   entries are dropped, and an entry the registry cannot find is reported once
   per session and recorded as a `summarizer-model` event. A chain that needed
   more than one model records a `summarizer-fallback` event, which `/lcm
-  report` shows as `model-fallback`. `/lcm doctor` prints the chain that
+  report` shows as `model-fallback`; the report also summarizes heal runs. `/lcm doctor` prints the chain that
   actually runs, next to the config it came from, so `auto` expansion and the
   appended session model are visible rather than implied. A substitution also
   raises one UI warning per session.
@@ -153,6 +155,10 @@ stored bytes, secrets included.
   fraction of either cap.
   A pass that crosses one finishes its remaining chunks with the mechanical
   truncate and records `summarizer-capped` with `source: "budget"`.
+- `summarizerTokensPerHeal`: what one `/lcm heal --apply` run may spend across all
+  of its calls, counted the same way. Default 120,000. A dry run spends nothing.
+  The run is bounded separately from a compaction pass because it re-derives
+  nodes a pass already paid for.
 
 The file must be valid strict JSON, so `//` comments and trailing commas are
 rejected, and a corrupt file is left untouched with defaults applied. A number
@@ -343,7 +349,7 @@ refused rather than quietly printing the block.
 - **Telemetry**: `~/.pi/agent/lcm/metrics.jsonl` logs every context decision,
   per-message provider usage (fresh vs cached, cost), one row per summarizer
   call with the model, stage, and what the provider billed, one row per recall
-  call, one per externalized file, and one per branch change.
+  call, one per heal run, one per externalized file, and one per branch change.
   `/lcm doctor` reports the thresholds, the zone, and the summarizer chain that
   are in effect, which answers what the log recorded after the fact.
 - **Verbatim storage**: message text is stored whole, whatever its size.

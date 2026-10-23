@@ -1,5 +1,5 @@
 /** Store lifecycle commands for the OpenCode adapter: backup, export, import,
- * diagnose, migrate, and a manual gc. They all read the same per-session
+ * diagnose, migrate, heal, and a manual gc. They all read the same per-session
  * sidecars the recall tools use, so they are registered with or without
  * `assembly`. The cockpit is not here: the promise plugin API has no
  * interactive TUI surface. */
@@ -32,21 +32,32 @@ import {
   storeGeneration,
   type DiagnoseBundleInput,
   type FactConfig,
+  type HealOutcome,
   type ThresholdConfig,
 } from "lossless-core";
 
 import type { CommandDefinition, ModelRef } from "./host.ts";
 import { readMetricRows } from "./metrics.ts";
 import type { SidecarRef, Sidecars } from "./sidecars.ts";
+import { summarizerConfig, type SummarizerOptions } from "./summarizer.ts";
 
-export interface LifecycleOptions {
+export interface LifecycleOptions extends SummarizerOptions {
   readonly assembly: boolean;
   readonly swapAtRatio: number;
   readonly recutAtRatio: number;
   readonly keepRecentTokens: number;
   readonly smartZone?: number;
-  readonly summarizer?: string | string[];
   readonly zones?: Readonly<Record<string, ThresholdConfig>>;
+}
+
+export interface HealRunRequest {
+  readonly sessionID: string;
+  readonly store: LcmStore;
+  /** The store's own first and last entry id, which is the span every call in
+   * the run summarizes. */
+  readonly span: { readonly first: string; readonly last: string };
+  readonly dryRun: boolean;
+  readonly maxNodes?: number;
 }
 
 export interface LifecycleDeps {
@@ -56,6 +67,9 @@ export interface LifecycleDeps {
   readonly host: () => string;
   readonly prompt: (sessionID: string, text: string) => Promise<unknown>;
   readonly record: (row: Record<string, unknown>) => void;
+  /** Run the bounded repair loop over this session's sidecar. A dry run reads
+   * the plan and must not call a model. */
+  readonly heal: (request: HealRunRequest) => Promise<HealOutcome>;
   /** The session's model, when the host can name it. Diagnose uses it to
    * report the window and the effective thresholds; the commands still work
    * without it. */
@@ -286,9 +300,10 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
               ...(deps.options.smartZone === undefined
                 ? {}
                 : { smartZone: deps.options.smartZone }),
-              ...(deps.options.summarizer === undefined
+              ...summarizerConfig(deps.options),
+              ...(deps.options.summarizerTokensPerHeal === undefined
                 ? {}
-                : { summarizer: deps.options.summarizer }),
+                : { summarizerTokensPerHeal: deps.options.summarizerTokensPerHeal }),
               ...(deps.options.zones === undefined ? {} : { zones: deps.options.zones }),
             }),
             path: "opencode.json plugin options",
@@ -530,4 +545,62 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       );
     },
   };
+}
+
+export function healCommand(deps: LifecycleDeps): CommandDefinition {
+  return {
+    name: "lossless-heal",
+    description:
+      "Repair mechanically truncated summaries from their stored sources; dry-run unless --apply is passed.",
+    execute: async (input) => {
+      const args = argsOf(input.prompt.text);
+      if (args.includes("--max-nodes") && valueOf(args, "--max-nodes") === undefined) {
+        await deps.prompt(input.sessionID, "LCM heal: --max-nodes takes a positive whole number.");
+        return;
+      }
+      const rawMaxNodes = valueOf(args, "--max-nodes");
+      const maxNodes = rawMaxNodes === undefined ? undefined : Number(rawMaxNodes);
+      if (maxNodes !== undefined && (!Number.isInteger(maxNodes) || maxNodes <= 0)) {
+        await deps.prompt(input.sessionID, "LCM heal: --max-nodes takes a positive whole number.");
+        return;
+      }
+      const store = currentStore(deps, input.sessionID);
+      if (store === undefined) {
+        await deps.prompt(input.sessionID, "LCM heal: no stored history for this session yet.");
+        return;
+      }
+      const span = store.entrySpan();
+      if (span === undefined) {
+        await deps.prompt(input.sessionID, "LCM heal: this session has no stored entries yet.");
+        return;
+      }
+      try {
+        const outcome = await deps.heal({
+          sessionID: input.sessionID,
+          store,
+          span,
+          dryRun: !args.includes("--apply"),
+          ...(maxNodes === undefined ? {} : { maxNodes }),
+        });
+        await deps.prompt(input.sessionID, healReport(outcome));
+      } catch (error) {
+        await deps.prompt(
+          input.sessionID,
+          `LCM heal failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  };
+}
+
+/** The compact result a command prompt carries. No summary or message text
+ * leaves the store; the counts are the whole answer. */
+export function healReport(outcome: HealOutcome): string {
+  if (outcome.dryRun) {
+    return outcome.counts.candidates === 0
+      ? "LCM heal dry-run: no truncated summaries or stale ancestors; nothing to repair."
+      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} truncated; run \`/lossless-heal --apply\` to repair.`;
+  }
+  const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
+  return `LCM heal: repaired ${outcome.counts.repaired}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
 }

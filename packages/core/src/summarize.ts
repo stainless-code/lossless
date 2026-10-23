@@ -1,9 +1,11 @@
 import { estimateTokens } from "./estimate-tokens.ts";
 import { SummarizerFailure } from "./llm.ts";
-import { appendMetric } from "./metrics.ts";
+import { appendMetric, type MetricsSink } from "./metrics.ts";
 
 export interface LlmComplete {
   (systemPrompt: string, userText: string, maxTokens: number): Promise<string>;
+  /** Where this completer's rows go. Absent means the metrics log. */
+  readonly metrics?: MetricsSink;
 }
 
 export interface EscalationResult {
@@ -29,8 +31,9 @@ export async function summarizeWithEscalation(
 ): Promise<EscalationResult> {
   const source = sourceOf(items);
   const { sourceTokens, sourceChars, plain, conversation } = source;
+  const emit = llm.metrics ?? appendMetric;
 
-  const l1 = await tryLevel(llm, conversation, PROMPT_LEVEL1, targetTokens, {
+  const l1 = await tryLevel(llm, emit, conversation, PROMPT_LEVEL1, targetTokens, {
     level: 1,
     sourceChars,
     session,
@@ -42,7 +45,7 @@ export async function summarizeWithEscalation(
     // already at budget, so a gate above that target would only block the
     // nodes this retry exists for.
     if (l1Tokens > 2 * targetTokens) {
-      const l2 = await tryLevel(llm, conversation, PROMPT_LEVEL2, targetTokens, {
+      const l2 = await tryLevel(llm, emit, conversation, PROMPT_LEVEL2, targetTokens, {
         level: 2,
         sourceChars,
         session,
@@ -61,7 +64,7 @@ export async function summarizeWithEscalation(
   // failure caused by the cap, and for a model that spends its output
   // budget on reasoning it makes the second attempt strictly less likely to
   // emit text at all. Brevity is PROMPT_LEVEL2's job.
-  const l2 = await tryLevel(llm, conversation, PROMPT_LEVEL2, targetTokens, {
+  const l2 = await tryLevel(llm, emit, conversation, PROMPT_LEVEL2, targetTokens, {
     level: 2,
     sourceChars,
     session,
@@ -89,7 +92,8 @@ export async function summarizeTerse(
   session?: string,
 ): Promise<EscalationResult> {
   const { sourceTokens, sourceChars, plain, conversation } = sourceOf(items);
-  const terse = await tryLevel(llm, conversation, PROMPT_LEVEL2, targetTokens, {
+  const emit = llm.metrics ?? appendMetric;
+  const terse = await tryLevel(llm, emit, conversation, PROMPT_LEVEL2, targetTokens, {
     level: 2,
     sourceChars,
     session,
@@ -126,6 +130,7 @@ function truncated(plain: string, sourceTokens: number): EscalationResult {
 
 async function tryLevel(
   llm: LlmComplete,
+  emit: MetricsSink,
   conversation: string,
   prompt: string,
   maxTokens: number,
@@ -136,7 +141,7 @@ async function tryLevel(
     if (out && out.trim().length > 0) return out.trim();
     // An empty response is a failure, not a terse summary, so it records an
     // error rather than degrading a session to level 3 in silence.
-    appendMetric({
+    emit({
       event: "lcm",
       kind: "summarizer-error",
       level: stage.level,
@@ -151,7 +156,7 @@ async function tryLevel(
     // `summarizer-capped`, and one row per remaining chunk would be the same
     // fact forty times. Every other throw is an attempt that was paid for.
     if (error instanceof SummarizerFailure && error.category === "capped") return null;
-    appendMetric({
+    emit({
       event: "lcm",
       kind: "summarizer-error",
       level: stage.level,
@@ -166,6 +171,8 @@ async function tryLevel(
 }
 
 const LEVEL3_TOKENS = 512;
+
+export { TRUNCATED_SUMMARY_PREFIX } from "./store.ts";
 
 export function deterministicTruncate(text: string, targetTokens: number): string {
   const maxChars = targetTokens * 4;

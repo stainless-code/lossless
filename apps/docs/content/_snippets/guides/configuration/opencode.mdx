@@ -12,6 +12,9 @@ The OpenCode adapter reads its options from the `plugins` entry in `opencode.jso
         "recutAtRatio": 0.85,
         "keepRecentTokens": 20000,
         "summaryTokens": 1500,
+        "summarizerTokensPerCall": 60000,
+        "summarizerTokensPerPass": 250000,
+        "summarizerTokensPerHeal": 120000,
         "contextWindow": 128000
       }
     }
@@ -20,5 +23,7 @@ The OpenCode adapter reads its options from the `plugins` entry in `opencode.jso
 ```
 
 The threshold vocabularies are the same: ratios, `smartZone`, and token pairs. `zones` maps `provider/model` to any of `smartZone`, `swapAtRatio`, `swapAtTokens`, `recutAtRatio`, and `recutAtTokens`. Token thresholds win over `smartZone`, which wins over ratios. The engine clamps the swap ratio to 0.9 and folds a re-cut into `(swap, 0.95]`.
+
+`summarizerTokensPerCall` and `summarizerTokensPerPass` bound a pass. `summarizerTokensPerHeal` bounds an on-demand `/lossless-heal --apply` repair. A malformed value keeps its default.
 
 `assembly: false` keeps the mirror and recall tools and leaves compaction to the host. Edit the options and reload the plugin to change them; there is no live settings panel. [Config](/reference/opencode/config) lists every key and default.

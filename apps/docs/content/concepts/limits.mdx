@@ -51,8 +51,9 @@ The index and the summarizer read a message's derived text, which is not always 
 | Leaf chunk | `leafChunkTokens`, default 3000 | How much source text one leaf covers. |
 | Summarizer call budget | `summarizerTokensPerCall`, default 60,000 | Refused before the provider is called. |
 | Summarizer pass budget | `summarizerTokensPerPass`, default 250,000 | Once crossed, the rest of the pass uses the mechanical truncate. |
+| Heal budget | `summarizerTokensPerHeal`, default 120,000 | Ceiling on one on-demand repair run. |
 
-A pass that cannot meet its summary budget records `condensation-stalled` rather than evicting a frontier node.
+A pass that cannot meet its summary budget records `condensation-stalled` rather than evicting a frontier node. A tainted node can be repaired from its stored source with `/lcm heal --apply` in Pi or `/lossless-heal --apply` in OpenCode.
 
 ## One engine per session
 

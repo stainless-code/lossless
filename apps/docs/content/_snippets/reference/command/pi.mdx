@@ -1,6 +1,6 @@
 ```text
 /lcm                 # the cockpit: interactive settings for this session
-/lcm <subcommand>    # one of the ten below
+/lcm <subcommand>    # one of the eleven below
 ```
 
 A session with no session file, or one where nothing has been ingested yet, has no store. The command says so instead of printing an empty projection.
@@ -46,7 +46,17 @@ Prints the store counts, the pinned projection and the occupancy it was applied 
 /lcm report
 ```
 
-A metrics summary for this session: context decisions, what each swap moved, summarizer calls with model, stage, and what the provider billed, recall calls, externalized files, branch changes, and named conditions such as `model-fallback`.
+A metrics summary for this session: context decisions, what each swap moved, summarizer calls with model, stage, and what the provider billed, summary node latency, heal runs, recall calls, externalized files, branch changes, and named conditions such as `model-fallback`.
+
+## heal
+
+```text
+/lcm heal                  # dry-run: name the tainted nodes and their ancestors
+/lcm heal --apply          # re-summarize them from their stored source
+/lcm heal --apply --max-nodes 8
+```
+
+A non-clean summary is a candidate. A mechanical level-3 node starts with `[lcm:truncated]`; a clipped leaf or a derived parent may not. Heal reads the exact source rows that node points at, re-summarizes the tainted node, then recomputes every ancestor whose child changed. It rejects another level-3 answer, an empty answer, or an answer over twice the target, so a failed repair keeps the old text. `--max-nodes` bounds one run; `summarizerTokensPerHeal` bounds its spend. The dry run makes no provider call.
 
 ## doctor
 

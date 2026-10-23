@@ -103,7 +103,12 @@ Where this implementation departs from the paper, and what it does not claim:
    per-turn cap is a different decision from a per-pass one. A provider that
    alternates failure and success is never capped by the per-pass failure
    counter, because a usable answer resets it, and a span remembered for a
-   minute is probed again after it.
+   minute is probed again after it. OpenCode now exposes both caps and records
+   summary latency and cap outcomes; a stored `[lcm:truncated]` node can be
+   repaired on demand with `/lossless-heal` or `/lcm heal`. Still open: an
+   automatic async continuation after a cap that leaves the uncovered tail for
+   the next pass, and the long-context measurement that would justify a
+   per-turn cap. The repair path must not auto-raise a budget from metrics.
 8. **The stub floor.** A 20-node frontier costs about 1,650 tokens at any budget,
    because a stub is about 79 tokens (a 200-character preview, the elision
    marker, and the header). Condensing further or a cheaper stub both move a

@@ -35,6 +35,7 @@ import { storedEntries } from "./map.ts";
 import { appendMetricRow } from "./metrics.ts";
 import { runLosslessPass } from "./pass.ts";
 import type { Sidecars } from "./sidecars.ts";
+import { summarizerConfig } from "./summarizer.ts";
 import type { WindowOf } from "./window.ts";
 
 export interface CheckpointDeps {
@@ -175,9 +176,7 @@ export function createCheckpointWriter(deps: CheckpointDeps): CheckpointWriter {
             targetTokens: deps.options.summaryTokens,
             stage: "blocking",
             ...(previousText === undefined ? {} : { previousSummary: previousText }),
-            ...(deps.options.summarizer === undefined
-              ? {}
-              : { summarizer: { summarizer: deps.options.summarizer } }),
+            summarizer: summarizerConfig(deps.options),
           },
         );
       } catch (error) {

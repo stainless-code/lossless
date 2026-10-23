@@ -1,6 +1,16 @@
 import { fileURLToPath } from "node:url";
 
-import { packageVersionNear, redactSecrets, type ThresholdConfig } from "lossless-core";
+import {
+  SUMMARIZER_CALL_TOKENS,
+  SUMMARIZER_PASS_TOKENS,
+  makeLlm,
+  packageVersionNear,
+  redactSecrets,
+  runHeal,
+  type LlmComplete,
+  type MetricsSink,
+  type ThresholdConfig,
+} from "lossless-core";
 
 import { statusCommand, statusLine, passCommand, reportCommand } from "./command.ts";
 import { createCheckpointWriter } from "./compaction.ts";
@@ -12,14 +22,18 @@ import {
   diagnoseCommand,
   exportCommand,
   gcCommand,
+  healCommand,
   importCommand,
   migrateCommand,
+  type LifecycleDeps,
 } from "./lifecycle.ts";
 import { storedEntries } from "./map.ts";
 import { appendMetricRow } from "./metrics.ts";
+import { opencodeModelHost } from "./model-host.ts";
 import { runLosslessPass } from "./pass.ts";
 import { DEFAULT_READER_TIMEOUT_MS, createReader } from "./reader.ts";
 import { Sidecars } from "./sidecars.ts";
+import { SUMMARIZER_HEAL_TOKENS, summarizerConfig } from "./summarizer.ts";
 import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 import { createWindowLookup } from "./window.ts";
 
@@ -47,6 +61,18 @@ export interface OpencodeLosslessOptions {
    * back to the session model.
    * @default "auto" */
   readonly summarizer?: string | string[];
+  /** Tokens one summarizer request may cost, estimate plus output cap, before
+   * it is refused rather than paid for.
+   * @default 60000 */
+  readonly summarizerTokensPerCall?: number;
+  /** Tokens one pass may spend across all of its calls, counted from what the
+   * provider reported.
+   * @default 250000 */
+  readonly summarizerTokensPerPass?: number;
+  /** Tokens one `/lossless-heal --apply` run may spend across all of its calls.
+   * A dry run spends nothing.
+   * @default 120000 */
+  readonly summarizerTokensPerHeal?: number;
   /** The occupancy share at which a request swaps in the projection. The
    * engine clamps it to 0.9 of the window.
    * @default 0.7 */
@@ -96,8 +122,8 @@ export function pluginLabel(): string {
 /** Wire lossless memory into an OpenCode v2 plugin context: mirror prompts,
  * assistant text, tool traffic, and compaction boundaries into per-session
  * sidecars, and register the recall tools plus the `/lossless-status`,
- * `/lossless-report`, and `/lossless-pass` commands. With `assembly` (the
- * default), also register the context projection and the blocking checkpoint
+ * `/lossless-report`, `/lossless-pass`, and `/lossless-heal` commands. With
+ * `assembly` (the default), also register the context projection and the blocking checkpoint
  * (`session.compaction`); `/lossless-pass` runs one DAG pass over the session's
  * stored span on demand. The host stops summarizing for itself once the sidecar
  * covers the aged span: it stores the DAG frontier as its checkpoint, and the
@@ -213,7 +239,7 @@ export async function setupOpencodeLossless(
 
   registrations.push(
     await ctx.command.transform((editor) => {
-      const lifecycle = {
+      const lifecycle: LifecycleDeps = {
         sidecars,
         options: {
           assembly: options.assembly,
@@ -221,7 +247,8 @@ export async function setupOpencodeLossless(
           recutAtRatio: options.recutAtRatio,
           keepRecentTokens: options.keepRecentTokens,
           ...(options.smartZone === undefined ? {} : { smartZone: options.smartZone }),
-          ...(options.summarizer === undefined ? {} : { summarizer: options.summarizer }),
+          ...summarizerConfig(options),
+          summarizerTokensPerHeal: options.summarizerTokensPerHeal,
           ...(options.zones === undefined ? {} : { zones: options.zones }),
         },
         version: pluginLabel,
@@ -230,6 +257,43 @@ export async function setupOpencodeLossless(
         record,
         model: async (sessionID: string) => sessionModel(await ctx.session.context({ sessionID })),
         window: windowOf,
+        heal: async ({ sessionID, store, span, dryRun, maxNodes }) => {
+          const sink: MetricsSink = (row) => record({ ...row });
+          const input = {
+            session: sessionID,
+            targetTokens: options.summaryTokens,
+            redact: redactSecrets,
+            ...(maxNodes === undefined ? {} : { maxNodes }),
+          };
+          if (dryRun) {
+            const noModel: LlmComplete = Object.assign(
+              async (): Promise<string> => {
+                throw new Error("lcm: a heal dry run makes no model call");
+              },
+              { metrics: sink },
+            );
+            return runHeal(store, { ...input, dryRun: true }, noModel);
+          }
+          const model = sessionModel(await ctx.session.context({ sessionID }));
+          if (model === undefined) {
+            throw new Error("this session has no model to repair summaries with");
+          }
+          const llm = makeLlm(
+            opencodeModelHost(ctx, model),
+            {
+              ...summarizerConfig(options),
+              summarizerTokensPerPass: options.summarizerTokensPerHeal,
+            },
+            {
+              session: sessionID,
+              stage: "heal",
+              span: { firstEntryId: span.first, lastEntryId: span.last },
+              sink,
+            },
+          );
+          if (llm === null) throw new Error("no summarizer model is available for this repair");
+          return runHeal(store, input, llm);
+        },
       };
       for (const make of [
         backupCommand,
@@ -238,6 +302,7 @@ export async function setupOpencodeLossless(
         diagnoseCommand,
         migrateCommand,
         gcCommand,
+        healCommand,
       ]) {
         editor.add(make(lifecycle));
       }
@@ -287,9 +352,7 @@ export async function setupOpencodeLossless(
                 {
                   targetTokens: options.summaryTokens,
                   stage: "direct",
-                  ...(options.summarizer === undefined
-                    ? {}
-                    : { summarizer: { summarizer: options.summarizer } }),
+                  summarizer: summarizerConfig(options),
                 },
               );
             },
@@ -385,14 +448,17 @@ export async function setupOpencodeLossless(
   };
 }
 
-interface RuntimeOptions extends ProjectionOptions {
+export interface RuntimeOptions extends ProjectionOptions {
   readonly enabled: boolean;
   readonly sidecarDir: string;
   readonly assembly: boolean;
   readonly readerTimeoutMs: number;
+  readonly summarizerTokensPerCall: number;
+  readonly summarizerTokensPerPass: number;
+  readonly summarizerTokensPerHeal: number;
 }
 
-function readOptions(raw: unknown): RuntimeOptions {
+export function readOptions(raw: unknown): RuntimeOptions {
   const record = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
   const summarizer = readSummarizer(record.summarizer);
   const smartZone = positiveNumber(record.smartZone);
@@ -409,6 +475,12 @@ function readOptions(raw: unknown): RuntimeOptions {
     summaryTokens: positiveInteger(record.summaryTokens) ?? DEFAULT_SUMMARY_TOKENS,
     contextWindow: positiveInteger(record.contextWindow) ?? DEFAULT_CONTEXT_WINDOW,
     readerTimeoutMs: positiveInteger(record.readerTimeoutMs) ?? DEFAULT_READER_TIMEOUT_MS,
+    summarizerTokensPerCall:
+      positiveInteger(record.summarizerTokensPerCall) ?? SUMMARIZER_CALL_TOKENS,
+    summarizerTokensPerPass:
+      positiveInteger(record.summarizerTokensPerPass) ?? SUMMARIZER_PASS_TOKENS,
+    summarizerTokensPerHeal:
+      positiveInteger(record.summarizerTokensPerHeal) ?? SUMMARIZER_HEAL_TOKENS,
     ...(summarizer === undefined ? {} : { summarizer }),
     ...(smartZone === undefined ? {} : { smartZone }),
     ...(zones === undefined ? {} : { zones }),

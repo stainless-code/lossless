@@ -58,12 +58,13 @@ describe("opencodeModelHost", () => {
     expect(answer).toEqual({
       outcome: "answer",
       text: "the summary",
-      stop: "end",
+      stop: "unknown",
       usage: {
         input: 3,
         output: 3,
         cacheRead: 0,
         cacheWrite: 0,
+        estimated: true,
         totalTokens: 6,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
       },

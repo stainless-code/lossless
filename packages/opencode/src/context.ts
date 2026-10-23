@@ -51,12 +51,12 @@ import { appendMetricRow } from "./metrics.ts";
 import { modelKey } from "./model-host.ts";
 import { runLosslessPass } from "./pass.ts";
 import type { Sidecars } from "./sidecars.ts";
+import { summarizerConfig, type SummarizerOptions } from "./summarizer.ts";
 import type { WindowOf } from "./window.ts";
 
 /** The projection's share of the plugin options, with every default already
  * resolved by `readOptions`. */
-export interface ProjectionOptions {
-  readonly summarizer?: string | string[];
+export interface ProjectionOptions extends SummarizerOptions {
   readonly smartZone?: number;
   readonly swapAtRatio: number;
   readonly recutAtRatio: number;
@@ -193,9 +193,7 @@ export function createContextProjector(deps: ProjectorDeps): Projector {
         targetTokens: deps.options.summaryTokens,
         stage: "async",
         ...(previousSummary === undefined ? {} : { previousSummary }),
-        ...(deps.options.summarizer === undefined
-          ? {}
-          : { summarizer: { summarizer: deps.options.summarizer } }),
+        summarizer: summarizerConfig(deps.options),
       },
     )
       .then(() => undefined)

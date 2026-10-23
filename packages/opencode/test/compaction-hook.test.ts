@@ -8,6 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { SessionCompactionEvent, SessionMessageInfo } from "../src/host.ts";
 import { storedEntries } from "../src/map.ts";
+import { readMetricRows } from "../src/metrics.ts";
 import { setupOpencodeLossless } from "../src/plugin.ts";
 import { fakeHost, type FakeHost } from "./support/opencode-fake.ts";
 
@@ -102,6 +103,10 @@ function lastMetric(dir: string): MetricRow {
   return JSON.parse(rows[rows.length - 1] ?? "{}") as MetricRow;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 type Mode = "covered" | "uncovered" | "failing";
 
 interface Seeded {
@@ -112,7 +117,7 @@ interface Seeded {
   readonly summaryId?: number;
 }
 
-async function setup(mode: Mode, keep?: number): Promise<Seeded> {
+async function setup(mode: Mode, keep?: number, callBudget?: number): Promise<Seeded> {
   const dir = mkdtempSync(join(tmpdir(), "opencode-lossless-compact-hook-"));
   const mapped = storedEntries(SESSION, HISTORY);
   const budget = keep ?? keepFor(2);
@@ -154,6 +159,7 @@ async function setup(mode: Mode, keep?: number): Promise<Seeded> {
       contextWindow: CONTEXT_WINDOW,
       keepRecentTokens: budget,
       summaryTokens: 400,
+      ...(callBudget === undefined ? {} : { summarizerTokensPerCall: callBudget }),
     },
     {
       history: [...HISTORY],
@@ -251,6 +257,33 @@ describe("compaction checkpoint", () => {
         reason: "pass-failed",
       });
       expect(row.checkpoint).toBeUndefined();
+    } finally {
+      await seeded.cleanup();
+    }
+  });
+
+  it("passes the per-call budget into a blocking pass", async () => {
+    const seeded = await setup("uncovered", undefined, 1);
+    try {
+      const request = event(transcript());
+      await seeded.host.sessionHooks.compaction?.(request);
+
+      expect(seeded.calls()).toBe(0);
+      expect(request.result).toBeUndefined();
+      expect(lastMetric(seeded.dir)).toMatchObject({
+        kind: "compaction-checkpoint",
+        action: "fail",
+        reason: "pass-failed",
+      });
+      const capped = readMetricRows(seeded.dir).find(
+        (row): row is Record<string, unknown> => isRecord(row) && row.kind === "summarizer-capped",
+      );
+      expect(capped).toMatchObject({
+        stage: "blocking",
+        source: "budget",
+        reason: "call",
+        budgetTokens: 1,
+      });
     } finally {
       await seeded.cleanup();
     }

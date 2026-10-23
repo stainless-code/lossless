@@ -30,7 +30,12 @@ export interface LcmConfig {
   externalizeFiles?: boolean;
   summarizerTokensPerCall?: number;
   summarizerTokensPerPass?: number;
+  summarizerTokensPerHeal?: number;
 }
+
+/** Tokens one bounded repair run may spend across all of its calls. It is a
+ * separate budget because a heal re-derives nodes a pass already paid for. */
+export const DEFAULT_SUMMARIZER_TOKENS_PER_HEAL = 120_000;
 
 export const DEFAULT_CONFIG: LcmConfig = {
   summarizer: "auto",
@@ -46,6 +51,7 @@ export const DEFAULT_CONFIG: LcmConfig = {
   externalizeFiles: true,
   summarizerTokensPerCall: 60_000,
   summarizerTokensPerPass: 250_000,
+  summarizerTokensPerHeal: DEFAULT_SUMMARIZER_TOKENS_PER_HEAL,
 };
 
 export interface PassConditions {
@@ -119,6 +125,7 @@ const NUMBER_KEYS = [
   "largeFileChars",
   "summarizerTokensPerCall",
   "summarizerTokensPerPass",
+  "summarizerTokensPerHeal",
 ] as const satisfies readonly (keyof LcmConfig)[];
 const BOOLEAN_KEYS = [
   "redactSecrets",
@@ -148,6 +155,7 @@ const NUMBER_RANGES = {
   largeFileChars: (v: number) => v >= 1000,
   summarizerTokensPerCall: (v: number) => v >= 1,
   summarizerTokensPerPass: (v: number) => v >= 1,
+  summarizerTokensPerHeal: (v: number) => Number.isInteger(v) && v >= 1,
 } satisfies Record<(typeof NUMBER_KEYS)[number], (v: number) => boolean>;
 const KNOWN_KEYS: ReadonlySet<string> = new Set<keyof LcmConfig>([
   ...NUMBER_KEYS,

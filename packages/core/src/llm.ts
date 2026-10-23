@@ -1,7 +1,13 @@
 import { estimateTokens } from "./estimate-tokens.ts";
 import type { CompletionRequest, ModelAnswer, ModelHost, ModelRef, Notices } from "./host.ts";
 import { appendMetric, summarizerUsageRecord } from "./metrics.ts";
-import type { SummarizerFailureCategory, SummarizerOutcome, SummarizerStage } from "./metrics.ts";
+import type {
+  MetricsSink,
+  SummarizerFailureCategory,
+  SummarizerOutcome,
+  SummarizerStage,
+} from "./metrics.ts";
+import type { LlmComplete } from "./summarize.ts";
 
 export interface SummarizerConfig {
   /** One model id, or an ordered fallback chain. `auto` is the session model. */
@@ -98,6 +104,8 @@ export interface MakeLlmOptions {
   session: string;
   stage?: SummarizerStage;
   span: SummarizedSpan;
+  /** Where every row this completer writes goes. Defaults to the metrics log. */
+  sink?: MetricsSink;
 }
 
 /** Failed walks in a row before a pass stops calling the model and lets the
@@ -186,11 +194,12 @@ export function makeLlm<Model>(
   host: ModelHost<Model>,
   config: SummarizerConfig,
   opts: MakeLlmOptions,
-) {
+): LlmComplete | null {
   const { session, stage, span } = opts;
+  const emit = opts.sink ?? appendMetric;
   const resolved = resolveModels(host, config);
   const { models } = resolved;
-  if (resolved.unresolved.length > 0) reportUnresolved(host.notices, resolved, session);
+  if (resolved.unresolved.length > 0) reportUnresolved(host.notices, resolved, session, emit);
   const first = models[0];
   if (!first) return null;
   const fingerprint = spanFingerprint(
@@ -212,7 +221,7 @@ export function makeLlm<Model>(
   const refuseBudget = (reason: "call" | "pass", estimate: number): never => {
     if (!reported) {
       reported = true;
-      appendMetric({
+      emit({
         event: "lcm",
         kind: "summarizer-capped",
         stage,
@@ -236,7 +245,7 @@ export function makeLlm<Model>(
   const report = (category: SummarizerFailureCategory, paid: number, remembered: boolean): void => {
     if (reported) return;
     reported = true;
-    appendMetric({
+    emit({
       event: "lcm",
       kind: "summarizer-capped",
       stage,
@@ -257,97 +266,102 @@ export function makeLlm<Model>(
   };
 
   const order = [...models];
-  return async (systemPrompt: string, userText: string, maxTokens: number): Promise<string> => {
-    if (stopped) return refuse(stoppedBy, false);
-    // The request's own size is known before it is paid for, which is what makes
-    // this a cap rather than a report: the prompt, the source, and the output cap
-    // the provider is allowed to charge for.
-    const estimate =
-      estimateTokens(systemPrompt) + estimateTokens(userText) + Math.max(0, maxTokens);
-    if (estimate > callBudget) return refuseBudget("call", estimate);
-    if (spent + estimate > passBudget) return refuseBudget("pass", estimate);
-    const remembered = cappedSpans.get(fingerprint);
-    if (remembered && Date.now() - remembered.at < FAILED_SPAN_TTL_MS) {
-      // The memory is a fact about the span, so this completer is mechanical
-      // for its whole life once it has been refused: a pass that outlives the
-      // TTL would otherwise start paying again, and the one-shot cap row is
-      // already spent, so that second give-up would leave no record at all.
-      stopped = true;
-      stoppedBy = remembered.category;
-      return refuse(remembered.category, true);
-    }
-    const attempts: SummarizerAttempt[] = [];
-    let failure: SummarizerFailureCategory = "unknown";
-    // A slice on purpose: a failure reorders `order` mid-walk, and this call
-    // still visits each entry of the state it started with.
-    for (const model of order.slice()) {
-      const key = model.key;
-      let answer: string | null = null;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const result = await host.complete(
-            model,
-            requestOf(systemPrompt, userText, maxTokens, model),
-          );
-          // Recorded whether or not the answer is used: a rejected call and a
-          // model that is demoted mid-chain were both billed.
-          const row = summarizerUsageRecord(result.usage, {
-            model: key,
-            stage,
-            outcome: outcomeOf(result),
-            stopReason: result.stop,
-            session,
-          });
-          if (row) appendMetric(row);
-          // What the provider reported, which is what the pass budget counts: an
-          // estimate got the call refused, and only the report is spend.
-          spent += (row?.input ?? 0) + (row?.output ?? 0);
-          if (result.outcome === "failed") {
-            attempts.push({ model: key, outcome: "threw", error: result.reason });
-            failure = result.capped ? "length" : classifyFailure(result.reason);
-          } else if (result.text.trim().length > 0) {
-            attempts.push({ model: key, outcome: "ok" });
-            answer = result.text;
-          } else {
-            attempts.push({ model: key, outcome: "empty" });
-            failure = "empty";
+  const complete: LlmComplete = Object.assign(
+    async (systemPrompt: string, userText: string, maxTokens: number): Promise<string> => {
+      if (stopped) return refuse(stoppedBy, false);
+      // The request's own size is known before it is paid for, which is what makes
+      // this a cap rather than a report: the prompt, the source, and the output cap
+      // the provider is allowed to charge for.
+      const estimate =
+        estimateTokens(systemPrompt) + estimateTokens(userText) + Math.max(0, maxTokens);
+      if (estimate > callBudget) return refuseBudget("call", estimate);
+      if (spent + estimate > passBudget) return refuseBudget("pass", estimate);
+      const remembered = cappedSpans.get(fingerprint);
+      if (remembered && Date.now() - remembered.at < FAILED_SPAN_TTL_MS) {
+        // The memory is a fact about the span, so this completer is mechanical
+        // for its whole life once it has been refused: a pass that outlives the
+        // TTL would otherwise start paying again, and the one-shot cap row is
+        // already spent, so that second give-up would leave no record at all.
+        stopped = true;
+        stoppedBy = remembered.category;
+        return refuse(remembered.category, true);
+      }
+      const attempts: SummarizerAttempt[] = [];
+      let failure: SummarizerFailureCategory = "unknown";
+      // A slice on purpose: a failure reorders `order` mid-walk, and this call
+      // still visits each entry of the state it started with.
+      for (const model of order.slice()) {
+        const key = model.key;
+        let answer: string | null = null;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const result = await host.complete(
+              model,
+              requestOf(systemPrompt, userText, maxTokens, model),
+            );
+            // Recorded whether or not the answer is used: a rejected call and a
+            // model that is demoted mid-chain were both billed.
+            const row = summarizerUsageRecord(result.usage, {
+              model: key,
+              stage,
+              outcome: outcomeOf(result),
+              stopReason: result.stop,
+              session,
+            });
+            if (row) emit(row);
+            // What the provider reported, which is what the pass budget counts: an
+            // estimate got the call refused, and only the report is spend.
+            spent += (row?.input ?? 0) + (row?.output ?? 0);
+            if (result.outcome === "failed") {
+              attempts.push({ model: key, outcome: "threw", error: result.reason });
+              failure = result.capped ? "length" : classifyFailure(result.reason);
+            } else if (result.text.trim().length > 0) {
+              attempts.push({ model: key, outcome: "ok" });
+              answer = result.text;
+            } else {
+              attempts.push({ model: key, outcome: "empty" });
+              failure = "empty";
+            }
+          } catch (error) {
+            attempts.push({ model: key, outcome: "threw", error: message(error) });
+            failure = classifyFailure(message(error));
           }
-        } catch (error) {
-          attempts.push({ model: key, outcome: "threw", error: message(error) });
-          failure = classifyFailure(message(error));
+          if (answer !== null || !retriableCategory(failure)) break;
         }
-        if (answer !== null || !retriableCategory(failure)) break;
+        if (answer !== null) {
+          consecutive = 0;
+          reportFallback(attempts, key, session, emit);
+          return answer;
+        }
+        demote(order, model);
       }
-      if (answer !== null) {
-        consecutive = 0;
-        reportFallback(attempts, key, session);
-        return answer;
+      reportFallback(attempts, null, session, emit);
+      consecutive++;
+      if (consecutive >= SUMMARIZER_FAILURE_CAP) {
+        stopped = true;
+        stoppedBy = failure;
+        cappedSpans.set(fingerprint, { at: Date.now(), category: failure });
+        const oldest = cappedSpans.keys().next().value;
+        if (oldest !== undefined && cappedSpans.size > CAPPED_SPAN_MEMORY)
+          cappedSpans.delete(oldest);
+        report(failure, consecutive, false);
       }
-      demote(order, model);
-    }
-    reportFallback(attempts, null, session);
-    consecutive++;
-    if (consecutive >= SUMMARIZER_FAILURE_CAP) {
-      stopped = true;
-      stoppedBy = failure;
-      cappedSpans.set(fingerprint, { at: Date.now(), category: failure });
-      const oldest = cappedSpans.keys().next().value;
-      if (oldest !== undefined && cappedSpans.size > CAPPED_SPAN_MEMORY) cappedSpans.delete(oldest);
-      report(failure, consecutive, false);
-    }
-    // Every model answering with no text is the empty-response signal; only a
-    // chain where every call threw is an error. The walk that spent the last
-    // of the budget answers like any other, because it was paid for: what the
-    // cap row speaks for is the refusals after it.
-    if (attempts.some((a) => a.outcome === "empty")) return "";
-    const failures = attempts.flatMap((a) =>
-      a.outcome === "threw" ? [`${a.model}: ${a.error}`] : [],
-    );
-    throw new SummarizerFailure(
-      `lcm: every summarizer model failed (${failures.join("; ")})`,
-      failure,
-    );
-  };
+      // Every model answering with no text is the empty-response signal; only a
+      // chain where every call threw is an error. The walk that spent the last
+      // of the budget answers like any other, because it was paid for: what the
+      // cap row speaks for is the refusals after it.
+      if (attempts.some((a) => a.outcome === "empty")) return "";
+      const failures = attempts.flatMap((a) =>
+        a.outcome === "threw" ? [`${a.model}: ${a.error}`] : [],
+      );
+      throw new SummarizerFailure(
+        `lcm: every summarizer model failed (${failures.join("; ")})`,
+        failure,
+      );
+    },
+    { metrics: emit },
+  );
+  return complete;
 }
 
 function demote<Model>(order: ModelRef<Model>[], model: ModelRef<Model>): void {
@@ -357,9 +371,14 @@ function demote<Model>(order: ModelRef<Model>[], model: ModelRef<Model>): void {
   order.push(model);
 }
 
-function reportFallback(attempts: SummarizerAttempt[], used: string | null, session: string): void {
+function reportFallback(
+  attempts: SummarizerAttempt[],
+  used: string | null,
+  session: string,
+  emit: MetricsSink,
+): void {
   if (attempts.length < 2) return;
-  appendMetric({ event: "lcm", kind: "summarizer-fallback", attempts, used, session });
+  emit({ event: "lcm", kind: "summarizer-fallback", attempts, used, session });
 }
 
 /** Report an unresolved entry once per chain per session, in metrics and in the
@@ -369,6 +388,7 @@ function reportUnresolved<Model>(
   notices: Notices,
   resolved: ResolvedChain<Model>,
   session: string,
+  emit: MetricsSink,
 ): void {
   const report = describeSummarizerChain(resolved);
   if (report.level !== "warning") return;
@@ -377,7 +397,7 @@ function reportUnresolved<Model>(
   if (warned.has(signature)) return;
   warned.add(signature);
   if (notices.kind === "ui") notices.notify(`LCM: ${report.warning}`, report.level);
-  appendMetric({
+  emit({
     event: "lcm",
     kind: "summarizer-model",
     requested: resolved.requested,

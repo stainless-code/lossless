@@ -1,9 +1,9 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { ingestEntries, LcmStore, type AlignedEntry } from "lossless-core";
+import { ingestEntries, LcmStore, metricsPath, type AlignedEntry } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { GenerateText, ModelDomain, OpencodeContext } from "../src/host.ts";
@@ -20,18 +20,22 @@ function sidecarPath(): string {
   return join(mkdtempSync(join(tmpdir(), "opencode-lossless-pass-")), "sidecar.sqlite");
 }
 
-function seeded(): { store: LcmStore; path: string; entries: AlignedEntry[] } {
+function seeded(session: string = SESSION): {
+  store: LcmStore;
+  path: string;
+  entries: AlignedEntry[];
+} {
   const path = sidecarPath();
   const store = new LcmStore(path);
   ingestEntries(store, [
     {
-      entryId: `${SESSION}:prompt:msg_1`,
+      entryId: `${session}:prompt:msg_1`,
       role: "user",
       text: LONG_USER,
       timestamp: 1,
     },
     {
-      entryId: `${SESSION}:text:msg_2:0`,
+      entryId: `${session}:text:msg_2:0`,
       role: "assistant",
       text: LONG_ASSISTANT,
       timestamp: 2,
@@ -41,8 +45,8 @@ function seeded(): { store: LcmStore; path: string; entries: AlignedEntry[] } {
     store,
     path,
     entries: [
-      { entryId: `${SESSION}:prompt:msg_1`, role: "user", text: LONG_USER },
-      { entryId: `${SESSION}:text:msg_2:0`, role: "assistant", text: LONG_ASSISTANT },
+      { entryId: `${session}:prompt:msg_1`, role: "user", text: LONG_USER },
+      { entryId: `${session}:text:msg_2:0`, role: "assistant", text: LONG_ASSISTANT },
     ],
   };
 }
@@ -66,6 +70,28 @@ function countRows(path: string, where: string): number {
   } finally {
     db.close();
   }
+}
+
+function coreLogMark(): number {
+  try {
+    return readFileSync(metricsPath(), "utf8").length;
+  } catch {
+    return 0;
+  }
+}
+
+function coreRowsForSince(mark: number, session: string): Array<Record<string, unknown>> {
+  let raw = "";
+  try {
+    raw = readFileSync(metricsPath(), "utf8").slice(mark).trim();
+  } catch {
+    return [];
+  }
+  if (raw.length === 0) return [];
+  return raw
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((row) => row.session === session);
 }
 
 describe("runLosslessPass", () => {
@@ -92,20 +118,122 @@ describe("runLosslessPass", () => {
     }
   });
 
+  it("routes every pass row through deps.record and never the core log", async () => {
+    const session = "ses_pass_sink";
+    const { store, entries } = seeded(session);
+    try {
+      const rows: Array<Record<string, unknown>> = [];
+      const mark = coreLogMark();
+      const outcome = await runLosslessPass(
+        {
+          store: () => store,
+          ctx: ctxWith({ text: () => Promise.resolve({ text: "a terse summary" }) }),
+          model: MODEL,
+          record: (row) => rows.push(row),
+        },
+        session,
+        entries,
+        { targetTokens: 200, stage: "direct" },
+      );
+      expect(outcome.kind).toBe("stored");
+      for (const kind of ["summary-stored", "summarizer-usage", "compaction-complete", "pass"]) {
+        expect(rows.some((row) => row.kind === kind)).toBe(true);
+      }
+      expect(rows.every((row) => row.session === session)).toBe(true);
+      expect(coreRowsForSince(mark, session)).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("labels completer and engine rows with the direct stage", async () => {
+    const session = "ses_pass_direct";
+    const { store, entries } = seeded(session);
+    try {
+      const rows: Array<Record<string, unknown>> = [];
+      const outcome = await runLosslessPass(
+        {
+          store: () => store,
+          ctx: ctxWith({ text: () => Promise.resolve({ text: "x".repeat(2000) }) }),
+          model: MODEL,
+          record: (row) => rows.push(row),
+        },
+        session,
+        entries,
+        { targetTokens: 10, stage: "direct" },
+      );
+      expect(outcome.kind).toBe("stored");
+      const usage = rows.filter((row) => row.kind === "summarizer-usage");
+      expect(usage.length).toBeGreaterThan(0);
+      expect(usage.map((row) => row.stage)).toEqual(usage.map(() => "direct"));
+      expect(usage.every((row) => row.estimated === true)).toBe(true);
+      const truncated = rows.filter((row) => row.kind === "summary-final-truncated");
+      expect(truncated).toHaveLength(1);
+      expect(truncated[0]?.stage).toBe("direct");
+      expect(rows.filter((row) => row.stage === "blocking")).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("passes the per-call budget into the completer and records the cap", async () => {
+    const session = "ses_pass_budget";
+    const { store, entries } = seeded(session);
+    try {
+      const rows: Array<Record<string, unknown>> = [];
+      await expect(
+        runLosslessPass(
+          {
+            store: () => store,
+            ctx: ctxWith({ text: () => Promise.resolve({ text: "unused" }) }),
+            model: MODEL,
+            record: (row) => rows.push(row),
+          },
+          session,
+          entries,
+          {
+            targetTokens: 200,
+            stage: "direct",
+            summarizer: { summarizerTokensPerCall: 1 },
+          },
+        ),
+      ).rejects.toThrow(/summarizer did not answer/);
+      expect(rows.find((row) => row.kind === "summarizer-capped")).toMatchObject({
+        session,
+        stage: "direct",
+        source: "budget",
+        reason: "call",
+        budgetTokens: 1,
+      });
+      expect(rows.filter((row) => row.kind === "summarizer-usage")).toEqual([]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("abandons the run when the model fails and stores nothing", async () => {
     const { store, path, entries } = seeded();
     try {
+      const rows: Array<Record<string, unknown>> = [];
       const ctx = ctxWith({
         text: () => Promise.reject(new Error("provider down")),
       });
       await expect(
-        runLosslessPass({ store: () => store, ctx, model: MODEL }, SESSION, entries, {
-          targetTokens: 200,
-        }),
+        runLosslessPass(
+          { store: () => store, ctx, model: MODEL, record: (row) => rows.push(row) },
+          SESSION,
+          entries,
+          { targetTokens: 200 },
+        ),
       ).rejects.toThrow(/summarizer did not answer/);
       expect(countRows(path, "status = 'pending'")).toBe(0);
       expect(countRows(path, "status = 'committed'")).toBe(0);
       expect(store.stats().summaries).toBe(0);
+      expect(rows.find((row) => row.kind === "compaction-abandoned")).toMatchObject({
+        session: SESSION,
+        stage: "blocking",
+        dropped: 1,
+      });
     } finally {
       store.close();
     }
