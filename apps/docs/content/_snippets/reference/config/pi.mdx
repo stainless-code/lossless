@@ -18,6 +18,7 @@ Strict JSON: comments and trailing commas are rejected. A file that does not par
 | `zones`                   | object             | unset    | map of `"provider/id"` to thresholds | Per-model threshold overrides.                                              |
 | `summaryTokens`           | number             | `1500`   | `>= 1`                               | Target size of one summary.                                                 |
 | `leafChunkTokens`         | number             | `3000`   | `>= 1`                               | Source tokens folded into one leaf summary.                                 |
+| `healSourceTokens`        | number             | derived  | `1` to `24000`                       | Source tokens one heal node may read. Defaults to `8 x summaryTokens`, clamped to `3000` through `24000` and to `summarizerTokensPerCall`. Shared across the whole node, not applied per message. |
 | `keepRecentTokens`        | number             | `20000`  | `>= 0`                               | Messages this recent stay verbatim in the projection.                       |
 | `maxAsyncChunks`          | number             | `24`     | `>= 1`                               | Chunks one asynchronous pass may summarize before it yields.                |
 | `redactSecrets`           | boolean            | `true`   |                                      | Mask secret-shaped text on its way to a model. Never affects storage.       |

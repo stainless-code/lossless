@@ -934,5 +934,17 @@ export default function (pi: ExtensionAPI) {
     getCommitState: () => commitState,
     getDbPath: (sessionFile) => lcmDataPath(sessionFile),
     keepRecentTokens: keepRecent,
+    healBudgets: () => {
+      const targetTokens = scaledBudget(config.summaryTokens ?? 1500, sessionCharsPerToken);
+      const sourceTokens =
+        config.healSourceTokens === undefined
+          ? undefined
+          : scaledBudget(config.healSourceTokens, sessionCharsPerToken);
+      return {
+        targetTokens,
+        callBudgetTokens: config.summarizerTokensPerCall ?? 60_000,
+        ...(sourceTokens === undefined ? {} : { sourceTokens }),
+      };
+    },
   });
 }

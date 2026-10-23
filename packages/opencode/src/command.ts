@@ -199,7 +199,8 @@ export function formatMetricsReport(rows: readonly unknown[], sessionID: string)
     const lastStop = stringOf(lastHeal?.stop) ?? "(unrecorded)";
     lines.push(
       `heal: ${heals.length} run(s), ${sumField(heals, "repaired")} repaired, ` +
-        `${sumField(heals, "failed")} failed, ${sumField(heals, "blocked")} blocked; ` +
+        `${sumField(heals, "improved")} improved, ${sumField(heals, "failed")} failed, ` +
+        `${sumField(heals, "blocked")} blocked (${sumField(heals, "blockedSource")} source); ` +
         `${sumField(heals, "calls")} call(s); ${sumField(heals, "skipped")} skipped, ` +
         `${sumField(heals, "changedCount")} changed, ${sumField(heals, "notAttempted")} remaining; ` +
         `last stop ${lastStop}`,

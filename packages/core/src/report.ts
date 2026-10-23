@@ -48,11 +48,14 @@ const NUMBER_FIELDS = [
   "maxCalls",
   "attempted",
   "repaired",
+  "improved",
   "blocked",
+  "blockedSource",
   "skipped",
   "changedCount",
   "notAttempted",
   "calls",
+  "callBudgetTokens",
   "levelBefore",
   "levelAfter",
   "renderedTokens",
@@ -143,6 +146,7 @@ const BOOLEAN_FIELDS = [
   "estimated",
   "dryRun",
   "tainted",
+  "sourceClipped",
 ] as const;
 
 type AssertNever<T extends never> = T;
@@ -509,9 +513,9 @@ export function buildReport(events: readonly MetricsEvent[]): string {
     lines.push(
       `## Summary heal (${healRuns.length} ${healRuns.length === 1 ? "run" : "runs"})`,
       "",
-      "| repaired | failed | blocked | skipped | calls | estimated tokens |",
-      "| -------- | ------ | ------- | ------- | ----- | ---------------- |",
-      `| ${count("repaired")} | ${count("failed")} | ${count("blocked")} | ${count("skipped")} | ${count("calls")} | ${fmtTokens(count("tokens"))} |`,
+      "| repaired | improved | failed | blocked (source) | skipped | calls | estimated tokens |",
+      "| -------- | -------- | ------ | ---------------- | ------- | ----- | ---------------- |",
+      `| ${count("repaired")} | ${count("improved")} | ${count("failed")} | ${count("blocked")} (${count("blockedSource")}) | ${count("skipped")} | ${count("calls")} | ${fmtTokens(count("tokens"))} |`,
       "",
       `Stop reasons: ${[...stops.entries()].map(([stop, n]) => `${stop} ${n}`).join(", ")}.`,
       "",

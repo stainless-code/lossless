@@ -419,7 +419,13 @@ export type CompactionCompleteRow = LcmRowBase & {
  * no level of its own, which is why the detection walks provenance. `levelAfter`
  * is null when nothing was stored, so a rejected level-3 answer leaves the old
  * text and no quality claim behind. */
-export type HealNodeOutcomeKind = "repaired" | "failed" | "blocked" | "skipped" | "changed";
+export type HealNodeOutcomeKind =
+  | "repaired"
+  | "improved"
+  | "failed"
+  | "blocked"
+  | "skipped"
+  | "changed";
 
 /** Why a heal run stopped. `dry-run` reports a plan without a model call. */
 export type HealStopReason =
@@ -438,6 +444,9 @@ export type HealStartRow = LcmRowBase & {
   maxCalls: number;
   maxTokens: number;
   targetTokens: number;
+  /** The effective whole-node source window and the request cap that bounded it. */
+  sourceTokens: number;
+  callBudgetTokens: number;
   dryRun: boolean;
 };
 
@@ -458,6 +467,10 @@ export type HealNodeRow = LcmRowBase & {
   calls: number;
   outcome: HealNodeOutcomeKind;
   reason?: string;
+  /** Source facts only. Source and summary text never reach the metrics log. */
+  sourceTokens?: number;
+  sourceChars?: number;
+  sourceClipped?: boolean;
 };
 
 export type HealCompleteRow = LcmRowBase & {
@@ -466,14 +479,19 @@ export type HealCompleteRow = LcmRowBase & {
   candidates: number;
   attempted: number;
   repaired: number;
+  improved: number;
   failed: number;
   blocked: number;
+  blockedSource: number;
   skipped: number;
   changedCount: number;
   notAttempted: number;
   calls: number;
   tokens: number;
+  sourceTokens: number;
+  callBudgetTokens: number;
   repairedIds: number[];
+  improvedIds: number[];
 };
 
 /** A summarizer call that answered with nothing, or that threw. An empty answer

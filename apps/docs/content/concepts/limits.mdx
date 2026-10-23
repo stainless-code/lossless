@@ -52,8 +52,9 @@ The index and the summarizer read a message's derived text, which is not always 
 | Summarizer call budget | `summarizerTokensPerCall`, default 60,000 | Refused before the provider is called. |
 | Summarizer pass budget | `summarizerTokensPerPass`, default 250,000 | Once crossed, the rest of the pass uses the mechanical truncate. |
 | Heal budget | `summarizerTokensPerHeal`, default 120,000 | Ceiling on one on-demand repair run. |
+| Heal source window | `healSourceTokens`, default `8 x summaryTokens` clamped to 3,000 through 24,000 | Source tokens one repair node may read. It is a whole-node window, not a per-message clip. |
 
-A pass that cannot meet its summary budget records `condensation-stalled` rather than evicting a frontier node. A tainted node can be repaired from its stored source with `/lcm heal --apply` in Pi or `/lossless-heal --apply` in OpenCode.
+A pass that cannot meet its summary budget records `condensation-stalled` rather than evicting a frontier node. A tainted node can be repaired from its stored source with `/lcm heal --apply` in Pi or `/lossless-heal --apply` in OpenCode. A clipped or derived node whose source still exceeds the heal window is blocked without a model call; raising the window makes the next run attempt it again. A mechanical node gets one improvement, because a model summary over a clipped source is still better than the deterministic truncate.
 
 ## One engine per session
 

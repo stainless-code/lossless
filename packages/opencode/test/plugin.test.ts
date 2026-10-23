@@ -115,6 +115,13 @@ describe("setupOpencodeLossless", () => {
     }
   });
 
+  it("resolves healSourceTokens and ignores an override above the hard cap", () => {
+    expect(readOptions({ healSourceTokens: 18_000 }).healSourceTokens).toBe(18_000);
+    for (const raw of [0, -1, 1.5, 24_001, "many"]) {
+      expect(readOptions({ healSourceTokens: raw }).healSourceTokens).toBeUndefined();
+    }
+  });
+
   it("mounts the mirror, the recall tools, and the status command", async () => {
     const host = fakeHost({ sidecarDir: tempDir(), assembly: false });
     const cleanup = await setupOpencodeLossless(host.ctx, host.options);
@@ -354,7 +361,7 @@ describe("setupOpencodeLossless", () => {
       expect(host.prompts).toEqual([
         {
           sessionID,
-          text: "LCM heal dry-run: 1 candidate(s), 1 tainted; run `/lossless-heal --apply` to repair.",
+          text: "LCM heal dry-run: 1 candidate(s), 1 tainted, 12000 source tokens; run `/lossless-heal --apply` to repair.",
         },
       ]);
     } finally {
@@ -400,7 +407,7 @@ describe("setupOpencodeLossless", () => {
       expect(host.prompts).toEqual([
         {
           sessionID,
-          text: "LCM heal: repaired 1, failed 0, blocked 0, remaining 0; 1 model call(s).",
+          text: "LCM heal: repaired 1 clean, improved 0, failed 0, blocked 0, remaining 0; 1 model call(s).",
         },
       ]);
     } finally {

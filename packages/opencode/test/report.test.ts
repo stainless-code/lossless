@@ -203,7 +203,9 @@ describe("lossless report", () => {
       ],
       SESSION,
     );
-    expect(text).toContain("heal: 1 run(s), 2 repaired, 1 failed, 0 blocked; 3 call(s)");
+    expect(text).toContain(
+      "heal: 1 run(s), 2 repaired, 0 improved, 1 failed, 0 blocked (0 source); 3 call(s)",
+    );
   });
 
   it("says so when the session has no rows", () => {

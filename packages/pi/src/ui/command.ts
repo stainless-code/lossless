@@ -53,6 +53,9 @@ export interface LcmCommandDeps {
   getCommitState: () => CommitState | null;
   getDbPath(sessionFile: string | undefined): string;
   keepRecentTokens(): number;
+  /** The calibrated heal target and source window. The command itself has no
+   * session calibration, so Pi resolves both from the same sample. */
+  healBudgets?: () => { targetTokens: number; sourceTokens?: number; callBudgetTokens: number };
 }
 
 export const LCM_SUBCOMMANDS = [
@@ -121,11 +124,13 @@ function healNotice(outcome: HealOutcome): string {
   if (outcome.dryRun) {
     return outcome.counts.candidates === 0
       ? "LCM heal dry-run: no truncated summaries or stale ancestors; nothing to repair."
-      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} tainted; run \`/lcm heal --apply\` to repair.`;
+      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} tainted, ${outcome.sourceTokens} source tokens; run \`/lcm heal --apply\` to repair.`;
   }
   const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
   const changed = outcome.counts.changed === 0 ? "" : `, changed ${outcome.counts.changed}`;
-  return `LCM heal: repaired ${outcome.counts.repaired}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}${changed}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
+  const blockedSource =
+    outcome.counts.blockedSource === 0 ? "" : ` (${outcome.counts.blockedSource} source)`;
+  return `LCM heal: repaired ${outcome.counts.repaired} clean, improved ${outcome.counts.improved}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}${blockedSource}${changed}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
 }
 
 export function registerLcmCommand(
@@ -524,14 +529,18 @@ export function registerLcmCommand(
         }
         const healTokens = config.summarizerTokensPerHeal ?? DEFAULT_SUMMARIZER_TOKENS_PER_HEAL;
         healInFlight.add(session);
-        const targetTokens = config.summaryTokens ?? 1500;
+        const budgets = deps.healBudgets?.() ?? {
+          targetTokens: config.summaryTokens ?? 1500,
+          callBudgetTokens: config.summarizerTokensPerCall ?? 60_000,
+        };
+        const configuredSource = budgets.sourceTokens ?? config.healSourceTokens;
         const redact = makeRedact(deps.getConfig);
         const maxNodeInput = maxNodes.kind === "value" ? { maxNodes: maxNodes.value } : {};
         const budgetInput = {
           maxTokens: healTokens,
-          ...(config.leafChunkTokens === undefined
-            ? {}
-            : { leafChunkTokens: config.leafChunkTokens }),
+          targetTokens: budgets.targetTokens,
+          callBudgetTokens: budgets.callBudgetTokens,
+          ...(configuredSource === undefined ? {} : { sourceTokens: configuredSource }),
         };
         try {
           if (apply) {
@@ -558,7 +567,7 @@ export function registerLcmCommand(
             }
             const outcome = await runHeal(
               store,
-              { session, targetTokens, redact, ...budgetInput, ...maxNodeInput },
+              { session, redact, ...budgetInput, ...maxNodeInput },
               llm,
             );
             ctx.ui.notify(healNotice(outcome), outcome.failed.length > 0 ? "warning" : "info");
@@ -566,7 +575,7 @@ export function registerLcmCommand(
           }
           const outcome = await runHeal(
             store,
-            { session, targetTokens, redact, dryRun: true, ...budgetInput, ...maxNodeInput },
+            { session, redact, dryRun: true, ...budgetInput, ...maxNodeInput },
             healDryRunLlm,
           );
           ctx.ui.notify(healNotice(outcome), "info");

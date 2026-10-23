@@ -67,6 +67,8 @@ A chain entry is tried in order and skipped when the registry cannot find it, wh
 
 The defaults sit far above what a healthy pass spends. A pass that respects `summaryTokens` and `leafChunkTokens` costs a fraction of either cap.
 
+A heal reads a whole node's source through one window derived from `summaryTokens` (8x, clamped 3,000 through 24,000 and to `summarizerTokensPerCall`). Set `healSourceTokens` when a single stored message is larger than that window. A clipped or derived node that still exceeds the window is blocked with no model call, not retried at the same size; a mechanical node gets one improvement. Raising the window makes the next run attempt it again.
+
 ## Turn large bodies into handles, mask what leaves
 
 - `largeFileChars` plus `externalizeFiles`: a body read from a named path at or above the threshold becomes a file handle (path, content id, kind, exploration summary, bounded preview) that the summarizer reads instead of a clipped wall of text. The bytes stay in the message row. A body that large with no path is stored as text and recorded as `large-inline`.

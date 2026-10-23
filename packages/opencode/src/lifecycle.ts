@@ -46,6 +46,7 @@ export interface LifecycleOptions extends SummarizerOptions {
   readonly swapAtRatio: number;
   readonly recutAtRatio: number;
   readonly keepRecentTokens: number;
+  readonly healSourceTokens?: number;
   readonly smartZone?: number;
   readonly zones?: Readonly<Record<string, ThresholdConfig>>;
 }
@@ -304,6 +305,9 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
               ...(deps.options.summarizerTokensPerHeal === undefined
                 ? {}
                 : { summarizerTokensPerHeal: deps.options.summarizerTokensPerHeal }),
+              ...(deps.options.healSourceTokens === undefined
+                ? {}
+                : { healSourceTokens: deps.options.healSourceTokens }),
               ...(deps.options.zones === undefined ? {} : { zones: deps.options.zones }),
             }),
             path: "opencode.json plugin options",
@@ -599,9 +603,11 @@ export function healReport(outcome: HealOutcome): string {
   if (outcome.dryRun) {
     return outcome.counts.candidates === 0
       ? "LCM heal dry-run: no truncated summaries or stale ancestors; nothing to repair."
-      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} tainted; run \`/lossless-heal --apply\` to repair.`;
+      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} tainted, ${outcome.sourceTokens} source tokens; run \`/lossless-heal --apply\` to repair.`;
   }
   const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
   const changed = outcome.counts.changed === 0 ? "" : `, changed ${outcome.counts.changed}`;
-  return `LCM heal: repaired ${outcome.counts.repaired}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}${changed}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
+  const blockedSource =
+    outcome.counts.blockedSource === 0 ? "" : ` (${outcome.counts.blockedSource} source)`;
+  return `LCM heal: repaired ${outcome.counts.repaired} clean, improved ${outcome.counts.improved}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}${blockedSource}${changed}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
 }

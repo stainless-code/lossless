@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 
 import { estimateTokens } from "../src/estimate-tokens.ts";
-import { runHeal } from "../src/heal.ts";
+import { healSourceBudget, runHeal } from "../src/heal.ts";
 import { ingestEntries } from "../src/ingest.ts";
 import { SummarizerFailure } from "../src/llm.ts";
 import type { LcmMetricRecord, MetricRecord } from "../src/metrics.ts";
@@ -109,6 +109,20 @@ function summary(store: LcmStore, id: number): SummaryNode {
   return node;
 }
 
+test("heal: the source window derives from the target and stays inside the call budget", () => {
+  assert.equal(healSourceBudget({ targetTokens: 1500 }), 12_000);
+  assert.equal(healSourceBudget({ targetTokens: 500 }), 4_000);
+  assert.equal(healSourceBudget({ targetTokens: 100 }), 3_000);
+  assert.equal(healSourceBudget({ targetTokens: 5_000 }), 24_000);
+  assert.equal(healSourceBudget({ targetTokens: 1_500, sourceTokens: 20_000 }), 20_000);
+  assert.equal(healSourceBudget({ targetTokens: 1_500, sourceTokens: 100_000 }), 24_000);
+  assert.equal(
+    healSourceBudget({ targetTokens: 1_000, callBudgetTokens: 5_000 }),
+    2_976,
+    "the request cap reserves the target and prompt",
+  );
+});
+
 test("heal: a truncated leaf is re-derived from its provenance and its stale rich tier is cleared", async () => {
   const { store, messages } = storeWithMessages(2);
   try {
@@ -177,18 +191,20 @@ test("heal: a truncated leaf is re-derived from its provenance and its stale ric
   }
 });
 
-test("heal: a clipped source repairs the node as clipped, not clean", async () => {
+test("heal: a clipped source improves a mechanical node but is not called a repair", async () => {
   const { store, messages } = storeWithMessages(2);
   try {
     const leaf = insertLeaf(store, messages, "[lcm:truncated]\nmechanical");
     const rows: MetricRecord[] = [];
     const llm = scripted(() => "healed from clipped source", [], rows);
 
-    const outcome = await runHeal(store, { targetTokens: 100, leafChunkTokens: 10 }, llm);
+    const outcome = await runHeal(store, { targetTokens: 100, sourceTokens: 10 }, llm);
 
-    assert.deepEqual(outcome.repaired, [leaf]);
+    assert.deepEqual(outcome.repaired, []);
+    assert.deepEqual(outcome.improved, [leaf]);
     assert.equal(summary(store, leaf).quality, "clipped");
     const nodes = rowsOf(rows, "heal-node");
+    assert.equal(nodes[0]?.outcome, "improved");
     assert.equal(nodes[0]?.qualityAfter, "clipped");
     assert.ok(
       rowsOf(rows, "summary-input-clipped").length > 0,
@@ -196,8 +212,124 @@ test("heal: a clipped source repairs the node as clipped, not clean", async () =
     );
     assert.ok(
       store.taintedSummaries("[lcm:truncated]").some((node) => node.id === leaf),
-      "a clipped repair remains a candidate",
+      "a clipped improvement remains a candidate",
     );
+  } finally {
+    store.close();
+  }
+});
+
+test("heal: a whole-node window covers one large source message and stores clean", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const text = `large tool result ${"z".repeat(39_000)}`;
+    ingestEntries(store, [{ entryId: "e0", role: "toolResult", text, timestamp: 0 }]);
+    const message = store.messageByEntryId("e0");
+    assert.ok(message);
+    const leaf = insertLeaf(store, [message], "[lcm:truncated]\nmechanical");
+    const calls: string[] = [];
+    const llm = scripted(() => "large source healed", calls);
+
+    const outcome = await runHeal(store, { targetTokens: 1500 }, llm);
+
+    assert.deepEqual(outcome.repaired, [leaf]);
+    assert.equal(outcome.sourceTokens, 12_000);
+    assert.equal(summary(store, leaf).quality, "clean");
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0]!.includes("large tool result"));
+  } finally {
+    store.close();
+  }
+});
+
+test("heal: a short message does not spend the window a long message needs", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      { entryId: "e0", role: "toolResult", text: `long ${"z".repeat(39_000)}`, timestamp: 0 },
+      { entryId: "e1", role: "user", text: "short follow-up", timestamp: 1 },
+    ]);
+    const messages = store.messagesInSpan("e0", "e1");
+    const leaf = insertLeaf(store, messages, "[lcm:truncated]\nmechanical");
+    const calls: string[] = [];
+    const llm = scripted(() => "shared window healed", calls);
+
+    const outcome = await runHeal(store, { targetTokens: 1500 }, llm);
+
+    assert.deepEqual(outcome.repaired, [leaf]);
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0]!.includes("long "));
+    assert.ok(calls[0]!.includes("short follow-up"));
+    assert.equal(summary(store, leaf).quality, "clean");
+  } finally {
+    store.close();
+  }
+});
+
+test("heal: a clipped non-mechanical node is blocked with no call until the window fits", async () => {
+  const { store, messages } = storeWithMessages(2);
+  try {
+    const leaf = insertLeaf(store, messages, "clipped model summary", undefined, "clipped");
+    const calls: string[] = [];
+    const llm = scripted(() => "healed", calls);
+
+    const first = await runHeal(store, { targetTokens: 100, sourceTokens: 10 }, llm);
+
+    assert.deepEqual(first.repaired, []);
+    assert.deepEqual(first.improved, []);
+    assert.deepEqual(first.blockedSource, [leaf]);
+    assert.deepEqual(first.failed, []);
+    assert.equal(first.calls, 0);
+    assert.equal(calls.length, 0, "an over-window clipped node is not retried");
+    assert.equal(summary(store, leaf).text, "clipped model summary");
+
+    const second = await runHeal(store, { targetTokens: 100, sourceTokens: 3_000 }, llm);
+
+    assert.deepEqual(second.repaired, [leaf]);
+    assert.equal(summary(store, leaf).quality, "clean");
+    assert.equal(calls.length, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("heal: a source-blocked node does not spend the maxNodes allowance", async () => {
+  const { store, messages } = storeWithMessages(2);
+  try {
+    const leaf = insertLeaf(store, messages, "clipped model summary", undefined, "clipped");
+    const parent = insertCondensed(store, [leaf], "[lcm:truncated]\nparent", 1, "mechanical");
+    const calls: string[] = [];
+    const llm = scripted(() => "parent improved", calls);
+
+    const outcome = await runHeal(store, { targetTokens: 100, sourceTokens: 10, maxNodes: 1 }, llm);
+
+    assert.deepEqual(outcome.blockedSource, [leaf]);
+    assert.deepEqual(outcome.improved, [parent]);
+    assert.deepEqual(outcome.notAttempted, []);
+    assert.equal(outcome.calls, 1);
+    assert.equal(calls.length, 1);
+    assert.equal(summary(store, parent).text, "parent improved");
+  } finally {
+    store.close();
+  }
+});
+
+test("heal: a mechanical node over the window improves once, then is blocked", async () => {
+  const { store, messages } = storeWithMessages(2);
+  try {
+    const leaf = insertLeaf(store, messages, "[lcm:truncated]\nmechanical");
+    const calls: string[] = [];
+    const llm = scripted(() => "improved but still clipped", calls);
+
+    const first = await runHeal(store, { targetTokens: 100, sourceTokens: 10 }, llm);
+    assert.deepEqual(first.improved, [leaf]);
+    assert.equal(first.calls, 1);
+    assert.equal(summary(store, leaf).quality, "clipped");
+
+    const second = await runHeal(store, { targetTokens: 100, sourceTokens: 10 }, llm);
+    assert.deepEqual(second.blockedSource, [leaf]);
+    assert.equal(second.calls, 0);
+    assert.equal(calls.length, 1, "the same window does not buy another clipped attempt");
   } finally {
     store.close();
   }
@@ -468,8 +600,10 @@ test("heal: dry run reports the candidate graph and makes zero calls", async () 
       tainted: 1,
       attempted: 0,
       repaired: 0,
+      improved: 0,
       failed: 0,
       blocked: 0,
+      blockedSource: 0,
       skipped: 0,
       changed: 0,
       notAttempted: 0,

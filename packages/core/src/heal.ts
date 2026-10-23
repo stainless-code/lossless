@@ -1,6 +1,6 @@
 import { CHARS_PER_TOKEN, estimateTokens } from "./estimate-tokens.ts";
 import { filePreviewText } from "./files.ts";
-import { SummarizerFailure } from "./llm.ts";
+import { SUMMARIZER_CALL_TOKENS, SummarizerFailure } from "./llm.ts";
 import {
   appendMetric,
   type HealNodeOutcomeKind,
@@ -17,17 +17,42 @@ import { summarizeWithEscalation, type LlmComplete } from "./summarize.ts";
 export const HEAL_TRUNCATED_PREFIX = TRUNCATED_SUMMARY_PREFIX;
 
 export const HEAL_TARGET_TOKENS = 1500;
-export const HEAL_LEAF_CHUNK_TOKENS = 3000;
+/** The source-to-summary ratio the default window follows. A heal reads more
+ * than it writes, but a repair that cannot see the source cannot be clean. */
+export const HEAL_SOURCE_TARGET_FACTOR = 8;
+export const HEAL_SOURCE_MIN_TOKENS = 3_000;
+export const HEAL_SOURCE_MAX_TOKENS = 24_000;
+/** Room for the system prompt and the summary instruction under a call cap. */
+export const HEAL_PROMPT_TOKENS = 1_024;
+/** Kept for callers that still name the old constant. The value is the floor,
+ * not a fixed per-message clip. */
+export const HEAL_LEAF_CHUNK_TOKENS = HEAL_SOURCE_MIN_TOKENS;
 export const HEAL_MAX_NODES = 32;
 export const HEAL_TOKEN_BUDGET = 250_000;
+
+export interface HealSourceBudgetInput {
+  targetTokens?: number;
+  /** An explicit source window. The derived default is `8 * targetTokens`,
+   * clamped to the source floor and ceiling and then to the call budget. */
+  sourceTokens?: number;
+  callBudgetTokens?: number;
+}
 
 export interface HealInput {
   /** Session tag for every engine row and every ladder call this run makes. */
   session?: string;
   /** Tokens one repaired node targets. A result above twice this is rejected. */
   targetTokens?: number;
-  /** The chunk size a leaf source is clipped to before it reaches the model. */
+  /** Estimated tokens one node's whole source may read. Defaults to
+   * `8 * targetTokens`, clamped to 3,000 through 24,000 and to the request
+   * budget. It is shared across a node's messages, not applied per message. */
+  sourceTokens?: number;
+  /** @deprecated Use `sourceTokens`. Kept so a caller from the first heal
+   * release keeps working; it now means the same whole-node window. */
   leafChunkTokens?: number;
+  /** Tokens one summarizer request may cost. The source window is clamped so
+   * its prompt, output, and reserve fit this cap. */
+  callBudgetTokens?: number;
   /** Nodes this run may attempt. Ancestors only run after their children. */
   maxNodes?: number;
   /** Model calls this run may make. Defaults to twice `maxNodes`. */
@@ -76,15 +101,25 @@ export interface HealNodeResult {
   beforeTokens: number;
   afterTokens: number | null;
   calls: number;
+  /** Source facts for the attempted node. They never include source text. */
+  sourceTokens?: number;
+  sourceChars?: number;
+  sourceClipped?: boolean;
 }
 
 export interface HealCounts {
   candidates: number;
   tainted: number;
   attempted: number;
+  /** Nodes whose new text is clean. An improved node is not a repair. */
   repaired: number;
+  /** Nodes whose text changed but remains clipped or derived. */
+  improved: number;
   failed: number;
+  /** Dependency-blocked plus source-blocked nodes. */
   blocked: number;
+  /** The source-blocked subset of `blocked`. */
+  blockedSource: number;
   skipped: number;
   changed: number;
   notAttempted: number;
@@ -93,11 +128,17 @@ export interface HealCounts {
 export interface HealOutcome {
   dryRun: boolean;
   stop: HealStopReason;
+  /** The effective whole-node source window for this run, in estimated tokens. */
+  sourceTokens: number;
+  callBudgetTokens: number;
   candidates: HealCandidate[];
   nodes: HealNodeResult[];
   repaired: number[];
+  improved: number[];
   failed: number[];
   blocked: number[];
+  /** The subset of `blocked` whose source exceeded the window. */
+  blockedSource: number[];
   skipped: number[];
   changed: number[];
   notAttempted: number[];
@@ -120,6 +161,28 @@ interface CallBudget {
   stopped: HealStopReason | null;
 }
 
+/** The source window a repair is allowed to read, in estimated tokens.
+ *
+ * The default is a multiple of the summary target, so the one quality knob a
+ * user already tunes moves the source with it. A fixed source window has the
+ * failure this policy exists to remove: every larger input clips at the same
+ * place forever. The window is still bounded by the request cap, so a large
+ * source cannot turn into a prompt the provider will refuse.
+ */
+export function healSourceBudget(input: HealSourceBudgetInput = {}): number {
+  const target = bounded(input.targetTokens, HEAL_TARGET_TOKENS, 1);
+  const configured = bounded(input.sourceTokens, Number.NaN, 1);
+  const base = Number.isFinite(configured)
+    ? Math.min(HEAL_SOURCE_MAX_TOKENS, configured)
+    : Math.min(
+        HEAL_SOURCE_MAX_TOKENS,
+        Math.max(HEAL_SOURCE_MIN_TOKENS, target * HEAL_SOURCE_TARGET_FACTOR),
+      );
+  const callBudget = bounded(input.callBudgetTokens, SUMMARIZER_CALL_TOKENS, 1);
+  const requestCeiling = callBudget - target - HEAL_PROMPT_TOKENS;
+  return Math.max(1, Math.min(base, requestCeiling));
+}
+
 type HealSource =
   | {
       kind: "items";
@@ -127,6 +190,9 @@ type HealSource =
       /** The repaired node's verdict. A clipped leaf source, or a condensed
        * node over a non-clean child, must not be stored as clean. */
       quality: SummaryQuality;
+      sourceChars: number;
+      sourceTokens: number;
+      sourceClipped: boolean;
     }
   | { kind: "missing"; reason: "no-source" | "source-missing" };
 
@@ -148,8 +214,14 @@ export async function runHeal(
   const maxNodes = bounded(input.maxNodes, HEAL_MAX_NODES, 0);
   const maxCalls = bounded(input.maxCalls, Math.max(2, maxNodes * 2), 0);
   const tokenBudget = bounded(input.maxTokens, HEAL_TOKEN_BUDGET, 0);
-  const leafChunkTokens = bounded(input.leafChunkTokens, HEAL_LEAF_CHUNK_TOKENS, 1);
-  const maxChars = leafChunkTokens * CHARS_PER_TOKEN;
+  const callBudgetTokens = bounded(input.callBudgetTokens, SUMMARIZER_CALL_TOKENS, 1);
+  const configuredSource = input.sourceTokens ?? input.leafChunkTokens;
+  const sourceTokens = healSourceBudget({
+    targetTokens,
+    ...(configuredSource === undefined ? {} : { sourceTokens: configuredSource }),
+    callBudgetTokens,
+  });
+  const maxChars = sourceTokens * CHARS_PER_TOKEN;
   const redact = input.redact ?? ((text: string) => text);
   const prefix = input.truncatedPrefix ?? HEAL_TRUNCATED_PREFIX;
   const dryRun = input.dryRun === true;
@@ -166,6 +238,8 @@ export async function runHeal(
     maxCalls,
     maxTokens: tokenBudget,
     targetTokens,
+    sourceTokens,
+    callBudgetTokens,
     dryRun,
   });
 
@@ -173,11 +247,15 @@ export async function runHeal(
     const outcome: HealOutcome = {
       dryRun: true,
       stop: "dry-run",
+      sourceTokens,
+      callBudgetTokens,
       candidates: plan.candidates,
       nodes: [],
       repaired: [],
+      improved: [],
       failed: [],
       blocked: [],
+      blockedSource: [],
       skipped: [],
       changed: [],
       notAttempted: [],
@@ -188,8 +266,10 @@ export async function runHeal(
         tainted: plan.tainted.size,
         attempted: 0,
         repaired: 0,
+        improved: 0,
         failed: 0,
         blocked: 0,
+        blockedSource: 0,
         skipped: 0,
         changed: 0,
         notAttempted: 0,
@@ -205,8 +285,10 @@ export async function runHeal(
   const blocked = new Set<number>();
   const results: HealNodeResult[] = [];
   const repaired: number[] = [];
+  const improved: number[] = [];
   const failed: number[] = [];
   const blockedIds: number[] = [];
+  const blockedSourceIds: number[] = [];
   const skipped: number[] = [];
   const changedIds: number[] = [];
   let attempted = 0;
@@ -249,6 +331,9 @@ export async function runHeal(
       calls: result.calls,
       outcome: result.outcome,
       reason: result.reason,
+      ...(result.sourceTokens === undefined ? {} : { sourceTokens: result.sourceTokens }),
+      ...(result.sourceChars === undefined ? {} : { sourceChars: result.sourceChars }),
+      ...(result.sourceClipped === undefined ? {} : { sourceClipped: result.sourceClipped }),
     });
   };
 
@@ -345,7 +430,6 @@ export async function runHeal(
       break;
     }
 
-    attempted++;
     const current = store.getSummary(candidate.id);
     if (!current) {
       failed.push(candidate.id);
@@ -389,9 +473,47 @@ export async function runHeal(
       continue;
     }
 
+    const childChanged = childIds.some((id) => changed.has(id));
+    // A clipped or derived source cannot produce a clean node. Retrying it at
+    // the same window buys another model call and the same verdict, so it is
+    // blocked instead. A mechanical node gets one improvement because a model
+    // summary over a clipped source is still better than the truncate, and a
+    // parent whose child changed this run gets one chance to consume that new
+    // text. Neither can repeat at the same window.
+    if (source.quality !== "clean" && !candidate.mechanical && !childChanged) {
+      // This node consumed no model slot: a bounded run must not spend its
+      // node allowance on sources that cannot change verdict at this window.
+      blockedIds.push(candidate.id);
+      blockedSourceIds.push(candidate.id);
+      record({
+        id: candidate.id,
+        nodeKind: candidate.nodeKind,
+        depth: candidate.depth,
+        tainted: candidate.tainted,
+        qualityBefore: candidate.quality,
+        outcome: "blocked",
+        reason: "source-over-budget",
+        levelBefore,
+        levelAfter: null,
+        beforeTokens: current.tokens,
+        afterTokens: null,
+        calls: 0,
+        sourceTokens: source.sourceTokens,
+        sourceChars: source.sourceChars,
+        sourceClipped: source.sourceClipped,
+      });
+      continue;
+    }
+
+    attempted++;
     const callsBefore = state.calls;
     const answer = await summarizeWithEscalation(source.items, targetTokens, budgeted, session);
     const calls = state.calls - callsBefore;
+    const sourceFields = {
+      sourceTokens: source.sourceTokens,
+      sourceChars: source.sourceChars,
+      sourceClipped: source.sourceClipped,
+    };
 
     if (answer.level === 3) {
       reject(candidate, current.tokens, levelBefore, calls, state.stopped ?? "level-3");
@@ -430,6 +552,7 @@ export async function runHeal(
           beforeTokens: current.tokens,
           afterTokens: null,
           calls,
+          ...sourceFields,
         });
         blockAncestors(candidate.id);
         // Another writer changed this row's text. Its parents are stale either
@@ -437,7 +560,9 @@ export async function runHeal(
         markParentsDerived(candidate.id);
       } else {
         changed.add(candidate.id);
-        repaired.push(candidate.id);
+        const clean = source.quality === "clean";
+        if (clean) repaired.push(candidate.id);
+        else improved.push(candidate.id);
         record({
           id: candidate.id,
           nodeKind: candidate.nodeKind,
@@ -445,12 +570,13 @@ export async function runHeal(
           tainted: candidate.tainted,
           qualityBefore: candidate.quality,
           qualityAfter: source.quality,
-          outcome: "repaired",
+          outcome: clean ? "repaired" : "improved",
           levelBefore,
           levelAfter: answer.level,
           beforeTokens: current.tokens,
           afterTokens,
           calls,
+          ...sourceFields,
         });
         markParentsDerived(candidate.id);
       }
@@ -466,11 +592,15 @@ export async function runHeal(
   const outcome: HealOutcome = {
     dryRun: false,
     stop,
+    sourceTokens,
+    callBudgetTokens,
     candidates: plan.candidates,
     nodes: results,
     repaired,
+    improved,
     failed,
     blocked: blockedIds,
+    blockedSource: blockedSourceIds,
     skipped,
     changed: changedIds,
     notAttempted,
@@ -481,8 +611,10 @@ export async function runHeal(
       tainted: plan.tainted.size,
       attempted,
       repaired: repaired.length,
+      improved: improved.length,
       failed: failed.length,
       blocked: blockedIds.length,
+      blockedSource: blockedSourceIds.length,
       skipped: skipped.length,
       changed: changedIds.length,
       notAttempted: notAttempted.length,
@@ -582,7 +714,11 @@ function buildPlan(store: HealStore, prefix: string): HealPlan {
 
 /** A leaf reads the exact message rows its provenance names, with the file
  * handle and mask a compaction leaf uses. A condensed node reads the exact
- * child summaries, so a repaired child's new text is what its parent sees. */
+ * child summaries, so a repaired child's new text is what its parent sees.
+ *
+ * The source window belongs to the whole node. Short items keep their text and
+ * a long item gets the remainder, so one large tool result cannot be clipped
+ * to a per-message slice while the rest of the window sits unused. */
 function sourceFor(
   store: HealStore,
   node: SummaryNode,
@@ -594,45 +730,101 @@ function sourceFor(
     session?: string;
   },
 ): HealSource {
+  const items: Array<{ role: string; text: string; entryId: string }> = [];
+  let sourceQuality: SummaryQuality = "clean";
+
   if (node.kind === "condensed") {
     if (sources.summaries.length === 0) return { kind: "missing", reason: "no-source" };
-    const items: Array<{ role: string; text: string }> = [];
-    let quality: SummaryQuality = "clean";
     for (const childId of sources.summaries) {
       const child = store.getSummary(childId);
       if (!child) return { kind: "missing", reason: "source-missing" };
-      items.push({ role: "summary", text: child.text });
-      if (!isCleanSummary(child)) quality = "derived";
+      items.push({ role: "summary", text: child.text, entryId: child.firstEntryId });
+      if (!isCleanSummary(child)) sourceQuality = "derived";
     }
-    return { kind: "items", items, quality };
+  } else {
+    if (sources.messages.length === 0) return { kind: "missing", reason: "no-source" };
+    const messages = store.messagesByIds(sources.messages);
+    if (messages.length !== sources.messages.length) {
+      return { kind: "missing", reason: "source-missing" };
+    }
+    const refs = store.filesForMessages(messages.map((message) => message.id));
+    const refByMessage = new Map(refs.map((ref) => [ref.messageId, ref]));
+    for (const message of messages) {
+      const ref = refByMessage.get(message.id);
+      items.push({
+        role: message.role,
+        text: opts.redact(ref ? filePreviewText(ref) : message.text),
+        entryId: message.entryId,
+      });
+    }
   }
 
-  if (sources.messages.length === 0) return { kind: "missing", reason: "no-source" };
-  const messages = store.messagesByIds(sources.messages);
-  if (messages.length !== sources.messages.length) {
-    return { kind: "missing", reason: "source-missing" };
-  }
-  const refs = store.filesForMessages(messages.map((message) => message.id));
-  const refByMessage = new Map(refs.map((ref) => [ref.messageId, ref]));
-  let clippedSource = false;
-  const items = messages.map((message) => {
-    const ref = refByMessage.get(message.id);
-    if (ref) return { role: message.role, text: opts.redact(filePreviewText(ref)) };
-    const clipped = clipForHeal(opts.redact(message.text), message.entryId, opts.maxChars);
-    if (clipped.droppedChars > 0) {
-      clippedSource = true;
+  const sourceChars = items.reduce((n, item) => n + item.text.length, 0);
+  let sourceClipped = false;
+  let clippedItems = items;
+  // Condensed nodes read child summaries, which the DAG already bounds by its
+  // fanout and target. Clipping them would turn a clean parent into a derived
+  // one for no safety gain; the call budget still refuses an impossible prompt.
+  if (node.kind === "leaf" && sourceChars > opts.maxChars) {
+    const shares = shareChars(
+      items.map((item) => item.text.length),
+      opts.maxChars,
+    );
+    clippedItems = items.map((item, index) => {
+      const clipped = clipForHeal(item.text, item.entryId, shares[index] ?? 0);
+      if (clipped.droppedChars <= 0) return item;
+      sourceClipped = true;
       opts.emit({
         event: "lcm",
         kind: "summary-input-clipped",
         session: opts.session,
-        entryId: message.entryId,
+        entryId: item.entryId,
         keptChars: clipped.keptChars,
         droppedChars: clipped.droppedChars,
       });
+      return { ...item, text: clipped.text };
+    });
+  }
+
+  if (sourceClipped) {
+    sourceQuality = node.kind === "leaf" ? "clipped" : "derived";
+  }
+  return {
+    kind: "items",
+    items: clippedItems.map(({ role, text }) => ({ role, text })),
+    quality: sourceQuality,
+    sourceChars,
+    sourceTokens: Math.ceil(sourceChars / CHARS_PER_TOKEN),
+    sourceClipped,
+  };
+}
+
+/** Distribute a whole-node character budget over its items. Every character of
+ * a short item is kept; the remainder is shared evenly among longer items. The
+ * allocation is deterministic and never exceeds the budget. */
+function shareChars(lengths: readonly number[], budget: number): number[] {
+  const shares = lengths.map(() => 0);
+  let remaining = Math.max(0, Math.floor(budget));
+  let active = lengths
+    .map((length, index) => ({ length, index }))
+    .filter(({ length }) => length > 0)
+    .map(({ index }) => index);
+  while (remaining > 0 && active.length > 0) {
+    const per = Math.max(1, Math.floor(remaining / active.length));
+    const next: number[] = [];
+    for (const index of active) {
+      const length = lengths[index] ?? 0;
+      const share = shares[index] ?? 0;
+      const add = Math.min(length - share, per, remaining);
+      if (add <= 0) continue;
+      shares[index] = share + add;
+      remaining -= add;
+      if (shares[index]! < length) next.push(index);
     }
-    return { role: message.role, text: clipped.text };
-  });
-  return { kind: "items", items, quality: clippedSource ? "clipped" : "clean" };
+    if (next.length === active.length && next.every((index) => shares[index] === 0)) break;
+    active = next;
+  }
+  return shares;
 }
 
 function isCleanSummary(node: SummaryNode): boolean {
@@ -718,14 +910,19 @@ function reportComplete(
     candidates: outcome.counts.candidates,
     attempted: outcome.counts.attempted,
     repaired: outcome.counts.repaired,
+    improved: outcome.counts.improved,
     failed: outcome.counts.failed,
     blocked: outcome.counts.blocked,
+    blockedSource: outcome.counts.blockedSource,
     skipped: outcome.counts.skipped,
     changedCount: outcome.counts.changed,
     notAttempted: outcome.counts.notAttempted,
     calls: outcome.calls,
     tokens: outcome.tokens,
+    sourceTokens: outcome.sourceTokens,
+    callBudgetTokens: outcome.callBudgetTokens,
     repairedIds: outcome.repaired,
+    improvedIds: outcome.improved,
   });
 }
 

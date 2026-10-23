@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 
 import {
+  HEAL_SOURCE_MAX_TOKENS,
   SUMMARIZER_CALL_TOKENS,
   SUMMARIZER_PASS_TOKENS,
   LcmStore,
@@ -93,6 +94,12 @@ export interface OpencodeLosslessOptions {
   /** Tokens one summary aims for.
    * @default 1500 */
   readonly summaryTokens?: number;
+  /** Estimated tokens one heal node may read as source. Defaults to
+   * `8 * summaryTokens`, clamped to 3,000 through 24,000 and to
+   * `summarizerTokensPerCall`. It is a whole-node window, not a per-message
+   * clip. Raise it to repair summaries over unusually large source messages.
+   * @default 8 x summaryTokens, clamped 3000..24000 */
+  readonly healSourceTokens?: number;
   /** Window used when the host catalogue cannot name this model's limit.
    * @default 128000 */
   readonly contextWindow?: number;
@@ -277,8 +284,12 @@ export async function setupOpencodeLossless(
           const input = {
             session: sessionID,
             targetTokens: options.summaryTokens,
+            callBudgetTokens: options.summarizerTokensPerCall,
             maxTokens: options.summarizerTokensPerHeal,
             redact: redactSecrets,
+            ...(options.healSourceTokens === undefined
+              ? {}
+              : { sourceTokens: options.healSourceTokens }),
             ...(maxNodes === undefined ? {} : { maxNodes }),
           };
           try {
@@ -474,6 +485,7 @@ export interface RuntimeOptions extends ProjectionOptions {
   readonly sidecarDir: string;
   readonly assembly: boolean;
   readonly readerTimeoutMs: number;
+  readonly healSourceTokens?: number;
   readonly summarizerTokensPerCall: number;
   readonly summarizerTokensPerPass: number;
   readonly summarizerTokensPerHeal: number;
@@ -486,6 +498,7 @@ export function readOptions(raw: unknown): RuntimeOptions {
   const swapAtRatio = readRatio(record.swapAtRatio) ?? DEFAULT_SWAP_RATIO;
   const recutAtRatio = readRatio(record.recutAtRatio) ?? DEFAULT_RECUT_RATIO;
   const zones = readZones(record.zones);
+  const healSourceTokens = readHealSourceTokens(record.healSourceTokens);
   return {
     enabled: typeof record.enabled === "boolean" ? record.enabled : true,
     sidecarDir: typeof record.sidecarDir === "string" ? record.sidecarDir : DEFAULT_SIDECAR_DIR,
@@ -494,6 +507,7 @@ export function readOptions(raw: unknown): RuntimeOptions {
     recutAtRatio,
     keepRecentTokens: positiveInteger(record.keepRecentTokens) ?? DEFAULT_KEEP_RECENT_TOKENS,
     summaryTokens: positiveInteger(record.summaryTokens) ?? DEFAULT_SUMMARY_TOKENS,
+    ...(healSourceTokens === undefined ? {} : { healSourceTokens }),
     contextWindow: positiveInteger(record.contextWindow) ?? DEFAULT_CONTEXT_WINDOW,
     readerTimeoutMs: positiveInteger(record.readerTimeoutMs) ?? DEFAULT_READER_TIMEOUT_MS,
     summarizerTokensPerCall:
@@ -522,6 +536,14 @@ function positiveNumber(raw: unknown): number | undefined {
 function positiveInteger(raw: unknown): number | undefined {
   const value = positiveNumber(raw);
   return value !== undefined && Number.isInteger(value) ? value : undefined;
+}
+
+/** A source window above the hard ceiling is a malformed override, not a
+ * request for a prompt the summarizer call cap cannot carry. Falling back to
+ * the derived default is safer than clamping a typo into a paid call. */
+function readHealSourceTokens(raw: unknown): number | undefined {
+  const value = positiveInteger(raw);
+  return value !== undefined && value <= HEAL_SOURCE_MAX_TOKENS ? value : undefined;
 }
 
 /** A share of the window: above zero and at most one. Anything else keeps the

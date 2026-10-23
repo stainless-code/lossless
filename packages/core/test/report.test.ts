@@ -604,7 +604,7 @@ test("report: heal runs show repaired, failed, blocked, and stop reasons", () =>
     }),
   ]);
   assert.match(report, /## Summary heal \(1 run\)/);
-  assert.match(report, /\| 2 \| 1 \| 0 \| 1 \| 5 \| 42\.0k \|/);
+  assert.match(report, /\| 2 \| 0 \| 1 \| 0 \(0\) \| 1 \| 5 \| 42\.0k \|/);
   assert.match(report, /Stop reasons: done 1\./);
 });
 

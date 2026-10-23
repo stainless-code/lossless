@@ -763,7 +763,7 @@ test("command: heal dry-runs the truncated candidates and makes no model call", 
     assert.equal(modelCalls, 0);
     assert.equal(
       notifications.at(-1),
-      "LCM heal dry-run: 1 candidate(s), 1 tainted; run `/lcm heal --apply` to repair.",
+      "LCM heal dry-run: 1 candidate(s), 1 tainted, 12000 source tokens; run `/lcm heal --apply` to repair.",
     );
     assert.equal(liveStore.allSummaries()[0]?.text, "[lcm:truncated]\nmechanical");
   } finally {
@@ -801,7 +801,7 @@ test("command: heal --apply repairs a truncated node with the heal budget", asyn
     assert.equal(liveStore.allSummaries()[0]?.text, "healed leaf");
     assert.equal(
       notifications.at(-1),
-      "LCM heal: repaired 1, failed 0, blocked 0, remaining 0; 1 model call(s).",
+      "LCM heal: repaired 1 clean, improved 0, failed 0, blocked 0, remaining 0; 1 model call(s).",
     );
   } finally {
     liveStore.close();

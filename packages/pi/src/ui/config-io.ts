@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
-import { lcmHomePath } from "lossless-core";
+import { HEAL_SOURCE_MAX_TOKENS, lcmHomePath } from "lossless-core";
 import type { ZoneThresholds } from "lossless-core";
 
 export interface LcmConfig {
@@ -22,6 +22,9 @@ export interface LcmConfig {
   zones?: Record<string, ZoneThresholds>;
   summaryTokens?: number;
   leafChunkTokens?: number;
+  /** Estimated tokens one heal node may read as source. Unset derives it from
+   * summaryTokens; this is the explicit override for unusually large sources. */
+  healSourceTokens?: number;
   keepRecentTokens?: number;
   maxAsyncChunks?: number;
   redactSecrets?: boolean;
@@ -120,6 +123,7 @@ const NUMBER_KEYS = [
   "recutAtRatio",
   "summaryTokens",
   "leafChunkTokens",
+  "healSourceTokens",
   "keepRecentTokens",
   "maxAsyncChunks",
   "largeFileChars",
@@ -148,6 +152,7 @@ const NUMBER_RANGES = {
   recutAtRatio: (v: number) => v > 0 && v <= 1,
   summaryTokens: (v: number) => v >= 1,
   leafChunkTokens: (v: number) => v >= 1,
+  healSourceTokens: (v: number) => Number.isInteger(v) && v >= 1 && v <= HEAL_SOURCE_MAX_TOKENS,
   keepRecentTokens: (v: number) => v >= 0,
   maxAsyncChunks: (v: number) => v >= 1,
   // Below this a described body is smaller than most reads, and the handle
