@@ -349,7 +349,8 @@ refused rather than quietly printing the block.
 - **Telemetry**: `~/.pi/agent/lcm/metrics.jsonl` logs every context decision,
   per-message provider usage (fresh vs cached, cost), one row per summarizer
   call with the model, stage, and what the provider billed, one row per recall
-  call, one per heal run, one per externalized file, and one per branch change.
+  call, a heal-start row, one heal-node per attempted node, a heal-complete row,
+  one per externalized file, and one per branch change.
   `/lcm doctor` reports the thresholds, the zone, and the summarizer chain that
   are in effect, which answers what the log recorded after the fact.
 - **Verbatim storage**: message text is stored whole, whatever its size.

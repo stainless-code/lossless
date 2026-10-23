@@ -195,10 +195,14 @@ export function formatMetricsReport(rows: readonly unknown[], sessionID: string)
 
   const heals = mine.filter((row) => row.kind === "heal-complete");
   if (heals.length > 0) {
+    const lastHeal = heals[heals.length - 1];
+    const lastStop = stringOf(lastHeal?.stop) ?? "(unrecorded)";
     lines.push(
       `heal: ${heals.length} run(s), ${sumField(heals, "repaired")} repaired, ` +
         `${sumField(heals, "failed")} failed, ${sumField(heals, "blocked")} blocked; ` +
-        `${sumField(heals, "calls")} call(s)`,
+        `${sumField(heals, "calls")} call(s); ${sumField(heals, "skipped")} skipped, ` +
+        `${sumField(heals, "changedCount")} changed, ${sumField(heals, "notAttempted")} remaining; ` +
+        `last stop ${lastStop}`,
     );
   }
 

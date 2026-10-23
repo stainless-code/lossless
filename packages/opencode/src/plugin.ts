@@ -268,11 +268,16 @@ export async function setupOpencodeLossless(
           // plugin are closed on that reload, so the repair owns a separate
           // connection for the duration of the run.
           const runStore = new LcmStore(sidecars.pathFor(sessionID));
+          if (runStore.hasLiveRun()) {
+            runStore.close();
+            throw new Error("a compaction pass is in flight; retry the heal");
+          }
           healingSessions.add(sessionID);
           const sink: MetricsSink = (row) => record({ ...row });
           const input = {
             session: sessionID,
             targetTokens: options.summaryTokens,
+            maxTokens: options.summarizerTokensPerHeal,
             redact: redactSecrets,
             ...(maxNodes === undefined ? {} : { maxNodes }),
           };

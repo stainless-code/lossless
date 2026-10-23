@@ -599,7 +599,7 @@ export function healReport(outcome: HealOutcome): string {
   if (outcome.dryRun) {
     return outcome.counts.candidates === 0
       ? "LCM heal dry-run: no truncated summaries or stale ancestors; nothing to repair."
-      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} truncated; run \`/lossless-heal --apply\` to repair.`;
+      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} tainted; run \`/lossless-heal --apply\` to repair.`;
   }
   const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
   const changed = outcome.counts.changed === 0 ? "" : `, changed ${outcome.counts.changed}`;

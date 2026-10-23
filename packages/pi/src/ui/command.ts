@@ -121,7 +121,7 @@ function healNotice(outcome: HealOutcome): string {
   if (outcome.dryRun) {
     return outcome.counts.candidates === 0
       ? "LCM heal dry-run: no truncated summaries or stale ancestors; nothing to repair."
-      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} truncated; run \`/lcm heal --apply\` to repair.`;
+      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} tainted; run \`/lcm heal --apply\` to repair.`;
   }
   const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
   const changed = outcome.counts.changed === 0 ? "" : `, changed ${outcome.counts.changed}`;
@@ -511,14 +511,28 @@ export function registerLcmCommand(
           return;
         }
         const session = basename(db);
+        if (store.hasLiveRun()) {
+          ctx.ui.notify(
+            "LCM heal: a compaction pass is in flight; retry when it finishes.",
+            "warning",
+          );
+          return;
+        }
         if (healInFlight.has(session)) {
           ctx.ui.notify("LCM heal: a repair is already running for this session.", "warning");
           return;
         }
+        const healTokens = config.summarizerTokensPerHeal ?? DEFAULT_SUMMARIZER_TOKENS_PER_HEAL;
         healInFlight.add(session);
         const targetTokens = config.summaryTokens ?? 1500;
         const redact = makeRedact(deps.getConfig);
         const maxNodeInput = maxNodes.kind === "value" ? { maxNodes: maxNodes.value } : {};
+        const budgetInput = {
+          maxTokens: healTokens,
+          ...(config.leafChunkTokens === undefined
+            ? {}
+            : { leafChunkTokens: config.leafChunkTokens }),
+        };
         try {
           if (apply) {
             const llm = makeLlm(
@@ -544,7 +558,7 @@ export function registerLcmCommand(
             }
             const outcome = await runHeal(
               store,
-              { session, targetTokens, redact, ...maxNodeInput },
+              { session, targetTokens, redact, ...budgetInput, ...maxNodeInput },
               llm,
             );
             ctx.ui.notify(healNotice(outcome), outcome.failed.length > 0 ? "warning" : "info");
@@ -552,7 +566,7 @@ export function registerLcmCommand(
           }
           const outcome = await runHeal(
             store,
-            { session, targetTokens, redact, dryRun: true, ...maxNodeInput },
+            { session, targetTokens, redact, dryRun: true, ...budgetInput, ...maxNodeInput },
             healDryRunLlm,
           );
           ctx.ui.notify(healNotice(outcome), "info");

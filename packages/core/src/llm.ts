@@ -206,6 +206,10 @@ export function makeLlm<Model>(
     span,
     models.map((model) => model.key),
   );
+  // A pass and a heal over the same span must not inherit each other's cap:
+  // adding stage to the reported fingerprint would not change the record's
+  // meaning, so the private failure key carries it instead.
+  const failureKey = `${stage ?? "default"}|${fingerprint}`;
   let consecutive = 0;
   /** Set once this completer has spent its budget: the rest of the pass is
    * mechanical, which is what bounds one pass whatever the pass's wall clock.
@@ -276,7 +280,7 @@ export function makeLlm<Model>(
         estimateTokens(systemPrompt) + estimateTokens(userText) + Math.max(0, maxTokens);
       if (estimate > callBudget) return refuseBudget("call", estimate);
       if (spent + estimate > passBudget) return refuseBudget("pass", estimate);
-      const remembered = cappedSpans.get(fingerprint);
+      const remembered = cappedSpans.get(failureKey);
       if (remembered && Date.now() - remembered.at < FAILED_SPAN_TTL_MS) {
         // The memory is a fact about the span, so this completer is mechanical
         // for its whole life once it has been refused: a pass that outlives the
@@ -340,7 +344,7 @@ export function makeLlm<Model>(
       if (consecutive >= SUMMARIZER_FAILURE_CAP) {
         stopped = true;
         stoppedBy = failure;
-        cappedSpans.set(fingerprint, { at: Date.now(), category: failure });
+        cappedSpans.set(failureKey, { at: Date.now(), category: failure });
         const oldest = cappedSpans.keys().next().value;
         if (oldest !== undefined && cappedSpans.size > CAPPED_SPAN_MEMORY)
           cappedSpans.delete(oldest);

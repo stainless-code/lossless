@@ -226,7 +226,8 @@ export async function runHeal(
   /** A repaired child makes its parents stale. Persist that before this run can
    * stop or fail, so the next run still finds a clean-looking ancestor. */
   const markParentsDerived = (id: number): void => {
-    for (const parentId of plan.parents.get(id) ?? []) store.markSummaryDerived(parentId);
+    const parents = new Set([...(plan.parents.get(id) ?? []), ...store.parentSummaryIds(id)]);
+    for (const parentId of parents) store.markSummaryDerived(parentId);
   };
 
   const record = (result: HealNodeResult): void => {

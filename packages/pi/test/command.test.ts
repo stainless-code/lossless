@@ -763,7 +763,7 @@ test("command: heal dry-runs the truncated candidates and makes no model call", 
     assert.equal(modelCalls, 0);
     assert.equal(
       notifications.at(-1),
-      "LCM heal dry-run: 1 candidate(s), 1 truncated; run `/lcm heal --apply` to repair.",
+      "LCM heal dry-run: 1 candidate(s), 1 tainted; run `/lcm heal --apply` to repair.",
     );
     assert.equal(liveStore.allSummaries()[0]?.text, "[lcm:truncated]\nmechanical");
   } finally {

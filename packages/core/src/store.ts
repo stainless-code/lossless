@@ -339,6 +339,7 @@ END;
  * before it writes, so running the set on an already-migrated store is a no-op
  * and a store written before any version was recorded still upgrades. */
 function migrate(db: DatabaseSync): void {
+  const startedVersion = readVersion(db);
   addColumnIfMissing(db, "messages", "payload", "payload TEXT");
   addColumnIfMissing(db, "messages", "removed_at", "removed_at INTEGER");
   addColumnIfMissing(db, "summaries", "thorough_text", "thorough_text TEXT");
@@ -355,10 +356,11 @@ function migrate(db: DatabaseSync): void {
   addColumnIfMissing(db, "model_state", "window_source", "window_source TEXT");
   // Only a store from before versions were recorded can hold a pending row from
   // before crash recovery existed: it is dropped rather than recovered.
-  if (readVersion(db) < 1) db.exec("DELETE FROM summaries WHERE status = 'pending'");
-  // The quality verdict is derived from text and provenance, so a store that
-  // predates the column is backfilled once, at the moment the column lands.
-  if (addedQuality) backfillSummaryQuality(db);
+  if (startedVersion < 1) db.exec("DELETE FROM summaries WHERE status = 'pending'");
+  // The quality verdict is derived from text and provenance. A partial migration
+  // can add the column and die before the backfill, so version is the durable
+  // signal, not `addedQuality`.
+  if (addedQuality || startedVersion < 2) backfillSummaryQuality(db);
   if (tableColumns(db, "runs").has("owner")) {
     db.exec("DROP TABLE runs");
     db.exec(RUNS_TABLE);

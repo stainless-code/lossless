@@ -64,7 +64,8 @@ export function appendMetricRow(dir: string, row: Record<string, unknown>): void
     chmodSync(dir, 0o700);
     rotateIfNeeded(dir);
     const path = metricsPath(dir);
-    appendFileSync(path, `${JSON.stringify(row)}\n`, { encoding: "utf8", mode: 0o600 });
+    const stamped = typeof row.ts === "number" ? row : { ts: Date.now(), ...row };
+    appendFileSync(path, `${JSON.stringify(stamped)}\n`, { encoding: "utf8", mode: 0o600 });
     chmodSync(path, 0o600);
   } catch {
     // The caller's work already happened; a read-only directory loses the row.

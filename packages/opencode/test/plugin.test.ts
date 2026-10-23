@@ -354,7 +354,7 @@ describe("setupOpencodeLossless", () => {
       expect(host.prompts).toEqual([
         {
           sessionID,
-          text: "LCM heal dry-run: 1 candidate(s), 1 truncated; run `/lossless-heal --apply` to repair.",
+          text: "LCM heal dry-run: 1 candidate(s), 1 tainted; run `/lossless-heal --apply` to repair.",
         },
       ]);
     } finally {
