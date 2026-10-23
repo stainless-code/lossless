@@ -159,13 +159,12 @@ stored bytes, secrets included.
   of its calls, counted the same way. Default 120,000. A dry run spends nothing.
   The run is bounded separately from a compaction pass because it re-derives
   nodes a pass already paid for.
-- `healSourceTokens`: source tokens one repair node may read. Unset derives it
-  from `summaryTokens` at 8x, clamped to 3,000 through 24,000 and to
-  `summarizerTokensPerCall`. The window is shared across the node's messages,
-  so one large tool result can use the whole budget. Set it explicitly when a
-  stored message is larger than the derived window. A clipped or derived node
-  that still exceeds the window is blocked without a model call; a mechanical
-  node gets one improvement. Raising the value makes the next run attempt it.
+- `healSourceTokens`: source tokens one heal map window may read. Unset derives
+  it from `summaryTokens` at 8x, clamped to 3,000 through 24,000 and to
+  `summarizerTokensPerCall`. A leaf that fits one window is sent once; a larger
+  leaf maps up to eight windows and reduces them once. A source beyond eight
+  windows is blocked without a model call; a mechanical node gets one
+  improvement. Raising the value makes the next run attempt it.
 
 The file must be valid strict JSON, so `//` comments and trailing commas are
 rejected, and a corrupt file is left untouched with defaults applied. A number

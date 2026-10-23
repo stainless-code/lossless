@@ -111,10 +111,13 @@ Where this implementation departs from the paper, and what it does not claim:
    per-turn cap. The repair path must not auto-raise a budget from metrics.
    The heal source window is derived from `summaryTokens` at 8x, clamped to
    3,000 through 24,000 and to the request budget, with `healSourceTokens` as
-   the explicit override. A clipped or derived node over the window is blocked
-   without a call; a mechanical node gets one improvement. Windowed map-reduce
-   stays out until a source larger than 24,000 tokens has evidence that the
-   extra calls beat raising the window or accepting the block.
+   the explicit override. A leaf that fits one window is sent once; a larger
+   leaf is mapped through up to eight exact windows and reduced once, so the
+   observed 706k-character sources can become clean without a single enormous
+   prompt. A source beyond the bounded plan is blocked without a call; a
+   mechanical node gets one improvement. The next evidence gate is whether
+   eight windows remain enough after the next real compaction, or whether the
+   window count itself needs a setting.
 8. **The stub floor.** A 20-node frontier costs about 1,650 tokens at any budget,
    because a stub is about 79 tokens (a 200-character preview, the elision
    marker, and the header). Condensing further or a cheaper stub both move a

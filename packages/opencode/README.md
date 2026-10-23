@@ -122,11 +122,10 @@ cap, before it is refused rather than paid for; `summarizerTokensPerPass`
 `summarizerTokensPerHeal` (default 120000) caps what one
 `/lossless-heal --apply` run may spend across its calls; a dry run spends
 nothing. `healSourceTokens` (default 8x `summaryTokens`, clamped 3000 through
-24000 and to `summarizerTokensPerCall`) is the whole-node source window one
-repair may read. A clipped or derived node over that window is blocked without
-a model call, not retried at the same size; a mechanical node gets one
-improvement. Set the option when a stored message is larger than the derived
-window.
+24000 and to `summarizerTokensPerCall`) is the source window one heal map call
+may read. A leaf that fits one window is sent once; a larger leaf maps up to
+eight windows and reduces them once. A source beyond eight windows is blocked
+without a model call, and a mechanical node gets one improvement.
 `readerTimeoutMs` (default 120000) is how long one expand-query child may run
 before it is interrupted. A malformed value keeps its default rather than
 failing the plugin load. Set `assembly: false` to leave compaction to the host.

@@ -242,6 +242,86 @@ test("heal: a whole-node window covers one large source message and stores clean
   }
 });
 
+test("heal: an oversized source is mapped in windows and reduced once", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const text = `start ${"z".repeat(39_000)} end`;
+    ingestEntries(store, [{ entryId: "e0", role: "toolResult", text, timestamp: 0 }]);
+    const message = store.messageByEntryId("e0");
+    assert.ok(message);
+    const leaf = insertLeaf(store, [message], "[lcm:truncated]\nmechanical");
+    const calls: string[] = [];
+    const rows: MetricRecord[] = [];
+    const llm = scripted(
+      (user) => (user.includes("summary window") ? "reduced result" : "window summary"),
+      calls,
+      rows,
+    );
+
+    const outcome = await runHeal(
+      store,
+      { targetTokens: 100, sourceTokens: 3_000, maxNodes: 1 },
+      llm,
+    );
+
+    assert.deepEqual(outcome.repaired, [leaf]);
+    assert.equal(outcome.calls, 5, "four map calls plus one reduce");
+    assert.equal(calls.length, 5);
+    assert.equal(summary(store, leaf).text, "reduced result");
+    assert.equal(summary(store, leaf).quality, "clean");
+    assert.equal(rowsOf(rows, "summary-input-clipped").length, 0);
+  } finally {
+    store.close();
+  }
+});
+
+test("heal: the largest observed source fits eight windows", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const text = `${"x ".repeat(353_000)}tail`;
+    ingestEntries(store, [{ entryId: "e0", role: "toolResult", text, timestamp: 0 }]);
+    const message = store.messageByEntryId("e0");
+    assert.ok(message);
+    const leaf = insertLeaf(store, [message], "[lcm:truncated]\nmechanical");
+    const calls: string[] = [];
+    const llm = scripted((user) => (user.includes("summary window") ? "reduced" : "window"), calls);
+
+    const outcome = await runHeal(
+      store,
+      { targetTokens: 100, sourceTokens: 24_000, maxNodes: 1 },
+      llm,
+    );
+
+    assert.deepEqual(outcome.repaired, [leaf]);
+    assert.equal(outcome.calls, 9, "eight map calls plus one reduce");
+    assert.equal(summary(store, leaf).quality, "clean");
+  } finally {
+    store.close();
+  }
+});
+
+test("heal: an over-budget window plan falls back to a clipped mechanical attempt", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const text = `start ${"z".repeat(100_000)} end`;
+    ingestEntries(store, [{ entryId: "e0", role: "toolResult", text, timestamp: 0 }]);
+    const message = store.messageByEntryId("e0");
+    assert.ok(message);
+    const leaf = insertLeaf(store, [message], "[lcm:truncated]\nmechanical");
+    const calls: string[] = [];
+    const llm = scripted(() => "clipped improvement", calls);
+
+    const outcome = await runHeal(store, { targetTokens: 100, sourceTokens: 1_000 }, llm);
+
+    assert.deepEqual(outcome.repaired, []);
+    assert.deepEqual(outcome.improved, [leaf]);
+    assert.equal(outcome.calls, 1);
+    assert.equal(summary(store, leaf).quality, "clipped");
+  } finally {
+    store.close();
+  }
+});
+
 test("heal: a short message does not spend the window a long message needs", async () => {
   const store = new LcmStore(":memory:");
   try {

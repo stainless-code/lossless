@@ -22,6 +22,10 @@ export const HEAL_TARGET_TOKENS = 1500;
 export const HEAL_SOURCE_TARGET_FACTOR = 8;
 export const HEAL_SOURCE_MIN_TOKENS = 3_000;
 export const HEAL_SOURCE_MAX_TOKENS = 24_000;
+/** One repair may read a source larger than its window, but only as a bounded
+ * map-reduce: the fanout matches the DAG's maximum child count, so a windowed
+ * repair cannot grow calls without a limit. */
+export const HEAL_MAX_WINDOWS_PER_NODE = 8;
 /** Room for the system prompt and the summary instruction under a call cap. */
 export const HEAL_PROMPT_TOKENS = 1_024;
 /** Kept for callers that still name the old constant. The value is the floor,
@@ -43,12 +47,13 @@ export interface HealInput {
   session?: string;
   /** Tokens one repaired node targets. A result above twice this is rejected. */
   targetTokens?: number;
-  /** Estimated tokens one node's whole source may read. Defaults to
-   * `8 * targetTokens`, clamped to 3,000 through 24,000 and to the request
-   * budget. It is shared across a node's messages, not applied per message. */
+  /** Estimated tokens one map window may read. Defaults to `8 * targetTokens`,
+   * clamped to 3,000 through 24,000 and to the request budget. A larger leaf
+   * source uses up to eight windows and one reduce; it is never clipped to a
+   * per-message slice. */
   sourceTokens?: number;
   /** @deprecated Use `sourceTokens`. Kept so a caller from the first heal
-   * release keeps working; it now means the same whole-node window. */
+   * release keeps working; it now means the same per-window budget. */
   leafChunkTokens?: number;
   /** Tokens one summarizer request may cost. The source window is clamped so
    * its prompt, output, and reserve fit this cap. */
@@ -128,7 +133,7 @@ export interface HealCounts {
 export interface HealOutcome {
   dryRun: boolean;
   stop: HealStopReason;
-  /** The effective whole-node source window for this run, in estimated tokens. */
+  /** The effective map window for this run, in estimated tokens. */
   sourceTokens: number;
   callBudgetTokens: number;
   candidates: HealCandidate[];
@@ -183,6 +188,11 @@ export function healSourceBudget(input: HealSourceBudgetInput = {}): number {
   return Math.max(1, Math.min(base, requestCeiling));
 }
 
+interface HealWindow {
+  items: Array<{ role: string; text: string }>;
+  sourceChars: number;
+}
+
 type HealSource =
   | {
       kind: "items";
@@ -193,6 +203,9 @@ type HealSource =
       sourceChars: number;
       sourceTokens: number;
       sourceClipped: boolean;
+      /** Present when a leaf source exceeds one window but fits the bounded
+       * map-reduce plan. The items are then the exact full source. */
+      windows?: HealWindow[];
     }
   | { kind: "missing"; reason: "no-source" | "source-missing" };
 
@@ -212,7 +225,11 @@ export async function runHeal(
   const session = input.session;
   const targetTokens = bounded(input.targetTokens, HEAL_TARGET_TOKENS, 1);
   const maxNodes = bounded(input.maxNodes, HEAL_MAX_NODES, 0);
-  const maxCalls = bounded(input.maxCalls, Math.max(2, maxNodes * 2), 0);
+  const maxCalls = bounded(
+    input.maxCalls,
+    Math.max(2, maxNodes * 2, HEAL_MAX_WINDOWS_PER_NODE * 2 + 2),
+    0,
+  );
   const tokenBudget = bounded(input.maxTokens, HEAL_TOKEN_BUDGET, 0);
   const callBudgetTokens = bounded(input.callBudgetTokens, SUMMARIZER_CALL_TOKENS, 1);
   const configuredSource = input.sourceTokens ?? input.leafChunkTokens;
@@ -505,9 +522,48 @@ export async function runHeal(
       continue;
     }
 
+    if (source.windows !== undefined) {
+      const windows = source.windows;
+      const minCalls = windows.length + (windows.length > 1 ? 1 : 0);
+      if (state.calls + minCalls > maxCalls) {
+        stop = "max-calls";
+        notAttempted = remainingIds(plan.candidates, i);
+        break;
+      }
+      const minTokens =
+        windows.reduce((n, window) => n + Math.ceil(window.sourceChars / CHARS_PER_TOKEN), 0) +
+        (windows.length + 1) * (targetTokens + HEAL_PROMPT_TOKENS);
+      if (state.tokens + minTokens > tokenBudget) {
+        stop = "token-budget";
+        notAttempted = remainingIds(plan.candidates, i);
+        break;
+      }
+    }
+
     attempted++;
     const callsBefore = state.calls;
-    const answer = await summarizeWithEscalation(source.items, targetTokens, budgeted, session);
+    let answer: { text: string; level: SummaryLevel };
+    if (source.windows !== undefined) {
+      const result = await summarizeWindows(
+        source.windows,
+        targetTokens,
+        budgeted,
+        session,
+        redact,
+      );
+      if (result.kind === "failed") {
+        reject(candidate, current.tokens, levelBefore, state.calls - callsBefore, result.reason);
+        if (state.stopped !== null) {
+          stop = state.stopped;
+          notAttempted = remainingIds(plan.candidates, i + 1);
+          break;
+        }
+        continue;
+      }
+      answer = result;
+    } else {
+      answer = await summarizeWithEscalation(source.items, targetTokens, budgeted, session);
+    }
     const calls = state.calls - callsBefore;
     const sourceFields = {
       sourceTokens: source.sourceTokens,
@@ -716,9 +772,9 @@ function buildPlan(store: HealStore, prefix: string): HealPlan {
  * handle and mask a compaction leaf uses. A condensed node reads the exact
  * child summaries, so a repaired child's new text is what its parent sees.
  *
- * The source window belongs to the whole node. Short items keep their text and
- * a long item gets the remainder, so one large tool result cannot be clipped
- * to a per-message slice while the rest of the window sits unused. */
+ * A source that fits one window is sent whole. A larger leaf is split into
+ * exact windows and reduced, so one large tool result is never clipped to a
+ * per-message slice. */
 function sourceFor(
   store: HealStore,
   node: SummaryNode,
@@ -760,43 +816,140 @@ function sourceFor(
   }
 
   const sourceChars = items.reduce((n, item) => n + item.text.length, 0);
-  let sourceClipped = false;
-  let clippedItems = items;
   // Condensed nodes read child summaries, which the DAG already bounds by its
   // fanout and target. Clipping them would turn a clean parent into a derived
   // one for no safety gain; the call budget still refuses an impossible prompt.
-  if (node.kind === "leaf" && sourceChars > opts.maxChars) {
-    const shares = shareChars(
-      items.map((item) => item.text.length),
-      opts.maxChars,
-    );
-    clippedItems = items.map((item, index) => {
-      const clipped = clipForHeal(item.text, item.entryId, shares[index] ?? 0);
-      if (clipped.droppedChars <= 0) return item;
-      sourceClipped = true;
-      opts.emit({
-        event: "lcm",
-        kind: "summary-input-clipped",
-        session: opts.session,
-        entryId: item.entryId,
-        keptChars: clipped.keptChars,
-        droppedChars: clipped.droppedChars,
-      });
-      return { ...item, text: clipped.text };
-    });
+  if (node.kind !== "leaf" || sourceChars <= opts.maxChars) {
+    return {
+      kind: "items",
+      items: items.map(({ role, text }) => ({ role, text })),
+      quality: sourceQuality,
+      sourceChars,
+      sourceTokens: Math.ceil(sourceChars / CHARS_PER_TOKEN),
+      sourceClipped: false,
+    };
   }
 
-  if (sourceClipped) {
-    sourceQuality = node.kind === "leaf" ? "clipped" : "derived";
+  const windows = planHealWindows(items, opts.maxChars, HEAL_MAX_WINDOWS_PER_NODE);
+  if (windows !== null) {
+    return {
+      kind: "items",
+      items: items.map(({ role, text }) => ({ role, text })),
+      quality: "clean",
+      sourceChars,
+      sourceTokens: Math.ceil(sourceChars / CHARS_PER_TOKEN),
+      sourceClipped: false,
+      windows,
+    };
   }
+
+  // The source is larger than the bounded plan. A mechanical node may still
+  // spend one clipped call, because a model summary over part of the source is
+  // better than the deterministic truncate. A clipped or derived node blocks
+  // rather than buying the same partial read again.
+  const clipped = clipSourceItems(items, opts.maxChars, opts);
   return {
     kind: "items",
-    items: clippedItems.map(({ role, text }) => ({ role, text })),
-    quality: sourceQuality,
+    items: clipped.items.map(({ role, text }) => ({ role, text })),
+    quality: sourceQuality === "clean" ? "clipped" : sourceQuality,
     sourceChars,
     sourceTokens: Math.ceil(sourceChars / CHARS_PER_TOKEN),
-    sourceClipped,
+    sourceClipped: clipped.sourceClipped,
   };
+}
+
+/** Split a leaf source into exact, ordered windows. A message larger than one
+ * window is sliced at a preferred boundary; every character is kept once. */
+function planHealWindows(
+  items: readonly { role: string; text: string; entryId: string }[],
+  maxChars: number,
+  maxWindows: number,
+): HealWindow[] | null {
+  const slices: Array<{ role: string; text: string }> = [];
+  for (const item of items) {
+    if (item.text.length === 0) continue;
+    const parts: string[] = [];
+    for (let start = 0; start < item.text.length;) {
+      const end = sliceEnd(item.text, start, maxChars);
+      parts.push(item.text.slice(start, end));
+      start = end;
+    }
+    for (let index = 0; index < parts.length; index++) {
+      const text = parts[index] ?? "";
+      slices.push({
+        role: parts.length > 1 ? `${item.role} part ${index + 1}/${parts.length}` : item.role,
+        text,
+      });
+    }
+  }
+
+  const windows: HealWindow[] = [];
+  let current: Array<{ role: string; text: string }> = [];
+  let currentChars = 0;
+  const flush = (): boolean => {
+    if (current.length === 0) return true;
+    windows.push({ items: current, sourceChars: currentChars });
+    if (windows.length > maxWindows) return false;
+    current = [];
+    currentChars = 0;
+    return true;
+  };
+  for (const slice of slices) {
+    if (currentChars > 0 && currentChars + slice.text.length > maxChars && !flush()) return null;
+    current.push(slice);
+    currentChars += slice.text.length;
+  }
+  if (!flush()) return null;
+  return windows.length === 0 ? null : windows;
+}
+
+/** Pick a cut near the end of the window, preferring a paragraph, line,
+ * sentence, or word boundary. The cut never splits a surrogate pair or CRLF. */
+function sliceEnd(text: string, start: number, maxChars: number): number {
+  const limit = Math.min(text.length, start + maxChars);
+  if (limit >= text.length) return text.length;
+  // Keep the cut near the full window. A boundary in the last fifth would
+  // shrink every slice enough that a source fitting eight windows needs more.
+  const floor = start + Math.floor(maxChars * 0.95);
+  for (const marker of ["\n\n", "\n", ". ", " "]) {
+    const found = text.lastIndexOf(marker, limit);
+    if (found >= floor) return Math.min(limit, found + marker.length);
+  }
+  let end = limit;
+  if (text.charCodeAt(end - 1) >= 0xd800 && text.charCodeAt(end - 1) <= 0xdbff) end--;
+  if (text[end - 1] === "\r" && text[end] === "\n") end--;
+  return end > start ? end : limit;
+}
+
+function clipSourceItems(
+  items: readonly { role: string; text: string; entryId: string }[],
+  maxChars: number,
+  opts: {
+    redact: (text: string) => string;
+    emit: MetricsSink;
+    session?: string;
+  },
+): { items: Array<{ role: string; text: string; entryId: string }>; sourceClipped: boolean } {
+  const shares = shareChars(
+    items.map((item) => item.text.length),
+    maxChars,
+  );
+  let sourceClipped = false;
+  const clippedItems = items.map((item, index) => {
+    const clipped = clipForHeal(item.text, item.entryId, shares[index] ?? 0);
+    if (clipped.droppedChars <= 0) return item;
+    sourceClipped = true;
+    opts.emit({
+      event: "lcm",
+      kind: "summary-input-clipped",
+      session: opts.session,
+      entryId: item.entryId,
+      keptChars: clipped.keptChars,
+      droppedChars: clipped.droppedChars,
+    });
+    return { ...item, text: clipped.text };
+  });
+  return { items: clippedItems, sourceClipped };
 }
 
 /** Distribute a whole-node character budget over its items. Every character of
@@ -852,6 +1005,38 @@ function qualityPriority(node: SummaryNode | undefined): number {
   if (node.quality === "derived") return 1;
   if (node.quality === "clipped") return 2;
   return 3;
+}
+
+/** Map every window, then reduce the answers once. A map that falls back to the
+ * deterministic truncate is a failure for this node: storing a clipped result
+ * would leave it in the tainted set and buy the same windows again. */
+async function summarizeWindows(
+  windows: readonly HealWindow[],
+  targetTokens: number,
+  llm: LlmComplete,
+  session: string | undefined,
+  redact: (text: string) => string,
+): Promise<{ kind: "ok"; text: string; level: SummaryLevel } | { kind: "failed"; reason: string }> {
+  const answers: Array<{ text: string; level: SummaryLevel }> = [];
+  for (const window of windows) {
+    const answer = await summarizeWithEscalation(window.items, targetTokens, llm, session);
+    if (answer.level === 3) return { kind: "failed", reason: "window-level-3" };
+    answers.push({ text: redact(answer.text), level: answer.level });
+  }
+  if (answers.length === 1) {
+    return { kind: "ok", text: answers[0]?.text ?? "", level: answers[0]?.level ?? 1 };
+  }
+  const reduced = await summarizeWithEscalation(
+    answers.map((answer, index) => ({
+      role: `summary window ${index + 1}/${answers.length}`,
+      text: answer.text,
+    })),
+    targetTokens,
+    llm,
+    session,
+  );
+  if (reduced.level === 3) return { kind: "failed", reason: "reduce-level-3" };
+  return { kind: "ok", text: reduced.text, level: reduced.level };
 }
 
 function budgetedComplete(

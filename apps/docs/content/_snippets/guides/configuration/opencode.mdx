@@ -26,6 +26,6 @@ The threshold vocabularies are the same: ratios, `smartZone`, and token pairs. `
 
 `summarizerTokensPerCall` and `summarizerTokensPerPass` bound a pass. `summarizerTokensPerHeal` bounds an on-demand `/lossless-heal --apply` repair. A malformed value keeps its default.
 
-A heal reads a whole node's source through one window derived from `summaryTokens` (8x, clamped 3,000 through 24,000 and to `summarizerTokensPerCall`). Set `healSourceTokens` when a single stored message is larger than that window. A clipped or derived node that still exceeds the window is blocked with no model call, not retried at the same size; a mechanical node gets one improvement. Raising the window makes the next run attempt it again.
+A heal reads source through windows derived from `summaryTokens` (8x, clamped 3,000 through 24,000 and to `summarizerTokensPerCall`). A leaf that fits one window is sent once; a larger leaf maps up to eight windows and reduces them once. Set `healSourceTokens` to change the window. A source beyond eight windows is blocked with no model call, not retried at the same size; a mechanical node gets one improvement. Raising the window makes the next run attempt it again.
 
 `assembly: false` keeps the mirror and recall tools and leaves compaction to the host. Edit the options and reload the plugin to change them; there is no live settings panel. [Config](/reference/opencode/config) lists every key and default.
