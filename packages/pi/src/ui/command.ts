@@ -124,13 +124,15 @@ function healNotice(outcome: HealOutcome): string {
       : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} truncated; run \`/lcm heal --apply\` to repair.`;
   }
   const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
-  return `LCM heal: repaired ${outcome.counts.repaired}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
+  const changed = outcome.counts.changed === 0 ? "" : `, changed ${outcome.counts.changed}`;
+  return `LCM heal: repaired ${outcome.counts.repaired}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}${changed}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
 }
 
 export function registerLcmCommand(
   pi: Pick<ExtensionAPI, "registerCommand">,
   deps: LcmCommandDeps,
 ): void {
+  const healInFlight = new Set<string>();
   pi.registerCommand("lcm", {
     description: `LCM ${LCM_SUBCOMMANDS.join(" | ")}`,
     handler: async (args, ctx) => {
@@ -509,6 +511,11 @@ export function registerLcmCommand(
           return;
         }
         const session = basename(db);
+        if (healInFlight.has(session)) {
+          ctx.ui.notify("LCM heal: a repair is already running for this session.", "warning");
+          return;
+        }
+        healInFlight.add(session);
         const targetTokens = config.summaryTokens ?? 1500;
         const redact = makeRedact(deps.getConfig);
         const maxNodeInput = maxNodes.kind === "value" ? { maxNodes: maxNodes.value } : {};
@@ -554,6 +561,8 @@ export function registerLcmCommand(
             `LCM heal failed: ${error instanceof Error ? error.message : String(error)}`,
             "warning",
           );
+        } finally {
+          healInFlight.delete(session);
         }
         return;
       }

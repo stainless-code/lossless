@@ -203,6 +203,42 @@ test("heal: a clipped source repairs the node as clipped, not clean", async () =
   }
 });
 
+test("heal: a bounded run repairs mechanical work before a clipped retry", async () => {
+  const { store, messages } = storeWithMessages(4);
+  try {
+    const clipped = store.insertSummary({
+      kind: "leaf",
+      text: "[lcm:truncated]\nclipped",
+      tokens: 5,
+      depth: 0,
+      quality: "clipped",
+      firstEntryId: messages[0]!.entryId,
+      lastEntryId: messages[1]!.entryId,
+      messageIds: [messages[0]!.id, messages[1]!.id],
+    }).id;
+    const mechanical = store.insertSummary({
+      kind: "leaf",
+      text: "[lcm:truncated]\nmechanical",
+      tokens: 5,
+      depth: 0,
+      quality: "mechanical",
+      firstEntryId: messages[2]!.entryId,
+      lastEntryId: messages[3]!.entryId,
+      messageIds: [messages[2]!.id, messages[3]!.id],
+    }).id;
+    const parent = insertCondensed(store, [clipped, mechanical], "parent", 1);
+    const llm = scripted(() => "healed", []);
+
+    const outcome = await runHeal(store, { maxNodes: 1, targetTokens: 100 }, llm);
+
+    assert.deepEqual(outcome.repaired, [mechanical]);
+    assert.equal(summary(store, clipped).quality, "clipped");
+    assert.equal(summary(store, parent).quality, "derived");
+  } finally {
+    store.close();
+  }
+});
+
 test("heal: a clean-looking parent is recomputed from its updated children, then the root", async () => {
   const { store, messages } = storeWithMessages(6);
   try {

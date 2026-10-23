@@ -602,5 +602,6 @@ export function healReport(outcome: HealOutcome): string {
       : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} truncated; run \`/lossless-heal --apply\` to repair.`;
   }
   const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
-  return `LCM heal: repaired ${outcome.counts.repaired}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
+  const changed = outcome.counts.changed === 0 ? "" : `, changed ${outcome.counts.changed}`;
+  return `LCM heal: repaired ${outcome.counts.repaired}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}${changed}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
 }

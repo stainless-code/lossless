@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   SUMMARIZER_CALL_TOKENS,
   SUMMARIZER_PASS_TOKENS,
+  LcmStore,
   makeLlm,
   packageVersionNear,
   redactSecrets,
@@ -239,6 +240,7 @@ export async function setupOpencodeLossless(
 
   registrations.push(
     await ctx.command.transform((editor) => {
+      const healingSessions = new Set<string>();
       const lifecycle: LifecycleDeps = {
         sidecars,
         options: {
@@ -257,7 +259,16 @@ export async function setupOpencodeLossless(
         record,
         model: async (sessionID: string) => sessionModel(await ctx.session.context({ sessionID })),
         window: windowOf,
-        heal: async ({ sessionID, store, span, dryRun, maxNodes }) => {
+        heal: async ({ sessionID, span, dryRun, maxNodes }) => {
+          if (healingSessions.has(sessionID)) {
+            throw new Error("a heal is already running for this session");
+          }
+          // A heal can outlive the plugin instance that started it: the host
+          // reloads plugins when its watched files change. Sidecars held by the
+          // plugin are closed on that reload, so the repair owns a separate
+          // connection for the duration of the run.
+          const runStore = new LcmStore(sidecars.pathFor(sessionID));
+          healingSessions.add(sessionID);
           const sink: MetricsSink = (row) => record({ ...row });
           const input = {
             session: sessionID,
@@ -265,34 +276,39 @@ export async function setupOpencodeLossless(
             redact: redactSecrets,
             ...(maxNodes === undefined ? {} : { maxNodes }),
           };
-          if (dryRun) {
-            const noModel: LlmComplete = Object.assign(
-              async (): Promise<string> => {
-                throw new Error("lcm: a heal dry run makes no model call");
+          try {
+            if (dryRun) {
+              const noModel: LlmComplete = Object.assign(
+                async (): Promise<string> => {
+                  throw new Error("lcm: a heal dry run makes no model call");
+                },
+                { metrics: sink },
+              );
+              return await runHeal(runStore, { ...input, dryRun: true }, noModel);
+            }
+            const model = sessionModel(await ctx.session.context({ sessionID }));
+            if (model === undefined) {
+              throw new Error("this session has no model to repair summaries with");
+            }
+            const llm = makeLlm(
+              opencodeModelHost(ctx, model),
+              {
+                ...summarizerConfig(options),
+                summarizerTokensPerPass: options.summarizerTokensPerHeal,
               },
-              { metrics: sink },
+              {
+                session: sessionID,
+                stage: "heal",
+                span: { firstEntryId: span.first, lastEntryId: span.last },
+                sink,
+              },
             );
-            return runHeal(store, { ...input, dryRun: true }, noModel);
+            if (llm === null) throw new Error("no summarizer model is available for this repair");
+            return await runHeal(runStore, input, llm);
+          } finally {
+            runStore.close();
+            healingSessions.delete(sessionID);
           }
-          const model = sessionModel(await ctx.session.context({ sessionID }));
-          if (model === undefined) {
-            throw new Error("this session has no model to repair summaries with");
-          }
-          const llm = makeLlm(
-            opencodeModelHost(ctx, model),
-            {
-              ...summarizerConfig(options),
-              summarizerTokensPerPass: options.summarizerTokensPerHeal,
-            },
-            {
-              session: sessionID,
-              stage: "heal",
-              span: { firstEntryId: span.first, lastEntryId: span.last },
-              sink,
-            },
-          );
-          if (llm === null) throw new Error("no summarizer model is available for this repair");
-          return runHeal(store, input, llm);
         },
       };
       for (const make of [

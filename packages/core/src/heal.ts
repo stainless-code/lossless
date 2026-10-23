@@ -528,20 +528,25 @@ function buildPlan(store: HealStore, prefix: string): HealPlan {
     }
   }
 
-  // Child before parent, deterministic by id. The `visiting` state guards a
-  // corrupt cycle rather than trusting the depth column.
+  // Child before parent, deterministic by id. Mechanical work comes before a
+  // clipped retry, so a bounded run keeps making new progress. The `visiting`
+  // state guards a corrupt cycle rather than trusting the depth column.
+  const priority = (id: number): number => qualityPriority(nodes.get(id));
   const order: number[] = [];
   const state = new Map<number, "visiting" | "done">();
   const visit = (id: number): void => {
     if (state.has(id)) return;
     state.set(id, "visiting");
-    for (const child of sourcesOf(id).summaries) {
-      if (nodes.has(child)) visit(child);
-    }
+    const children = sourcesOf(id)
+      .summaries.filter((child) => nodes.has(child))
+      .sort((a, b) => priority(a) - priority(b) || a - b);
+    for (const child of children) visit(child);
     state.set(id, "done");
     order.push(id);
   };
-  for (const id of [...nodes.keys()].sort((a, b) => a - b)) visit(id);
+  for (const id of [...nodes.keys()].sort((a, b) => priority(a) - priority(b) || a - b)) {
+    visit(id);
+  }
 
   const candidates: HealCandidate[] = [];
   const parents = new Map<number, number[]>();
@@ -565,6 +570,12 @@ function buildPlan(store: HealStore, prefix: string): HealPlan {
       parents: ancestorIds,
     });
   }
+  // Depth keeps children before parents. Within a depth, repair mechanical and
+  // derived nodes before clipped ones: a clipped source is the most expensive
+  // case, and a bounded run must not spend its whole budget on it first.
+  candidates.sort(
+    (a, b) => a.depth - b.depth || qualityRank(a.quality) - qualityRank(b.quality) || a.id - b.id,
+  );
   return { candidates, tainted, parents, sources, tokens };
 }
 
@@ -625,6 +636,29 @@ function sourceFor(
 
 function isCleanSummary(node: SummaryNode): boolean {
   return node.quality === "clean" && !node.text.startsWith(TRUNCATED_SUMMARY_PREFIX);
+}
+
+function qualityRank(quality: SummaryQuality): number {
+  switch (quality) {
+    case "mechanical":
+      return 0;
+    case "derived":
+      return 1;
+    case "clean":
+      return 2;
+    case "clipped":
+      return 3;
+  }
+}
+
+/** A bounded run spends its first attempts on nodes that can become clean. A
+ * clipped retry is still worth doing, but only after the mechanical work. */
+function qualityPriority(node: SummaryNode | undefined): number {
+  if (node === undefined) return 4;
+  if (node.quality === "mechanical") return 0;
+  if (node.quality === "derived") return 1;
+  if (node.quality === "clipped") return 2;
+  return 3;
 }
 
 function budgetedComplete(
