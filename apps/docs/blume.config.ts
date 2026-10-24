@@ -10,7 +10,7 @@ import { CURATED_POPULAR } from "./components/curated-popular.js";
 
 const title = "Lossless";
 const description =
-  "Lossless Context Management for coding agents, starting with Pi. Aged history becomes summary pointers, and every message stays verbatim and searchable";
+  "Lossless Context Management for Pi and OpenCode v2. Aged history becomes summary pointers, and every message stays verbatim and searchable";
 /** Custom `.astro` pages have no frontmatter, so the OG cards are named here
  * (Blume would otherwise use the humanized segment). */
 const homeTitle = `${title}: nothing is lost, the model sees less`;
