@@ -74,7 +74,11 @@ describe("applyLossless", () => {
       const map = sidecarMap(dir);
       expect(map.has("live-1")).toBe(true);
       expect(map.get("live-1")?.allMessages().length).toBe(session.deriveMessages().length);
-      const definition = lcmCommandDefinition(ctx, { stores: () => map });
+      const definition = lcmCommandDefinition(ctx, {
+        stores: () => map,
+        sidecarDir: dir,
+        storePathFor: (sessionId) => join(dir, `${sessionId}.sqlite`),
+      });
       const status = await definition.handler({
         agent: fakeAgent(session, ROUTE),
         signal: new AbortController().signal,
@@ -106,7 +110,11 @@ describe("applyLossless", () => {
       // Manual compaction runs on an idle session: close the turn first.
       session.append("turn/end", { turn: 3, reason: { kind: "completed" } });
       const before = session.deriveMessages().length;
-      const definition = lcmCommandDefinition(ctx, { stores: () => sidecarMap(dir) });
+      const definition = lcmCommandDefinition(ctx, {
+        stores: () => sidecarMap(dir),
+        sidecarDir: dir,
+        storePathFor: (sessionId) => join(dir, `${sessionId}.sqlite`),
+      });
       const result = await definition.handler({
         agent: fakeAgent(session, ROUTE),
         signal: new AbortController().signal,
@@ -148,7 +156,11 @@ describe("applyLossless", () => {
       appendConversation(session, ROUTE, "carryover work ".repeat(30));
       session.append("turn/start", { turn: 3 });
       session.append("turn/end", { turn: 3, reason: { kind: "completed" } });
-      const definition = lcmCommandDefinition(ctx, { stores: () => sidecarMap(dir) });
+      const definition = lcmCommandDefinition(ctx, {
+        stores: () => sidecarMap(dir),
+        sidecarDir: dir,
+        storePathFor: (sessionId) => join(dir, `${sessionId}.sqlite`),
+      });
       const compact = (id: string) =>
         definition.handler({
           agent: fakeAgent(session, ROUTE),

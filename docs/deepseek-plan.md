@@ -427,6 +427,15 @@ Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
   row per DAG bracket commit with condensed plus leaf seqs, and `recall` plus
   `retrieval` rows through the wired recorder. Suite: 44 tests green
   (`vp check`, `tsc`, `bun run test`, `bun run pack`).
+- Parity slice 3a: `/lcm` grows `status|report|backup|export|diagnose` beside
+  `compact` (new `packages/deepseek/src/lifecycle.ts`, mirroring opencode;
+  single registration with manual subcommand dispatch, since the registry
+  rejects a duplicate `lcm` name). Status keeps the counts lines and adds the
+  meter window with thresholds plus the last pass outcome; report rolls up the
+  slice-2 rows in the OpenCode vocabulary; backup and export write 0600 files;
+  diagnose builds the redacted core bundle with `--save` support. Suite: 50
+  tests green (`vp check`, `tsc`, `bun run test packages/deepseek`,
+  `bun run pack`).
 
 ## Open questions for the owner
 

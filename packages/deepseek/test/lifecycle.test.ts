@@ -1,0 +1,210 @@
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { Context } from "@deepseek-ai/cordis";
+import CommandRuntime from "@deepseek-ai/dsh-commands";
+import { CommandId } from "@deepseek-ai/dsh-commands/brand";
+import SessionStore, { SessionId } from "@deepseek-ai/dsh-session";
+import SessionProjectionRegistry from "@deepseek-ai/dsh-session-projection";
+import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
+import TokenMeter from "@deepseek-ai/dsh-token-meter";
+import ToolRuntime from "@deepseek-ai/dsh-tools";
+import { LcmStore, ingestEntries } from "lossless-core";
+import { describe, expect, it } from "vite-plus/test";
+
+import { lcmCommandDefinition, type LcmCommandDeps } from "../src/command.ts";
+import { createRecord } from "../src/metrics.ts";
+import type { DshRoute } from "../src/model-host.ts";
+import { fakeAgent } from "./support/agent-fake.ts";
+import { appendConversation } from "./support/conversation.ts";
+import { setupContext } from "./support/script-adapter.ts";
+
+const ROUTE: DshRoute = { provider: "test-provider", model: "test-model" };
+
+function tempDir(): string {
+  return mkdtempSync(join(tmpdir(), "deepseek-lcm-"));
+}
+
+async function mountBase(ctx: Context): Promise<void> {
+  await ctx.plugin(SystemPrompt, {});
+  void new ToolRuntime(ctx);
+  void new CommandRuntime(ctx);
+  void new SessionStore(ctx);
+  new SessionProjectionRegistry(ctx);
+  void new TokenMeter(ctx);
+}
+
+function depsFor(dir: string, stores: Map<string, LcmStore>): LcmCommandDeps {
+  return {
+    stores: () => stores,
+    sidecarDir: dir,
+    storePathFor: (sessionId) => join(dir, `${sessionId}.sqlite`),
+  };
+}
+
+function seedStore(dir: string, sessionId: string, texts: string[]): LcmStore {
+  const store = new LcmStore(join(dir, `${sessionId}.sqlite`));
+  ingestEntries(
+    store,
+    texts.map((text, i) => ({
+      entryId: `e${String(i).padStart(2, "0")}`,
+      role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+      text,
+      timestamp: i,
+    })),
+  );
+  return store;
+}
+
+function invoke(
+  ctx: Context,
+  deps: LcmCommandDeps,
+  sessionId: string,
+  rawInput: string,
+): Promise<{ kind: string; text?: string }> {
+  const session = ctx.sessions.get(SessionId(sessionId));
+  if (!session) throw new Error(`no session ${sessionId}`);
+  const definition = lcmCommandDefinition(ctx, deps);
+  return definition.handler({
+    agent: fakeAgent(session, ROUTE),
+    signal: new AbortController().signal,
+    commandId: CommandId(`cmd-${rawInput.split(" ")[0] || "status"}`),
+    rawInput,
+    attachments: [],
+  }) as Promise<{ kind: string; text?: string }>;
+}
+
+describe("lcm read-only verbs", () => {
+  it("status keeps counts and adds window, thresholds, and the last pass", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const session = ctx.sessions.create(SessionId("status-1"), { meta: { cwd: dir } });
+    appendConversation(session, ROUTE, "status notes");
+    const store = seedStore(dir, "status-1", ["status hello"]);
+    createRecord(dir)({
+      kind: "pass",
+      session: "status-1",
+      outcome: "stored",
+      leaf: 2,
+      condensed: 1,
+    });
+    const result = await invoke(
+      ctx,
+      depsFor(dir, new Map([["status-1", store]])),
+      "status-1",
+      "status",
+    );
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("status-1: 1 messages, 0 summaries");
+    expect(result.text).toContain("window (status-1):");
+    expect(result.text).toContain("thresholds: swap 70% / recut 85%");
+    expect(result.text).toContain("last pass (status-1): stored (2 leaf, 1 condensed)");
+  });
+
+  it("report rolls up seeded pass, checkpoint, recall, and retrieval rows", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("rep-1"), { meta: { cwd: dir } });
+    const record = createRecord(dir);
+    record({ kind: "pass", session: "rep-1", outcome: "stored", leaf: 2, condensed: 1 });
+    record({ kind: "pass", session: "rep-1", outcome: "nothing", reason: "span covered" });
+    record({ kind: "compaction-checkpoint", session: "rep-1", summarySeqs: [1], leafSeqs: [2] });
+    record({ kind: "recall", session: "rep-1", tool: "lcm_grep", outcome: "hit" });
+    record({
+      kind: "retrieval",
+      session: "rep-1",
+      stop: "answered",
+      steps: 2,
+      retrievedTokens: 10,
+    });
+    const result = await invoke(ctx, depsFor(dir, new Map()), "rep-1", "report");
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("passes: 2 (stored 1, nothing 1, failed 0); 2 leaf, 1 condensed");
+    expect(result.text).toContain("checkpoints: 1 commit(s)");
+    expect(result.text).toContain("recall: 1 (hit 1)");
+    expect(result.text).toContain("retrieval: 1 (answered 1)");
+    expect(result.text).toContain("last pass: nothing (span covered)");
+  });
+
+  it("backup writes a timestamped copy of the calling session sidecar", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("bak-1"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "bak-1", ["backup hello"]);
+    const target = join(dir, "manual-backup.sqlite");
+    const result = await invoke(
+      ctx,
+      depsFor(dir, new Map([["bak-1", store]])),
+      "bak-1",
+      `backup ${target}`,
+    );
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("LCM backup written:");
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+  });
+
+  it("export writes JSONL with 0600 mode", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("exp-1"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "exp-1", ["export one", "export two"]);
+    const target = join(dir, "out.jsonl");
+    const result = await invoke(
+      ctx,
+      depsFor(dir, new Map([["exp-1", store]])),
+      "exp-1",
+      `export ${target}`,
+    );
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("LCM export: 2 messages + 0 summaries");
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+    const lines = readFileSync(target, "utf8").trim().split("\n");
+    expect(lines.length).toBe(2);
+    for (const line of lines) {
+      const row = JSON.parse(line) as { rowType?: string };
+      expect(row.rowType).toBe("message");
+    }
+  });
+
+  it("diagnose redacts secret material from the bundle", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("diag-1"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "diag-1", ["diagnose hello"]);
+    const secret = `sk-ant-${"A".repeat(20)}`;
+    createRecord(dir)({ kind: "pass", session: "diag-1", outcome: "failed", error: secret });
+    const result = await invoke(
+      ctx,
+      depsFor(dir, new Map([["diag-1", store]])),
+      "diag-1",
+      "diagnose",
+    );
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("LCM diagnose bundle:");
+    expect(result.text).not.toContain(secret);
+    expect(result.text).toContain("[REDACTED]");
+  });
+
+  it("diagnose --save writes the bundle to a file", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("diag-2"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "diag-2", ["diagnose save hello"]);
+    const target = join(dir, "diag.txt");
+    const deps = depsFor(dir, new Map([["diag-2", store]]));
+    const missing = await invoke(ctx, deps, "diag-2", "diagnose --save");
+    expect(missing.kind).toBe("error");
+    expect(missing.text).toContain("name the file to write");
+    const result = await invoke(ctx, deps, "diag-2", `diagnose --save ${target}`);
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("mode 0600");
+    expect(readFileSync(target, "utf8")).toContain("LCM diagnose bundle:");
+  });
+});

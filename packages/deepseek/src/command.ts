@@ -2,13 +2,19 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { CommandInvocation, CommandResult } from "@deepseek-ai/dsh-commands";
 import { CommandDefinitionId } from "@deepseek-ai/dsh-commands/brand";
 import { ManualCompactionError } from "@deepseek-ai/dsh-compaction";
-import type { LcmStore } from "lossless-core";
 
-export interface LcmCommandDeps {
-  readonly stores: () => ReadonlyMap<string, LcmStore>;
-}
+import {
+  handleBackup,
+  handleDiagnose,
+  handleExport,
+  handleReport,
+  handleStatus,
+  type LcmCommandDeps,
+} from "./lifecycle.ts";
 
-const USAGE = "Usage: /lcm [status|compact]";
+export type { LcmCommandDeps } from "./lifecycle.ts";
+
+const USAGE = "Usage: /lcm [status|report|backup|export|diagnose|compact] [--save <file>]";
 
 /** Fail loudly if a locally closed union gains an unhandled member. */
 function assertNever(value: never): never {
@@ -70,27 +76,24 @@ async function handleCompact(ctx: Context, invocation: CommandInvocation): Promi
   }
 }
 
-function handleStatus(deps: LcmCommandDeps): CommandResult {
-  const stores = deps.stores();
-  if (stores.size === 0) return { kind: "success", text: "LCM has mirrored no sessions yet." };
-  const lines = [...stores].map(([id, store]) => {
-    const messages = store.allMessages().length;
-    const summaries = store.allSummaries().length;
-    return `${id}: ${messages} messages, ${summaries} summaries`;
-  });
-  return { kind: "success", text: lines.join("\n") };
-}
-
-/** The `/lcm` command: `status` reports the mirror, `compact` forces one
- * manual compaction through whichever backend the composition mounted. */
+/** The `/lcm` command: read-only operator verbs plus one manual compaction.
+ * Subcommand routing is manual dispatch inside this one handler: the command
+ * registry rejects a second registration under the same name, so `/lcm report`
+ * and friends arrive here as raw input. */
 export function lcmCommandDefinition(ctx: Context, deps: LcmCommandDeps) {
   return {
     definitionId: CommandDefinitionId("deepseek-lossless"),
     name: "lcm",
-    description: "Lossless session memory: status and manual compaction",
+    description: "Lossless session memory: status, report, backup, export, diagnose, compact",
     handler: (invocation: CommandInvocation): Promise<CommandResult> => {
-      const verb = invocation.rawInput.trim().split(/\s+/, 1)[0] ?? "";
-      if (verb === "" || verb === "status") return Promise.resolve(handleStatus(deps));
+      const tokens = invocation.rawInput.trim().split(/\s+/).filter(Boolean);
+      const verb = tokens[0] ?? "";
+      const args = tokens.slice(1);
+      if (verb === "" || verb === "status") return handleStatus(ctx, deps, invocation);
+      if (verb === "report") return Promise.resolve(handleReport(deps, invocation));
+      if (verb === "backup") return Promise.resolve(handleBackup(deps, invocation, args));
+      if (verb === "export") return Promise.resolve(handleExport(deps, invocation, args));
+      if (verb === "diagnose") return handleDiagnose(ctx, deps, invocation, args);
       if (verb === "compact") return handleCompact(ctx, invocation);
       return Promise.resolve({ kind: "error", text: USAGE });
     },
