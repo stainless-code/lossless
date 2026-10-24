@@ -33,6 +33,8 @@ ErrorDocument 404 /lossless/404.html
 </IfModule>
 <FilesMatch "\.mdx?$">
   Header set X-Robots-Tag "noindex"
+  # Negotiated responses serve .md twins at canonical URLs: keep those indexable.
+  Header unset X-Robots-Tag env=REDIRECT_NEGOTIATED_MD
 </FilesMatch>
 <FilesMatch "^llms(-full|-small)?\.txt$">
   Header set X-Robots-Tag "noindex"
@@ -89,17 +91,17 @@ RewriteRule ^ - [L]
 # /lossless/ -> /lossless/index.md
 RewriteCond %{HTTP:Accept} text/markdown [NC]
 RewriteCond %{HTTP:Accept} !text/markdown(?:\s*;\s*(?!q\s*=)[^;,]+)*\s*;\s*q\s*=\s*0(\.0*)?(\s*[;,]|\s*$) [NC]
-RewriteRule ^$ /lossless/index.md [L,T=text/markdown]
+RewriteRule ^$ /lossless/index.md [L,T=text/markdown,E=NEGOTIATED_MD:1]
 
 # /lossless/index.html -> /lossless/index.md (same representation as /lossless/)
 RewriteCond %{HTTP:Accept} text/markdown [NC]
 RewriteCond %{HTTP:Accept} !text/markdown(?:\s*;\s*(?!q\s*=)[^;,]+)*\s*;\s*q\s*=\s*0(\.0*)?(\s*[;,]|\s*$) [NC]
-RewriteRule ^index\.html$ /lossless/index.md [L,T=text/markdown]
+RewriteRule ^index\.html$ /lossless/index.md [L,T=text/markdown,E=NEGOTIATED_MD:1]
 
 # /lossless/<route> -> twin .md
 RewriteCond %{HTTP:Accept} text/markdown [NC]
 RewriteCond %{HTTP:Accept} !text/markdown(?:\s*;\s*(?!q\s*=)[^;,]+)*\s*;\s*q\s*=\s*0(\.0*)?(\s*[;,]|\s*$) [NC]
 RewriteCond %{REQUEST_FILENAME} !\.md$ [NC]
 RewriteCond %{DOCUMENT_ROOT}/lossless/$1.md -f
-RewriteRule ^(.+?)/?$ /lossless/$1.md [L,T=text/markdown]
+RewriteRule ^(.+?)/?$ /lossless/$1.md [L,T=text/markdown,E=NEGOTIATED_MD:1]
 </IfModule>
