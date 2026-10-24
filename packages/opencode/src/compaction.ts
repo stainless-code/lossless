@@ -20,12 +20,13 @@ import {
   buildSynthetic,
   contextChars,
   cutIndexFor,
-  redactSecrets,
+  makeRedactConfigAdapter,
   renderableFrontier,
   renderSummaries,
   tokensFromChars,
   type AppliedSummary,
   type SummaryNode,
+  type WindowOf,
 } from "lossless-core";
 
 import { checkpointText } from "./checkpoint.ts";
@@ -36,7 +37,6 @@ import { appendMetricRow } from "./metrics.ts";
 import { runLosslessPass } from "./pass.ts";
 import type { Sidecars } from "./sidecars.ts";
 import { summarizerConfig } from "./summarizer.ts";
-import type { WindowOf } from "./window.ts";
 
 export interface CheckpointDeps {
   readonly ctx: OpencodeContext;
@@ -64,6 +64,10 @@ interface Row {
 }
 
 export function createCheckpointWriter(deps: CheckpointDeps): CheckpointWriter {
+  // The plugin reader never sets `redactSecrets`, so this always redacts;
+  // the flag check lives in the shared adapter, not at each call site.
+  const redact = makeRedactConfigAdapter(deps.options);
+
   async function apply(event: SessionCompactionEvent): Promise<void> {
     const sessionID = event.sessionID;
     try {
@@ -190,7 +194,7 @@ export function createCheckpointWriter(deps: CheckpointDeps): CheckpointWriter {
       }
     }
 
-    const { applied } = renderableFrontier(nodes, deps.options.summaryTokens, redactSecrets);
+    const { applied } = renderableFrontier(nodes, deps.options.summaryTokens, redact);
     const text = renderCheckpoint(previousText, applied);
     const kept = mapped.raw[cut];
     const keptSource = kept === undefined ? undefined : mapped.sources.get(kept);

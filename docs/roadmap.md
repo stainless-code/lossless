@@ -137,12 +137,14 @@ Where this implementation departs from the paper, and what it does not claim:
     `image` field per the Pi packages documentation: a long session, context
     filling, the swap notification, then `lcm_expand_query` recovering verbatim
     content. Highest-leverage item for adoption, zero functional ROI.
-12. **An OpenCode cockpit.** The promise plugin API has no interactive TUI
-    surface, so the six lifecycle commands cover backup, export, import,
-    diagnose, migrate, and gc, but not the editable settings panel Pi has. A
-    separate TUI plugin could reuse the same command core. Evidence gate: the
-    host exposes a promise TUI extension point, and a live session can change
-    one option and persist it without a restart.
+12. **An OpenCode cockpit (deferred, wont-fix for V2).** The host exposes a
+    TUI extension point with slot mounts (including `session.panel`), so the
+    earlier no-surface gate is stale; the lifecycle commands still cover
+    backup, export, import, diagnose, migrate, and gc, but not the editable
+    settings panel Pi has. The Pi-only surface that stays out of V2 is listed
+    in [the OpenCode comparison](../apps/docs/content/reference/opencode/comparison.mdx).
+    A separate TUI plugin could reuse the same command core. Evidence gate: a
+    live session changes one option through a TUI and persists it without a restart.
 
 ## Considered and deferred
 

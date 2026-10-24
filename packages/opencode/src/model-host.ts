@@ -6,21 +6,19 @@
  * no stop reason, and `capped` stays false. The estimate keeps the summarizer
  * budget and metrics populated without claiming a billed figure. */
 
-import type {
-  CompletionRequest,
-  ModelAnswer,
-  ModelHost,
-  ModelRef as CoreModelRef,
-  Usage,
+import {
+  modelKey,
+  tokensFromChars,
+  type CompletionRequest,
+  type ModelAnswer,
+  type ModelHost,
+  type ModelRef as CoreModelRef,
+  type Usage,
 } from "lossless-core";
 
 import type { ModelRef, OpencodeContext } from "./host.ts";
 
-/** The spelling config zones and metric rows use: `provider/id`, without the
- * variant, because a variant changes settings and not the model itself. */
-export function modelKey(ref: CoreModelRef<ModelRef>): string {
-  return `${ref.model.providerID}/${ref.model.id}`;
-}
+export { modelKey };
 
 /** A `ModelHost` over the OpenCode plugin context. `session` is the model the
  * session last ran under; `find` resolves a catalogue entry when the host
@@ -50,15 +48,14 @@ export function opencodeModelHost(ctx: OpencodeContext, current: ModelRef): Mode
 }
 
 function refOf(model: ModelRef): CoreModelRef<ModelRef> {
-  return { key: modelKey({ key: "", reasoning: false, model }), reasoning: false, model };
+  return { key: modelKey(model), reasoning: false, model };
 }
 
-/** Four characters per token, the same constant the engine uses when a host
- * reports no counters. Cost stays zero because this host does not price the
- * call. */
+/** The estimate uses the engine counter, because this host reports no usage.
+ * Cost stays zero because this host does not price the call. */
 function estimateUsage(prompt: string, text: string): Usage {
-  const input = Math.ceil(prompt.length / 4);
-  const output = Math.ceil(text.length / 4);
+  const input = tokensFromChars(prompt.length);
+  const output = tokensFromChars(text.length);
   return {
     input,
     output,

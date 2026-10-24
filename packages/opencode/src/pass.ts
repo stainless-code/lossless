@@ -4,8 +4,8 @@
 
 import {
   makeLlm,
+  makeRedactConfigAdapter,
   normalizeRole,
-  redactSecrets,
   runCompaction,
   type AlignedEntry,
   type CompactionOutcome,
@@ -134,7 +134,7 @@ export async function runLosslessPass(
       llm,
       // The pass stage is the engine's own vocabulary, so a direct pass labels
       // its completer rows and its engine rows alike.
-      { redact: redactSecrets, session: sessionID, stage },
+      { redact: makeRedactConfigAdapter({}), session: sessionID, stage },
     );
     if (outcome.kind === "stored") {
       // A stored outcome with no model answer is the ladder's mechanical

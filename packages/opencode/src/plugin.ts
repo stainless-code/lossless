@@ -4,10 +4,11 @@ import {
   HEAL_SOURCE_MAX_TOKENS,
   SUMMARIZER_CALL_TOKENS,
   SUMMARIZER_PASS_TOKENS,
+  createWindowLookup,
   LcmStore,
   makeLlm,
+  makeRedactConfigAdapter,
   packageVersionNear,
-  redactSecrets,
   runHeal,
   type LlmComplete,
   type MetricsSink,
@@ -37,7 +38,6 @@ import { DEFAULT_READER_TIMEOUT_MS, createReader } from "./reader.ts";
 import { Sidecars } from "./sidecars.ts";
 import { SUMMARIZER_HEAL_TOKENS, summarizerConfig } from "./summarizer.ts";
 import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
-import { createWindowLookup } from "./window.ts";
 
 export const PLUGIN_ID = "opencode-lossless";
 
@@ -147,6 +147,9 @@ export async function setupOpencodeLossless(
 ): Promise<() => Promise<void>> {
   const options = readOptions(rawOptions);
   if (options.enabled === false) return async () => undefined;
+  // The plugin reader never sets `redactSecrets`, so this always redacts;
+  // the flag check lives in the shared adapter, not at each call site.
+  const redact = makeRedactConfigAdapter(options);
   const sidecars = new Sidecars(options.sidecarDir);
   const registrations: Registration[] = [];
   const windowOf = createWindowLookup(ctx, options.contextWindow);
@@ -163,7 +166,7 @@ export async function setupOpencodeLossless(
   const reader = createReader({
     session: ctx.session,
     sidecars,
-    redact: redactSecrets,
+    redact,
     timeoutMs: options.readerTimeoutMs,
   });
   const checkpoint = options.assembly
@@ -211,7 +214,7 @@ export async function setupOpencodeLossless(
         // A reader child reads the parent's sidecar, never its own.
         store: (sessionId) =>
           sessionId === undefined ? undefined : sidecars.peek(reader.storeSession(sessionId)),
-        redact: redactSecrets,
+        redact,
         record,
         pastSessions: { list: (excludeSessionId) => sidecars.list(excludeSessionId) },
         sessionOf: (sessionID) => reader.storeSession(sessionID),
@@ -286,7 +289,7 @@ export async function setupOpencodeLossless(
             targetTokens: options.summaryTokens,
             callBudgetTokens: options.summarizerTokensPerCall,
             maxTokens: options.summarizerTokensPerHeal,
-            redact: redactSecrets,
+            redact,
             ...(options.healSourceTokens === undefined
               ? {}
               : { sourceTokens: options.healSourceTokens }),

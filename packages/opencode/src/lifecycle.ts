@@ -18,6 +18,7 @@ import { basename, join, resolve } from "node:path";
 
 import {
   LcmStore,
+  makeRedactConfigAdapter,
   SCHEMA_VERSION,
   buildDiagnoseBundle,
   checkIntegrity,
@@ -26,8 +27,8 @@ import {
   exportTranscript,
   importTranscript,
   mergeZone,
+  modelKey,
   parseExport,
-  redactSecrets,
   repairIntegrity,
   storeGeneration,
   type DiagnoseBundleInput,
@@ -49,6 +50,9 @@ export interface LifecycleOptions extends SummarizerOptions {
   readonly healSourceTokens?: number;
   readonly smartZone?: number;
   readonly zones?: Readonly<Record<string, ThresholdConfig>>;
+  /** Reserved seam for the shared redactor. The lifecycle reader never sets
+   * it, so the adapter always redacts; wiring `false` through will skip. */
+  readonly redactSecrets?: boolean;
 }
 
 export interface HealRunRequest {
@@ -214,6 +218,9 @@ export function importCommand(deps: LifecycleDeps): CommandDefinition {
 }
 
 export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
+  // The lifecycle reader never sets `redactSecrets`, so this always redacts;
+  // the flag check lives in the shared adapter, not at each call site.
+  const redact = makeRedactConfigAdapter(deps.options);
   return {
     name: "lossless-diagnose",
     description: "Build a pasteable, redacted diagnostics block for this session.",
@@ -241,9 +248,8 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
         try {
           model = await deps.model?.(input.sessionID);
         } catch {}
-        const modelKey =
-          model === undefined ? "(session model)" : `${model.providerID}/${model.id}`;
-        const zone = model === undefined ? undefined : deps.options.zones?.[modelKey];
+        const modelLabel = model === undefined ? "(session model)" : modelKey(model);
+        const zone = model === undefined ? undefined : deps.options.zones?.[modelLabel];
         let windowTokens: number | undefined;
         if (model !== undefined && deps.window !== undefined) {
           try {
@@ -282,7 +288,7 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
             integrity: { checks: integrity.checks, findings: integrity.findings, repairs },
             depthRows: depthStats(store.allSummaries()),
             pin: null,
-            model: modelKey,
+            model: modelLabel,
             window:
               windowTokens === undefined || effective === null
                 ? null
@@ -316,7 +322,7 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
             (row): row is Record<string, unknown> =>
               isRecord(row) && row.session === input.sessionID,
           ),
-          redact: redactSecrets,
+          redact,
           home: homedir(),
         };
         const bundle = buildDiagnoseBundle(inputBundle);

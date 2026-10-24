@@ -28,9 +28,10 @@ import {
   cutIndexFor,
   cutMayReplace,
   effectiveThresholds,
+  makeRedactConfigAdapter,
   mergeZone,
+  modelKey,
   nextAction,
-  redactSecrets,
   renderableFrontier,
   shouldKickBoundary,
   tailKeyOf,
@@ -42,17 +43,16 @@ import {
   type LcmStore,
   type SummaryNode,
   type ThresholdConfig,
+  type WindowOf,
 } from "lossless-core";
 
 import { checkpointNodes, checkpointText } from "./checkpoint.ts";
 import type { ModelRef, OpencodeContext, SessionContextEvent } from "./host.ts";
 import { storedEntries, type StoredCheckpoint, type StoredEntries } from "./map.ts";
 import { appendMetricRow } from "./metrics.ts";
-import { modelKey } from "./model-host.ts";
 import { runLosslessPass } from "./pass.ts";
 import type { Sidecars } from "./sidecars.ts";
 import { summarizerConfig, type SummarizerOptions } from "./summarizer.ts";
-import type { WindowOf } from "./window.ts";
 
 /** The projection's share of the plugin options, with every default already
  * resolved by `readOptions`. */
@@ -65,6 +65,9 @@ export interface ProjectionOptions extends SummarizerOptions {
   readonly summaryTokens: number;
   /** Used when the host catalogue cannot name this model's window. */
   readonly contextWindow: number;
+  /** Reserved seam for the shared redactor. The plugin reader never sets it,
+   * so the adapter always redacts; wiring `false` through will skip. */
+  readonly redactSecrets?: boolean;
 }
 
 interface SessionState {
@@ -120,6 +123,9 @@ interface OutgoingSegment {
 export function createContextProjector(deps: ProjectorDeps): Projector {
   const states = new Map<string, SessionState>();
   const pass = deps.runPass ?? runLosslessPass;
+  // The plugin reader never sets `redactSecrets`, so this always redacts;
+  // the flag check lives in the shared adapter, not at each call site.
+  const redact = makeRedactConfigAdapter(deps.options);
 
   function stateFor(sessionID: string): SessionState {
     let state = states.get(sessionID);
@@ -250,7 +256,7 @@ export function createContextProjector(deps: ProjectorDeps): Projector {
     const tokens = mapped.tokens ?? tokensFromChars(contextChars(mapped.raw));
     const occupancy = tokens / contextWindow;
     const round3 = (value: number): number => Math.round(value * 1000) / 1000;
-    const key = modelKey({ key: "", reasoning: false, model: event.model });
+    const key = modelKey(event.model);
 
     // A host checkpoint changes the outgoing request without adding an entry
     // this map can align. Only a checkpoint this adapter marked is adopted; any
@@ -295,6 +301,7 @@ export function createContextProjector(deps: ProjectorDeps): Projector {
           round3(occupancy),
           deps.options.summaryTokens,
           mapped,
+          redact,
         );
       }
     } else {
@@ -351,7 +358,7 @@ export function createContextProjector(deps: ProjectorDeps): Projector {
         spanBounds: (aged) =>
           deps.sidecars.peek(sessionID)?.spanBounds(aged.map((entry) => entry.entryId)) ?? null,
         buildSynthetic,
-        redact: redactSecrets,
+        redact,
       },
     );
 
@@ -522,6 +529,7 @@ function seedCheckpoint(
   occupancy: number,
   summaryTokens: number,
   mapped: StoredEntries,
+  redact: (text: string) => string,
 ): void {
   const nodes = checkpointNodes(store, checkpoint);
   const lastId = checkpoint.summaryIds[checkpoint.summaryIds.length - 1] ?? 0;
@@ -529,7 +537,7 @@ function seedCheckpoint(
     cutCount: 0,
     synthetic: { role: "user", content: text, timestamp: Date.now() },
     summaryId: lastId,
-    applied: renderableFrontier(nodes, summaryTokens, redactSecrets).applied,
+    applied: renderableFrontier(nodes, summaryTokens, redact).applied,
     appliedAtOccupancy: occupancy,
     tailKey: tailKeyOf(mapped.raw[0]),
   };
