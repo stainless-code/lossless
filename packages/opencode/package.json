@@ -7,7 +7,8 @@
     "context",
     "lcm",
     "memory",
-    "opencode"
+    "opencode",
+    "tanstack-intent"
   ],
   "homepage": "https://github.com/stainless-code/lossless#readme",
   "bugs": {
@@ -22,7 +23,8 @@
   },
   "files": [
     "dist",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "skills"
   ],
   "type": "module",
   "main": "./dist/index.mjs",
@@ -35,7 +37,7 @@
   "scripts": {
     "pack:watch": "vp pack --watch",
     "prepack": "vp pack",
-    "prepublishOnly": "vp check && vp test"
+    "prepublishOnly": "vp check && vp test && intent validate"
   },
   "devDependencies": {
     "@opencode/ai": "2.1.4",

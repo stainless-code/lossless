@@ -35,7 +35,7 @@ test("publish surface: the manifest keeps every field Pi discovers the extension
   assert.equal(manifest.exports?.["."]?.types, manifest.main?.replace(/\.mjs$/, ".d.mts"));
   assert.ok(existsSync(join(PACKAGE_DIR, "src", "index.ts")));
   assert.equal(manifest.repository?.directory, "packages/pi");
-  assert.deepEqual((manifest.files ?? []).toSorted(), ["CHANGELOG.md", "dist"]);
+  assert.deepEqual((manifest.files ?? []).toSorted(), ["CHANGELOG.md", "dist", "skills"]);
   for (const name of ["README.md", "LICENSE", "CHANGELOG.md"]) {
     assert.ok(existsSync(join(PACKAGE_DIR, name)), `${name} is not in the package`);
   }
@@ -69,8 +69,6 @@ function deadLinks(source: string): string[] {
 
 test("publish surface: a shipped doc links only to what its tarball carries", () => {
   assert.deepEqual(deadLinks("[the roadmap](../../docs/roadmap.md)"), ["../../docs/roadmap.md"]);
-  // The comparison lives in the docs site, so a shipped doc naming it by a
-  // relative path is dead by construction, and the README links the site page.
   assert.deepEqual(
     deadLinks("[the comparison](../../apps/docs/content/reference/pi/comparison.mdx)"),
     ["../../apps/docs/content/reference/pi/comparison.mdx"],
@@ -82,9 +80,6 @@ test("publish surface: a shipped doc links only to what its tarball carries", ()
   assert.ok(adapterFiles().length >= 15, `walked ${adapterFiles().length} adapter files`);
 });
 
-/** The specifiers one file names, in the three forms this repo writes them. A
- * local copy rather than an import from the engine's boundary test: the adapter
- * reaches the engine through its entry, its tests included. */
 const SPECIFIER_PATTERNS = [
   /(?:^|\n)[}\s]*(?:import\s+(?:[^\n]*?\b)?from\s+|from\s+)["']([^"']+)["']/g,
   /(?:^|\n)[}\s]*import\s+["']([^"']+)["']/g,
@@ -115,8 +110,6 @@ function typescriptFiles(dir: string): string[] {
   return files;
 }
 
-/** The adapter's shipped source and its tests. Its test support is shared with
- * the engine on purpose (one HOME guard); the engine's source is not. */
 function adapterFiles(): string[] {
   return [join(PACKAGE_DIR, "src"), join(PACKAGE_DIR, "test")].flatMap((dir) =>
     typescriptFiles(dir),
@@ -142,9 +135,6 @@ test("publish surface: the adapter reads the engine through its entry and no dee
 });
 
 test("publish surface: every package the adapter imports has a field that declares it", () => {
-  // The pack inlines what it can and leaves `peerDependencies` to the host, so an
-  // undeclared host package ships Pi's own code inside dist/index.mjs, and a
-  // runtime `dependencies` entry would leave the engine out of the tarball.
   const shipped = typescriptFiles(join(PACKAGE_DIR, "src"));
   const imported = new Set(shipped.flatMap((file) => specifiers(readFileSync(file, "utf8"))));
   const atRuntime = new Set(shipped.flatMap((file) => valueSpecifiers(readFileSync(file, "utf8"))));
@@ -154,8 +144,6 @@ test("publish surface: every package the adapter imports has a field that declar
   for (const name of [...atRuntime].filter(
     (one) => !one.startsWith("node:") && !one.startsWith("."),
   )) {
-    // `lossless-core` is the one package the adapter inlines on purpose, and it
-    // is the workspace entry below this one.
     if (name === "lossless-core") continue;
     assert.ok(peers.includes(name), `${name} is imported at runtime, so it must be a peer`);
   }

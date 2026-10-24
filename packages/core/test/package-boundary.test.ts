@@ -72,14 +72,10 @@ test("package: the engine depends on its schema library and nothing else", () =>
 test("package: the engine is publishable, and ships dist plus the docs it owns", () => {
   assert.equal(manifest.name, "lossless-core");
   assert.equal(manifest.private, undefined);
-  // npm always includes README and LICENSE from the package directory, so the
-  // file list names only what it has to be told about. changesets writes the
-  // changelog in place, as it does for the adapter.
-  assert.deepEqual(manifest.files, ["dist", "CHANGELOG.md"]);
+  assert.deepEqual(manifest.files, ["dist", "CHANGELOG.md", "skills"]);
   for (const name of ["README.md", "LICENSE", "CHANGELOG.md"]) {
     assert.ok(existsSync(join(PACKAGE_DIR, name)), `${name} is not in the package`);
   }
-  // The root keeps the repo's licence; the package ships the same bytes.
   assert.deepEqual(
     readFileSync(join(PACKAGE_DIR, "LICENSE")),
     readFileSync(join(REPO_ROOT, "LICENSE")),
@@ -88,9 +84,6 @@ test("package: the engine is publishable, and ships dist plus the docs it owns",
 
 const SHIPPED_DOCS = ["README.md", "CHANGELOG.md"];
 
-/** The links in a shipped doc that resolve outside the package or to a file it
- * does not carry. An npm reader has the tarball and nothing around it, so both
- * fail for them. */
 function deadLinks(source: string): string[] {
   const dead: string[] = [];
   for (const match of source.matchAll(/\]\(([^)\s]+)\)/g)) {
@@ -105,8 +98,6 @@ function deadLinks(source: string): string[] {
 }
 
 test("package: a shipped doc links only to what its tarball carries", () => {
-  // A planted violation, so a walk that finds nothing is known to work rather
-  // than known to be silent, and an inside link it has to leave alone.
   assert.deepEqual(deadLinks("[the roadmap](../../docs/roadmap.md)"), ["../../docs/roadmap.md"]);
   assert.deepEqual(deadLinks("[the changelog](./CHANGELOG.md)"), []);
   const problems = SHIPPED_DOCS.flatMap((name) =>
@@ -138,8 +129,6 @@ test("package: every name the engine's README promises is exported", () => {
   const values = imports
     .filter(([, kind]) => kind === undefined)
     .flatMap(([, , names]) => namedIn(names!));
-  // A type import is erased at runtime, so it is checked against the source
-  // that declares it; `bun run typecheck` reads the import itself.
   const types = imports
     .filter(([, kind]) => kind !== undefined)
     .flatMap(([, , names]) => namedIn(names!));
