@@ -109,6 +109,9 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
         const operationSignal = AbortSignal.any([agentSignal, signal]);
         try {
           operationSignal.throwIfAborted();
+          // Retain 0, exactly like the seam's compactNow: the manual path
+          // forces one useful reduction, so retainTokens prices only the
+          // pressure path the seam owns.
           const range = selectDagRange(
             agent.session,
             this.ctx.tokenMeter.measure(agent.session),

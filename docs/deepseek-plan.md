@@ -452,6 +452,14 @@ Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
   caps (20 stores, 40 hits, 1.5 s) and `sessionsScanned` recorded; the
   default scope stays the current session. Suite: 63 tests green
   (`vp check`, `tsc`, `bun run test packages/deepseek`).
+- Parity slice 5: seam policy knobs (`thresholdRatio`, `retainTokens` /
+  `retainRatio`, `headroomTokens`, `modelPolicies`) ride the plugin config
+  into the resolved seam config with adapter-only keys kept off it;
+  summarizer caps thread into the ladder `makeLlm` config and the heal
+  `makeLlm` plus `runHeal` budgets, with an unset heal source deriving
+  8 x target clamped 3000..24000 inside core `runHeal`; `reasoning` stays
+  false per the harness sources. Suite: 72 tests green (`vp check`, `tsc`,
+  `bun run test packages/deepseek`, `bun run pack`).
 
 ## Open questions for the owner
 

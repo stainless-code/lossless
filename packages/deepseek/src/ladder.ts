@@ -6,6 +6,8 @@ import {
   createUsageTally,
   makeLlm,
   runCompaction,
+  SUMMARIZER_CALL_TOKENS,
+  SUMMARIZER_HEAL_TOKENS,
   tokenUsageOfTally,
   type CompactionSpanEntry,
   type CompletionRequest,
@@ -14,6 +16,7 @@ import {
   type ModelAnswer,
   type ModelHost,
   type ModelRef,
+  type SummarizerConfig,
   type UsageTally,
 } from "lossless-core";
 
@@ -35,6 +38,19 @@ export interface LosslessEngineDeps {
   readonly record?: (row: Record<string, unknown>) => void;
   readonly summaryTokens?: number;
   readonly leafChunkTokens?: number;
+  /** Tokens one summarizer request may cost before it is refused rather than
+   * paid for. Unset keeps the core default (60,000). */
+  readonly summarizerTokensPerCall?: number;
+  /** Tokens one pass may spend across all of its calls. Unset keeps the core
+   * default (250,000). */
+  readonly summarizerTokensPerPass?: number;
+  /** Tokens one heal run may spend across all of its calls. Unset keeps the
+   * core heal default (120,000). */
+  readonly summarizerTokensPerHeal?: number;
+  /** Estimated tokens one heal node may read as source. Unset derives the
+   * core default inside runHeal: 8 x the node target, clamped to 3,000
+   * through 24,000 and to the request budget. */
+  readonly healSourceTokens?: number;
   /** Route automatic pressure compaction through the DAG bracket instead of
    * the seam. Default false: the B path stays the observable auto behavior
    * while the bracket proves itself on the manual path. */
@@ -52,6 +68,58 @@ export interface CheckpointMemory {
 
 const DEFAULT_SUMMARY_TOKENS = 1500;
 const DEFAULT_LEAF_CHUNK_TOKENS = 3000;
+
+/** makeLlm config for one ladder pass. Set keys ride the plugin config;
+ * absent keys stay absent so makeLlm keeps the core defaults. */
+export function passLlmConfig(
+  deps: Pick<LosslessEngineDeps, "summarizerTokensPerCall" | "summarizerTokensPerPass">,
+): SummarizerConfig {
+  return {
+    ...(deps.summarizerTokensPerCall === undefined
+      ? {}
+      : { summarizerTokensPerCall: deps.summarizerTokensPerCall }),
+    ...(deps.summarizerTokensPerPass === undefined
+      ? {}
+      : { summarizerTokensPerPass: deps.summarizerTokensPerPass }),
+  };
+}
+
+/** Run budgets for one heal, mirroring the pi and opencode adapters: the run
+ * cap is the per-heal budget, the node target is the summary target, the
+ * per-request cap is the per-call budget, and the source window rides only
+ * when configured. An unset source derives inside core runHeal as 8 x the
+ * target, clamped to 3,000 through 24,000 and to the request budget. */
+export function healRunBudgets(
+  deps: Pick<
+    LosslessEngineDeps,
+    "summaryTokens" | "summarizerTokensPerCall" | "summarizerTokensPerHeal" | "healSourceTokens"
+  >,
+): {
+  readonly maxTokens: number;
+  readonly targetTokens: number;
+  readonly callBudgetTokens: number;
+  readonly sourceTokens?: number;
+} {
+  return {
+    maxTokens: deps.summarizerTokensPerHeal ?? SUMMARIZER_HEAL_TOKENS,
+    targetTokens: deps.summaryTokens ?? DEFAULT_SUMMARY_TOKENS,
+    callBudgetTokens: deps.summarizerTokensPerCall ?? SUMMARIZER_CALL_TOKENS,
+    ...(deps.healSourceTokens === undefined ? {} : { sourceTokens: deps.healSourceTokens }),
+  };
+}
+
+/** makeLlm config for one heal run: the per-request cap plus the heal run
+ * budget standing in for the per-pass budget, like pi and opencode. */
+export function healLlmConfig(
+  deps: Pick<LosslessEngineDeps, "summarizerTokensPerCall" | "summarizerTokensPerHeal">,
+): SummarizerConfig {
+  return {
+    ...(deps.summarizerTokensPerCall === undefined
+      ? {}
+      : { summarizerTokensPerCall: deps.summarizerTokensPerCall }),
+    summarizerTokensPerPass: deps.summarizerTokensPerHeal ?? SUMMARIZER_HEAL_TOKENS,
+  };
+}
 
 export function checkpointMemory(
   stores?: (sessionId: string) => LcmStore | undefined,
@@ -98,7 +166,11 @@ export class SpanAlreadyMemoryError extends Error {
 
 /** Shared provider/model fallback chain (explicit config, latest routed
  * request, agent options) for the seam path and the DAG bracket alike. Reads
- * only the host session header and agent options beside the host SDK. */
+ * only the host session header and agent options beside the host SDK.
+ * Per-model policy overrides (modelPolicies) ride the seam config untouched:
+ * the seam merges them per routed target on its pressure path, while this
+ * chain stays the one summarization target both paths share so the
+ * summarizer cannot drift between them. */
 export function resolveSummarizationTarget(
   config: { summarizationProvider: string; summarizationModel: string },
   agent: Agent,
@@ -161,16 +233,12 @@ export async function runLadder(
   // and the rows fall back to the global log, never a half-wired file.
   const sink: MetricsSink | undefined =
     record === undefined ? undefined : (row) => record({ ...row });
-  const llm = makeLlm(
-    tracker.wrap(host),
-    {},
-    {
-      session: sessionId,
-      stage: "blocking",
-      span: { firstEntryId: first.entryId, lastEntryId: last.entryId },
-      ...(sink === undefined ? {} : { sink }),
-    },
-  );
+  const llm = makeLlm(tracker.wrap(host), passLlmConfig(lossless), {
+    session: sessionId,
+    stage: "blocking",
+    span: { firstEntryId: first.entryId, lastEntryId: last.entryId },
+    ...(sink === undefined ? {} : { sink }),
+  });
   if (!llm) throw new Error("lossless compaction: no summarizer model resolves");
   const store = lossless.store(sessionId);
   if (!store) throw new Error(`lossless compaction: no sidecar store for session ${sessionId}`);

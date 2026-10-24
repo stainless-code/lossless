@@ -33,6 +33,7 @@ import {
   type LlmComplete,
 } from "lossless-core";
 
+import { healLlmConfig, healRunBudgets } from "./ladder.ts";
 import { dshModelHost } from "./model-host.ts";
 
 export interface LcmCommandDeps {
@@ -44,6 +45,16 @@ export interface LcmCommandDeps {
   readonly sidecarDir: string;
   /** File path of one session's sidecar, for backup targets. */
   readonly storePathFor: (sessionId: string) => string;
+  /** Tokens one repaired node targets. Unset keeps the ladder default. */
+  readonly summaryTokens?: number;
+  /** Tokens one summarizer request may cost. Unset keeps the core default. */
+  readonly summarizerTokensPerCall?: number;
+  /** Tokens one heal run may spend across all of its calls. Unset keeps the
+   * core heal default. */
+  readonly summarizerTokensPerHeal?: number;
+  /** Estimated tokens one heal node may read as source. Unset derives the
+   * core default (8 x target, clamped) inside runHeal. */
+  readonly healSourceTokens?: number;
 }
 
 const STAMP = (): string => new Date().toISOString().replace(/[:.]/g, "-");
@@ -631,9 +642,9 @@ function healReport(outcome: HealOutcome): string {
 const healInFlight = new Set<string>();
 
 /** Repair mechanically truncated nodes from their stored sources. Dry-run
- * default; only --apply calls the model. Budgets are the core heal defaults:
- * this adapter has no calibrated summarizer budgets yet (slice 5 owns them),
- * so the forward dependency is to thread them through here when they land. */
+ * default; only --apply calls the model. Budgets ride the plugin config
+ * through these deps (slice 5); unset keys keep the core heal defaults, so
+ * compositions that omit them behave exactly as slice 3b did. */
 export async function handleHeal(
   ctx: Context,
   deps: LcmCommandDeps,
@@ -672,7 +683,13 @@ export async function handleHeal(
     if (!apply) {
       const outcome = await runHeal(
         store,
-        { session: sessionId, redact: redactSecrets, dryRun: true, ...maxNodeInput },
+        {
+          session: sessionId,
+          redact: redactSecrets,
+          dryRun: true,
+          ...healRunBudgets(deps),
+          ...maxNodeInput,
+        },
         healDryRunLlm,
       );
       return { kind: "success", text: healReport(outcome) };
@@ -682,15 +699,11 @@ export async function handleHeal(
       ...(route === undefined ? {} : { defaultRoute: route }),
       signal: invocation.signal,
     });
-    const llm = makeLlm(
-      host,
-      {},
-      {
-        session: sessionId,
-        stage: "heal",
-        span: { firstEntryId: span.first, lastEntryId: span.last },
-      },
-    );
+    const llm = makeLlm(host, healLlmConfig(deps), {
+      session: sessionId,
+      stage: "heal",
+      span: { firstEntryId: span.first, lastEntryId: span.last },
+    });
     if (!llm) {
       return {
         kind: "error",
@@ -699,7 +712,7 @@ export async function handleHeal(
     }
     const outcome = await runHeal(
       store,
-      { session: sessionId, redact: redactSecrets, ...maxNodeInput },
+      { session: sessionId, redact: redactSecrets, ...healRunBudgets(deps), ...maxNodeInput },
       llm,
     );
     return { kind: "success", text: healReport(outcome) };

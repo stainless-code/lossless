@@ -1,4 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
+import type { ModelCompactPolicyConfig } from "@deepseek-ai/dsh-compaction-basic";
 import { SidecarStores, redactSecrets, type LcmStore } from "lossless-core";
 
 import { registerLcmCommand } from "./command.ts";
@@ -21,6 +22,35 @@ export interface LosslessPluginConfig {
   readonly leafChunkTokens?: number;
   readonly summarizationProvider?: string;
   readonly summarizationModel?: string;
+  /** Pressure fraction of the priced window that trips automatic compaction.
+   * Seam default 0.8. Rides the seam config. */
+  readonly thresholdRatio?: number;
+  /** Recent context retained as an absolute token budget. Mutually exclusive
+   * with retainRatio; the seam default shape is the ratio form (0.16).
+   * Rides the seam config; the manual path keeps the seam's 0 retain. */
+  readonly retainTokens?: number;
+  /** Recent context retained as a fraction of the priced window. Seam
+   * default 0.16; mutually exclusive with retainTokens. Rides the seam. */
+  readonly retainRatio?: number;
+  /** Pressure headroom beyond the routed output reservation. Seam default
+   * 65536; the seam also defaults its summary cap to it. Rides the seam. */
+  readonly headroomTokens?: number;
+  /** Exact provider/model policy overrides, merged over the defaults by the
+   * seam per routed target. Duplicate targets fail load. Rides the seam. */
+  readonly modelPolicies?: ModelCompactPolicyConfig[];
+  /** Tokens one summarizer request may cost before it is refused. Default
+   * 60000. Adapter-only: never rides the seam config. */
+  readonly summarizerTokensPerCall?: number;
+  /** Tokens one pass may spend across all of its calls. Default 250000.
+   * Adapter-only. */
+  readonly summarizerTokensPerPass?: number;
+  /** Tokens one heal run may spend across all of its calls. Default 120000.
+   * Adapter-only. */
+  readonly summarizerTokensPerHeal?: number;
+  /** Estimated tokens one heal node may read as source. Unset derives 8 x
+   * summaryTokens, clamped to 3000 through 24000 and the request budget.
+   * Adapter-only. */
+  readonly healSourceTokens?: number;
 }
 
 const DEFAULT_SIDECAR_DIR = "./.lossless";
@@ -105,6 +135,13 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
       ...(config.summarizationModel === undefined
         ? {}
         : { summarizationModel: config.summarizationModel }),
+      // Seam policy knobs only: the seam's resolveConfig rejects unknown
+      // keys, so every adapter-only key stays on our own deps below.
+      ...(config.thresholdRatio === undefined ? {} : { thresholdRatio: config.thresholdRatio }),
+      ...(config.retainTokens === undefined ? {} : { retainTokens: config.retainTokens }),
+      ...(config.retainRatio === undefined ? {} : { retainRatio: config.retainRatio }),
+      ...(config.headroomTokens === undefined ? {} : { headroomTokens: config.headroomTokens }),
+      ...(config.modelPolicies === undefined ? {} : { modelPolicies: config.modelPolicies }),
     },
     {
       store: (sessionId) => sidecars.peek(sessionId),
@@ -115,6 +152,18 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
       ...(config.summaryTokens === undefined ? {} : { summaryTokens: config.summaryTokens }),
       ...(config.leafChunkTokens === undefined ? {} : { leafChunkTokens: config.leafChunkTokens }),
       ...(config.bracketAuto === undefined ? {} : { bracketAuto: config.bracketAuto }),
+      ...(config.summarizerTokensPerCall === undefined
+        ? {}
+        : { summarizerTokensPerCall: config.summarizerTokensPerCall }),
+      ...(config.summarizerTokensPerPass === undefined
+        ? {}
+        : { summarizerTokensPerPass: config.summarizerTokensPerPass }),
+      ...(config.summarizerTokensPerHeal === undefined
+        ? {}
+        : { summarizerTokensPerHeal: config.summarizerTokensPerHeal }),
+      ...(config.healSourceTokens === undefined
+        ? {}
+        : { healSourceTokens: config.healSourceTokens }),
     },
   );
   const stopCommand = registerLcmCommand(ctx, {
@@ -122,6 +171,15 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
     storeFor: (sessionId) => sidecars.for(sessionId),
     sidecarDir: dir,
     storePathFor: (sessionId) => sidecars.pathFor(sessionId),
+    // The heal verbs budget from these; unset keys keep core defaults.
+    ...(config.summaryTokens === undefined ? {} : { summaryTokens: config.summaryTokens }),
+    ...(config.summarizerTokensPerCall === undefined
+      ? {}
+      : { summarizerTokensPerCall: config.summarizerTokensPerCall }),
+    ...(config.summarizerTokensPerHeal === undefined
+      ? {}
+      : { summarizerTokensPerHeal: config.summarizerTokensPerHeal }),
+    ...(config.healSourceTokens === undefined ? {} : { healSourceTokens: config.healSourceTokens }),
   });
   return () => {
     stopMirror();

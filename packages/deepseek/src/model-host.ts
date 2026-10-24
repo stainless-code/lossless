@@ -25,8 +25,14 @@ export interface DshHostOptions {
   readonly signal?: AbortSignal;
 }
 
-/** One ref for one route. `reasoning` stays false until the host resolves
- * model info, so a reasoning model never silently spends the output cap. */
+/** One ref for one route. `reasoning` stays false: core adds
+ * REASONING_HEADROOM to the request cap when it is true (lossless-core
+ * llm.ts requestOf), and no harness source hands this host a synchronous
+ * boolean. resolveModelInfo is async and the DeepSeek adapter always reports
+ * an efforts table, off-only when thinking is disabled, never a per-model
+ * boolean (harness llm-deepseek model-info.ts modelInfo); the sibling
+ * opencode adapter hardwires the same false (opencode model-host.ts). A
+ * reasoning model therefore never silently spends the output cap here. */
 export function dshRef(route: DshRoute): ModelRef<DshRoute> {
   return { key: `${route.provider}/${route.model}`, reasoning: false, model: route };
 }
