@@ -124,16 +124,15 @@ export function createUsageTally(): UsageTally {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 }
 
-/** Add one call's counts. Missing legs count as zero so a partial report
- * cannot turn the total into NaN. */
+/** Add one call's counts. Legs are required numbers per the core Usage type. */
 export function addUsageTally(
   tally: UsageTally,
-  delta: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number },
+  delta: { input: number; output: number; cacheRead: number; cacheWrite: number },
 ): void {
-  tally.input += delta.input ?? 0;
-  tally.output += delta.output ?? 0;
-  tally.cacheRead += delta.cacheRead ?? 0;
-  tally.cacheWrite += delta.cacheWrite ?? 0;
+  tally.input += delta.input;
+  tally.output += delta.output;
+  tally.cacheRead += delta.cacheRead;
+  tally.cacheWrite += delta.cacheWrite;
 }
 
 /** Fold a tally into provider token names. Undefined when nothing was billed,

@@ -37,32 +37,26 @@ function toCoreDeps(deps: RecallDeps): CoreRecallDeps {
   };
 }
 
-function coreDepsFor(
-  store: LcmStore | undefined,
-  redact: (text: string) => string,
-): CoreRecallDeps {
-  return {
-    storeFor: () => store,
-    redact,
-  };
-}
-
+/** Session-less answer for tests: binds one store through the single
+ * converter above with the empty session id. */
 export function grepAnswer(
   store: LcmStore | undefined,
   redact: (text: string) => string,
   args: { query: string; limit?: number },
 ): string {
-  return coreGrepAnswer(coreDepsFor(store, redact), "", args);
+  return coreGrepAnswer(toCoreDeps({ store: () => store, redact }), "", args);
 }
 
+/** Session-less answer for tests: see grepAnswer. */
 export function describeAnswer(
   store: LcmStore | undefined,
   redact: (text: string) => string,
   args: { id: number },
 ): string {
-  return coreDescribeAnswer(coreDepsFor(store, redact), "", args);
+  return coreDescribeAnswer(toCoreDeps({ store: () => store, redact }), "", args);
 }
 
+/** Session-less answer for tests: see grepAnswer. */
 export function expandAnswer(
   store: LcmStore | undefined,
   redact: (text: string) => string,
@@ -75,7 +69,7 @@ export function expandAnswer(
     max_chars?: number;
   },
 ): string {
-  return coreExpandAnswer(coreDepsFor(store, redact), "", args);
+  return coreExpandAnswer(toCoreDeps({ store: () => store, redact }), "", args);
 }
 
 function sessionOf(exec: ToolRunContext): string | undefined {

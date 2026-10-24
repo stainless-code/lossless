@@ -271,7 +271,6 @@ export function selectDagRange(
   retainTokens: number,
 ): DagCommitSelection | null {
   const pricedNodes = measurement.nodes;
-  if (pricedNodes.length === 0) return null;
   const surfaceNodes = session.surface.nodes;
   if (
     surfaceNodes.length !== pricedNodes.length ||

@@ -33,6 +33,7 @@ class SessionSidecars extends SidecarStores {
     super({ dir });
   }
 
+  /** Store plus live index for one session, creating both on first use. */
   entryFor(sessionId: string): { store: LcmStore; index: MessageIndex } {
     const store = this.for(sessionId);
     let index = this.indexes.get(sessionId);
@@ -43,6 +44,7 @@ class SessionSidecars extends SidecarStores {
     return { store, index };
   }
 
+  /** Live index for a session without creating a store, if mirrored yet. */
   peekIndex(sessionId: string): MessageIndex | undefined {
     return this.indexes.get(sessionId);
   }
@@ -67,14 +69,13 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   if (config.enabled !== true) return () => undefined;
   const dir = config.sidecarDir ?? DEFAULT_SIDECAR_DIR;
   const sidecars = new SessionSidecars(dir);
-  const sidecarFor = (sessionId: string): { store: LcmStore; index: MessageIndex } =>
-    sidecars.entryFor(sessionId);
   const stopMirror = ctx.on("session/event", (live, event) => {
-    const entry = sidecarFor(String(live.id));
+    const entry = sidecars.entryFor(String(live.id));
     mirrorEvent(live, event, entry.store, entry.index);
   });
   const stopTools = registerRecallTools(ctx, {
-    store: (sessionId) => (sessionId === undefined ? undefined : sidecarFor(sessionId).store),
+    store: (sessionId) =>
+      sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
     redact: redactSecrets,
   });
   // Hydration fallback: a resumed session rebuilds its last checkpoint

@@ -5,18 +5,15 @@ import {
   addUsageTally,
   createUsageTally,
   makeLlm,
-  resolveFallbackTarget,
   runCompaction,
-} from "lossless-core";
-import { tokenUsageOfTally } from "lossless-core";
-import type { UsageTally } from "lossless-core";
-import type {
-  CompactionSpanEntry,
-  CompletionRequest,
-  LcmStore,
-  ModelAnswer,
-  ModelHost,
-  ModelRef,
+  tokenUsageOfTally,
+  type CompactionSpanEntry,
+  type CompletionRequest,
+  type LcmStore,
+  type ModelAnswer,
+  type ModelHost,
+  type ModelRef,
+  type UsageTally,
 } from "lossless-core";
 
 import type { MessageIndex } from "./ingest.ts";
@@ -95,9 +92,8 @@ export class SpanAlreadyMemoryError extends Error {
 }
 
 /** Shared provider/model fallback chain (explicit config, latest routed
- * request, agent options) for the seam path and the DAG bracket alike. The
- * ordering lives in the core resolveFallbackTarget seam; this wrapper keeps
- * only the host session and option reads. */
+ * request, agent options) for the seam path and the DAG bracket alike. Reads
+ * only the host session header and agent options beside the host SDK. */
 export function resolveSummarizationTarget(
   config: { summarizationProvider: string; summarizationModel: string },
   agent: Agent,
@@ -119,7 +115,7 @@ export function resolveSummarizationTarget(
     options.model.length > 0
       ? { provider: options.provider, model: options.model }
       : undefined;
-  return resolveFallbackTarget([configured, latest, agentTarget]);
+  return configured ?? latest ?? agentTarget;
 }
 
 /** What one ladder run stored: the condensed text plus the sidecar ids and

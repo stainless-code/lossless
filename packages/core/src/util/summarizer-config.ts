@@ -53,17 +53,6 @@ export interface HealBudgets {
   readonly sourceTokens?: number;
 }
 
-/** First defined fallback wins: configured, then routed, then agent. The
- * DeepSeek adapter reads this through its resolveSummarizationTarget wrapper,
- * which keeps the host session and option reads beside the host SDK; the
- * ordering lives here, so the adapters cannot drift. */
-export function resolveFallbackTarget<T>(candidates: readonly (T | undefined)[]): T | undefined {
-  for (const candidate of candidates) {
-    if (candidate !== undefined) return candidate;
-  }
-  return undefined;
-}
-
 /** The calibrated heal target and source window. A null ratio keeps the
  * configured reading, which is what an uncalibrated host passes. */
 export function healBudgets(

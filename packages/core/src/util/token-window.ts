@@ -1,9 +1,10 @@
 /** Shared token and window math every harness adapter uses. The estimator
  * counts four characters per token, the overflow parser reads the window a
  * provider named, and the lookup and key helpers name a model the same way
- * in config zones and metric rows. Pi already reads the estimator and the
- * parser from the core entry; OpenCode reads the lookup and the key from
- * here through its thin wrappers, so the two adapters cannot drift. */
+ * in config zones and metric rows. Pi reads the estimator and the parser
+ * from the core entry; OpenCode and DeepSeek read the lookup, the key, and
+ * the range selector through their thin wrappers, so the adapters cannot
+ * drift from the contract stated here. */
 
 /** Token math shared with adapters: `tokensFromChars` counts chars at four per token, `scaledBudget` calibrates a budget. */
 export { scaledBudget, tokensFromChars } from "../estimate-tokens.ts";
@@ -127,12 +128,11 @@ export interface CompactableRange<S> {
 }
 
 /** The next range starting at `firstIdx` while retaining a priced recent tail
- * and never splitting a tool-call/result pair. The DeepSeek adapter reads
- * this through its selectDagRange wrapper, which keeps the fail-closed
- * surface check and the system-head offset beside the host session; the
- * accumulation, the admission, and the boundary walk live here, so the two
- * copies cannot drift. Null means no safe useful range exists: no nodes, the
- * retained tail already reaches the head, or no balanced boundary is left. */
+ * and never splitting a tool-call/result pair. Adapters keep host-side
+ * checks beside their session; the accumulation, the admission, and the
+ * boundary walk live here. Null means no safe useful range exists: no nodes,
+ * the retained tail already reaches the head, or no balanced boundary is
+ * left. */
 export function selectCompactableRange<S>(
   nodes: readonly CompactableNode<S>[],
   firstIdx: number,
