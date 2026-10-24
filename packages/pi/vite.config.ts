@@ -7,9 +7,6 @@ import { defineConfig } from "vite-plus";
 const engine = fileURLToPath(new URL("../core/src/index.ts", import.meta.url));
 
 export default defineConfig({
-  resolve: {
-    alias: { "lossless-core": engine },
-  },
   pack: {
     deps: {
       resolveDepSubpath: true,
@@ -20,8 +17,10 @@ export default defineConfig({
     sourcemap: true,
     outDir: "dist",
     target: "node22.19.0",
+    tsconfig: "tsconfig.build.json",
   },
   test: {
+    alias: { "lossless-core": engine },
     setupFiles: ["../core/test/setup.ts"],
   },
 });

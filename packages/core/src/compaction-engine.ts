@@ -5,7 +5,9 @@ import { ingestEntries, type IngestibleEntry } from "./ingest.ts";
 import {
   appendMetric,
   type CompactionNoopReason,
+  type CompactionStage,
   type MetricSpan,
+  type MetricsSink,
   type SummaryLevel,
   type SummaryStage,
 } from "./metrics.ts";
@@ -14,6 +16,8 @@ import {
   type LcmRole,
   type StoredMessage,
   type SummaryNode,
+  type SummaryQuality,
+  TRUNCATED_SUMMARY_PREFIX,
   normalizeRole,
 } from "./store.ts";
 import {
@@ -82,7 +86,7 @@ export async function runCompaction(
      * fallback event cannot be attributed to a session. */
     session?: string;
     maxDepth?: number;
-    stage?: "blocking" | "async" | "direct";
+    stage?: CompactionStage;
   },
 ): Promise<CompactionOutcome> {
   const targetTokens = input.targetTokens ?? 1500;
@@ -90,6 +94,7 @@ export async function runCompaction(
   const leafChunkBudget = opts?.leafChunkTokens ?? LEAF_CHUNK_TOKENS;
   const redact = opts?.redact ?? ((t: string) => t);
   const session = opts?.session;
+  const emit = llm.metrics ?? appendMetric;
 
   const ingestible: IngestibleEntry[] = input.span.map((e) => ({
     entryId: e.entryId,
@@ -132,6 +137,7 @@ export async function runCompaction(
       // and the clip metric stays quiet.
       const refs = store.filesForMessages(remaining.map((m) => m.id));
       const refByMessage = new Map(refs.map((r) => [r.messageId, r]));
+      let sourceClipped = false;
       const items = remaining.flatMap((m) => {
         const ref = refByMessage.get(m.id);
         // The summarizer never reads a stored body unmasked. The mask runs on
@@ -140,7 +146,8 @@ export async function runCompaction(
         if (ref) return [{ role: m.role, text: redact(filePreviewText(ref)) }];
         const clipped = clipForSummary(redact(m.text), m.entryId, maxChunkChars);
         if (clipped.droppedChars > 0) {
-          appendMetric({
+          sourceClipped = true;
+          emit({
             event: "lcm",
             kind: "summary-input-clipped",
             session,
@@ -152,6 +159,7 @@ export async function runCompaction(
         return [{ role: m.role, text: clipped.text }];
       });
       const sourceChars = items.reduce((n, m) => n + m.text.length, 0);
+      const started = Date.now();
       const answer = await summarizeWithEscalation(items, leafChunkBudget / 2, llm, session);
       const { text, level } = answer;
       paid = true;
@@ -167,17 +175,20 @@ export async function runCompaction(
       }
       const stored = storedSummaryText(text, level, redact);
       const tokens = estimateTokens(stored);
+      const quality = leafQuality(level, sourceClipped);
       const inserted = store.insertSummary({
         kind: "leaf",
         text: stored,
         tokens,
         depth: 0,
+        quality,
         firstEntryId: chunkHead.entryId,
         lastEntryId: chunkTail.entryId,
         messageIds: remaining.map((m) => m.id),
         fileIds: [...new Set(refs.map((r) => r.fileId))],
         ...(answer.thoroughText === undefined ? {} : { thoroughText: answer.thoroughText }),
       });
+      const durationMs = Date.now() - started;
       if (!inserted.created) {
         reportSkippedExisting(
           inserted.id,
@@ -187,6 +198,8 @@ export async function runCompaction(
           0,
           [chunkHead.entryId, chunkTail.entryId],
           tokens,
+          durationMs,
+          emit,
         );
         if (inserted.foreignLive) {
           claimedLeaves.push({
@@ -205,8 +218,11 @@ export async function runCompaction(
             inserted.existingTokens,
             stored,
             tokens,
+            quality,
             session,
             "leaf",
+            started,
+            emit,
           )
         ) {
           leafIds.push(inserted.id);
@@ -216,6 +232,8 @@ export async function runCompaction(
             session,
             [chunkHead.entryId, chunkTail.entryId],
             sourceChars,
+            inserted.id,
+            emit,
           );
         }
         return;
@@ -226,6 +244,8 @@ export async function runCompaction(
         session,
         [chunkHead.entryId, chunkTail.entryId],
         sourceChars,
+        inserted.id,
+        emit,
       );
       if (tokens > targetTokens || answer.retried) {
         reportOversize(
@@ -236,24 +256,28 @@ export async function runCompaction(
           answer,
           [chunkHead.entryId, chunkTail.entryId],
           session,
+          inserted.id,
+          emit,
         );
       }
       leafIds.push(inserted.id);
-      appendMetric({
+      emit({
         event: "lcm",
         kind: "summary-stored",
         stage: "leaf",
         level,
+        quality,
         depth: 0,
         tokens,
         summaryId: inserted.id,
         session,
         span: [chunkHead.entryId, chunkTail.entryId],
+        durationMs,
       });
       return;
     }
     if (paid) {
-      appendMetric({
+      emit({
         event: "lcm",
         kind: "summary-skipped-covered",
         stage: "leaf",
@@ -291,6 +315,7 @@ export async function runCompaction(
     const groupTail = group[group.length - 1];
     if (!groupHead || !groupTail) break;
     const depth = groupHead.depth + 1;
+    const started = Date.now();
     const answer = await summarizeWithEscalation(
       group.map((n) => ({ role: "summary", text: n.text })),
       targetTokens,
@@ -302,11 +327,13 @@ export async function runCompaction(
     const sourceChars = group.reduce((n, s) => n + s.text.length, 0);
     const stored = storedSummaryText(text, level, redact);
     const tokens = estimateTokens(stored);
+    const quality = condensedQuality(level, group);
     const inserted = store.insertSummary({
       kind: "condensed",
       text: stored,
       tokens,
       depth,
+      quality,
       firstEntryId: groupHead.firstEntryId,
       lastEntryId: groupTail.lastEntryId,
       childSummaryIds: group.map((n) => n.id),
@@ -315,6 +342,7 @@ export async function runCompaction(
       fileIds: store.fileIdsForSummaries(group.map((n) => n.id)),
       ...(answer.thoroughText === undefined ? {} : { thoroughText: answer.thoroughText }),
     });
+    const durationMs = Date.now() - started;
     if (!inserted.created) {
       // A second pass condensed the same group: the span-unique index
       // discarded this row, which otherwise reads as a fresh insert.
@@ -326,6 +354,8 @@ export async function runCompaction(
         depth,
         span,
         tokens,
+        durationMs,
+        emit,
       );
       if (
         inserted.own &&
@@ -335,32 +365,47 @@ export async function runCompaction(
           inserted.existingTokens,
           stored,
           tokens,
+          quality,
           session,
           "condensed",
+          started,
+          emit,
         )
       ) {
         condensedIds.push(inserted.id);
-        reportFallbackStored("condensed", level, session, span, sourceChars);
+        reportFallbackStored("condensed", level, session, span, sourceChars, inserted.id, emit);
       }
       frontier = store.frontier(from, bounds.lastEntryId);
       frontierTok = frontierTokens(frontier);
       continue;
     }
     condensedIds.push(inserted.id);
-    reportFallbackStored("condensed", level, session, span, sourceChars);
+    reportFallbackStored("condensed", level, session, span, sourceChars, inserted.id, emit);
     if (tokens > targetTokens || answer.retried) {
-      reportOversize("condensed", depth, tokens, targetTokens, answer, span, session);
+      reportOversize(
+        "condensed",
+        depth,
+        tokens,
+        targetTokens,
+        answer,
+        span,
+        session,
+        inserted.id,
+        emit,
+      );
     }
-    appendMetric({
+    emit({
       event: "lcm",
       kind: "summary-stored",
       stage: "condensed",
       level,
+      quality,
       depth,
       tokens,
       summaryId: inserted.id,
       session,
       span,
+      durationMs,
     });
     frontier = store.frontier(from, bounds.lastEntryId);
     frontierTok = frontierTokens(frontier);
@@ -374,6 +419,7 @@ export async function runCompaction(
   const lone = frontier.length === 1 ? frontier[0] : undefined;
   if (lone && frontierTok > targetTokens * 2) {
     const beforeTokens = lone.tokens;
+    const started = Date.now();
     const answer = await summarizeTerse(
       [{ role: "summary", text: lone.text }],
       targetTokens,
@@ -382,15 +428,31 @@ export async function runCompaction(
     );
     const stored = storedSummaryText(answer.text, answer.level, redact);
     const tokens = estimateTokens(stored);
-    if (replaceIfSmaller(store, lone.id, beforeTokens, stored, tokens, session, lone.kind)) {
+    const quality = reducedQuality(answer.level, lone.quality);
+    if (
+      replaceIfSmaller(
+        store,
+        lone.id,
+        beforeTokens,
+        stored,
+        tokens,
+        quality,
+        session,
+        lone.kind,
+        started,
+        emit,
+      )
+    ) {
       reportFallbackStored(
         lone.kind,
         answer.level,
         session,
         [lone.firstEntryId, lone.lastEntryId],
         lone.text.length,
+        lone.id,
+        emit,
       );
-      appendMetric({
+      emit({
         event: "lcm",
         kind: "condensation-reduced",
         session,
@@ -412,7 +474,7 @@ export async function runCompaction(
   // (or none may grow past the cap). Silence here is indistinguishable from
   // "the frontier fits", so the stall records its reason.
   if (frontier.length > 0 && frontierTok > targetTokens) {
-    appendMetric({
+    emit({
       event: "lcm",
       kind: "condensation-stalled",
       reason: stallReason(frontier),
@@ -444,7 +506,7 @@ export async function runCompaction(
     finalText = deterministicTruncate(finalText, targetTokens);
     // The blocking and async regimes hand this text to the model as the
     // whole memory of the span, so a clip here is a silent quality loss.
-    appendMetric({
+    emit({
       event: "lcm",
       kind: "summary-final-truncated",
       stage: opts?.stage ?? "direct",
@@ -455,7 +517,7 @@ export async function runCompaction(
     });
   }
 
-  appendMetric({
+  emit({
     event: "lcm",
     kind: "compaction-complete",
     session,
@@ -482,8 +544,10 @@ function reportOversize(
   answer: EscalationResult,
   span: [string, string],
   session: string | undefined,
+  summaryId: number,
+  emit: MetricsSink,
 ): void {
-  appendMetric({
+  emit({
     event: "lcm",
     kind: "summary-oversized",
     stage,
@@ -495,6 +559,7 @@ function reportOversize(
     retried: answer.retried,
     level: answer.level,
     span,
+    summaryId,
   });
 }
 
@@ -509,17 +574,26 @@ function replaceIfSmaller(
   existingTokens: number,
   text: string,
   tokens: number,
+  quality: SummaryQuality,
   session: string | undefined,
   stage: "leaf" | "condensed",
+  started: number,
+  emit: MetricsSink,
 ): boolean {
   if (existingTokens <= 0 || tokens > existingTokens * REPLACE_MARGIN) return false;
   if (store.parentSummaryIds(id).length > 0) return false;
   const displaced = store.getSummary(id);
-  store.updateSummaryText(id, text, tokens);
+  // A clean node is the best memory this span has, and a mechanical answer is
+  // worse than every other verdict. Neither can displace a better row.
+  if (displaced?.quality === "clean" && quality !== "clean") return false;
+  if (displaced !== undefined && displaced.quality !== "mechanical" && quality === "mechanical") {
+    return false;
+  }
+  store.updateSummaryText(id, text, tokens, quality);
   if (displaced !== undefined && displaced.thoroughText === undefined) {
     store.setThoroughText(id, displaced.text);
   }
-  appendMetric({
+  emit({
     event: "lcm",
     kind: "summary-replaced",
     stage,
@@ -527,8 +601,33 @@ function replaceIfSmaller(
     summaryId: id,
     beforeTokens: existingTokens,
     afterTokens: tokens,
+    ...(displaced === undefined ? {} : { qualityBefore: displaced.quality }),
+    qualityAfter: quality,
+    durationMs: Date.now() - started,
   });
   return true;
+}
+
+function leafQuality(level: SummaryLevel, sourceClipped: boolean): SummaryQuality {
+  if (level === 3) return "mechanical";
+  return sourceClipped ? "clipped" : "clean";
+}
+
+function condensedQuality(level: SummaryLevel, children: readonly SummaryNode[]): SummaryQuality {
+  if (level === 3) return "mechanical";
+  return children.some((child) => !isClean(child)) ? "derived" : "clean";
+}
+
+function reducedQuality(level: SummaryLevel, previous: SummaryQuality): SummaryQuality {
+  if (level === 3) return "mechanical";
+  return previous === "clean" ? "clean" : "derived";
+}
+
+/** A row can be clean by verdict and still carry the mechanical prefix when it
+ * was imported or written before quality existed; compaction treats that as a
+ * non-clean child. */
+function isClean(node: SummaryNode): boolean {
+  return node.quality === "clean" && !node.text.startsWith(TRUNCATED_SUMMARY_PREFIX);
 }
 
 function storedSummaryText(
@@ -536,7 +635,7 @@ function storedSummaryText(
   level: SummaryLevel,
   redact: (t: string) => string,
 ): string {
-  return level === 3 ? `[lcm:truncated]\n${redact(text)}` : redact(text);
+  return level === 3 ? `${TRUNCATED_SUMMARY_PREFIX}\n${redact(text)}` : redact(text);
 }
 
 function reportFallbackStored(
@@ -545,15 +644,18 @@ function reportFallbackStored(
   session: string | undefined,
   span: MetricSpan,
   sourceChars: number,
+  summaryId: number,
+  emit: MetricsSink,
 ): void {
   if (level !== 3) return;
-  appendMetric({
+  emit({
     event: "lcm",
     kind: "summary-fallback-stored",
     stage,
     session,
     span,
     sourceChars,
+    summaryId,
   });
 }
 
@@ -565,8 +667,10 @@ function reportSkippedExisting(
   depth: number,
   span: [string, string],
   attemptedTokens: number,
+  durationMs: number,
+  emit: MetricsSink,
 ): void {
-  appendMetric({
+  emit({
     event: "lcm",
     kind: "summary-skipped-existing",
     stage,
@@ -576,6 +680,7 @@ function reportSkippedExisting(
     span,
     attemptedTokens,
     existingTokens,
+    durationMs,
   });
 }
 

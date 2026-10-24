@@ -10,6 +10,7 @@ import {
 import { basename, dirname, join } from "node:path";
 
 import { lcmHomePath } from "./home-paths.ts";
+import type { SummaryQuality } from "./store.ts";
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_GENERATIONS = 12;
@@ -73,12 +74,18 @@ export function appendMetric(record: MetricRecord): void {
   } catch {}
 }
 
+/** Where a row goes. A pass injects one sink so every row it causes reaches the
+ * same place, including the calls its completer makes. */
+export type MetricsSink = (record: MetricRecord) => void;
+
 export interface UsageLike {
   input?: unknown;
   output?: unknown;
   cacheRead?: unknown;
   cacheWrite?: unknown;
   cost?: { input?: unknown; output?: unknown; total?: unknown };
+  /** The host counted characters because the provider reported no usage. */
+  estimated?: unknown;
 }
 
 interface MetricBase {
@@ -89,7 +96,7 @@ interface MetricBase {
 export type MetricSpan = [string, string];
 
 export type SummaryStage = "leaf" | "condensed";
-export type CompactionStage = "blocking" | "async" | "direct";
+export type CompactionStage = "blocking" | "async" | "direct" | "heal";
 export type SummaryLevel = 1 | 2 | 3;
 
 /** One model's turn in a summarizer chain, in the order it was tried. */
@@ -141,7 +148,9 @@ export function usageRecord(usage: UsageLike | undefined): UsageRow | undefined 
   return { event: "usage" as const, ...counters };
 }
 
-export type SummarizerStage = "blocking" | "async";
+/** The stage a completer ran under. Same vocabulary as `CompactionStage`, so a
+ * direct pass labels its completer rows and its engine rows alike. */
+export type SummarizerStage = CompactionStage;
 
 /** Why a summarizer call failed, as far as the provider's own text says. A
  * closed set, and `unknown` is a real answer: a classification that guesses is
@@ -179,6 +188,8 @@ export type SummarizerUsageRow = UsageCounters & {
   outcome: SummarizerOutcome;
   stopReason?: string;
   session?: string;
+  /** The counters were derived from characters, not reported by the provider. */
+  estimated?: true;
 };
 
 /** One provider call the summarizer made. `usage` rows cannot carry it, since
@@ -190,7 +201,8 @@ export function summarizerUsageRecord(
 ): SummarizerUsageRow | undefined {
   const counters = countersOf(usage);
   if (!billed(counters)) return undefined;
-  return { event: "lcm", kind: "summarizer-usage", ...opts, ...counters };
+  const row: SummarizerUsageRow = { event: "lcm", kind: "summarizer-usage", ...opts, ...counters };
+  return usage?.estimated === true ? { ...row, estimated: true } : row;
 }
 
 // One interface per kind, derived from the call sites, makes the writer the
@@ -303,16 +315,22 @@ export type SummaryFallbackStoredRow = LcmRowBase & {
   stage: SummaryStage;
   span: MetricSpan;
   sourceChars: number;
+  /** Absent on rows written before the node id rode along. */
+  summaryId?: number;
 };
 
 export type SummaryStoredRow = LcmRowBase & {
   kind: "summary-stored";
   stage: SummaryStage;
   level: SummaryLevel;
+  /** Absent on rows written before quality was recorded. */
+  quality?: SummaryQuality;
   depth: number;
   tokens: number;
   summaryId: number;
   span: MetricSpan;
+  /** From just before the summarizer call to after the node row was written. */
+  durationMs: number;
 };
 
 export type SummarySkippedCoveredRow = LcmRowBase & {
@@ -330,6 +348,7 @@ export type SummarySkippedExistingRow = LcmRowBase & {
   span: MetricSpan;
   attemptedTokens: number;
   existingTokens: number;
+  durationMs: number;
 };
 
 export type SummaryOversizedRow = LcmRowBase & {
@@ -342,6 +361,8 @@ export type SummaryOversizedRow = LcmRowBase & {
   retried: boolean;
   level: SummaryLevel;
   span: MetricSpan;
+  /** Absent on rows written before the node id rode along. */
+  summaryId?: number;
 };
 
 export type SummaryReplacedRow = LcmRowBase & {
@@ -350,6 +371,10 @@ export type SummaryReplacedRow = LcmRowBase & {
   summaryId: number;
   beforeTokens: number;
   afterTokens: number;
+  /** Absent when the row being displaced could not be read. */
+  qualityBefore?: SummaryQuality;
+  qualityAfter: SummaryQuality;
+  durationMs: number;
 };
 
 export type SummaryFinalTruncatedRow = LcmRowBase & {
@@ -387,6 +412,86 @@ export type CompactionCompleteRow = LcmRowBase & {
   condensed: number;
   ingested: number;
   span: MetricSpan;
+};
+
+/** What one heal node did. `levelBefore` is 3 only when the stored text carries
+ * the mechanical prefix; a clean-looking node derived from tainted children has
+ * no level of its own, which is why the detection walks provenance. `levelAfter`
+ * is null when nothing was stored, so a rejected level-3 answer leaves the old
+ * text and no quality claim behind. */
+export type HealNodeOutcomeKind =
+  | "repaired"
+  | "improved"
+  | "failed"
+  | "blocked"
+  | "skipped"
+  | "changed";
+
+/** Why a heal run stopped. `dry-run` reports a plan without a model call. */
+export type HealStopReason =
+  | "done"
+  | "dry-run"
+  | "max-nodes"
+  | "max-calls"
+  | "token-budget"
+  | "llm-capped";
+
+export type HealStartRow = LcmRowBase & {
+  kind: "heal-start";
+  candidates: number;
+  taintedNodes: number;
+  maxNodes: number;
+  maxCalls: number;
+  maxTokens: number;
+  targetTokens: number;
+  /** The effective whole-node source window and the request cap that bounded it. */
+  sourceTokens: number;
+  callBudgetTokens: number;
+  dryRun: boolean;
+};
+
+export type HealNodeRow = LcmRowBase & {
+  kind: "heal-node";
+  summaryId: number;
+  depth: number;
+  nodeKind: SummaryStage;
+  tainted: boolean;
+  qualityBefore: SummaryQuality;
+  /** Present only when this run stored a replacement; a failed node keeps the
+   * quality the store already holds. */
+  qualityAfter?: SummaryQuality;
+  levelBefore: SummaryLevel | null;
+  levelAfter: SummaryLevel | null;
+  beforeTokens: number;
+  afterTokens: number | null;
+  calls: number;
+  outcome: HealNodeOutcomeKind;
+  reason?: string;
+  /** Source facts only. Source and summary text never reach the metrics log. */
+  sourceTokens?: number;
+  sourceChars?: number;
+  sourceClipped?: boolean;
+};
+
+export type HealCompleteRow = LcmRowBase & {
+  kind: "heal-complete";
+  stop: HealStopReason;
+  candidates: number;
+  attempted: number;
+  repaired: number;
+  improved: number;
+  failed: number;
+  blocked: number;
+  blockedSource: number;
+  skipped: number;
+  changedCount: number;
+  notAttempted: number;
+  calls: number;
+  tokens: number;
+  sourceTokens: number;
+  callBudgetTokens: number;
+  repairedIds: number[];
+  improvedIds: number[];
 };
 
 /** A summarizer call that answered with nothing, or that threw. An empty answer
@@ -623,6 +728,9 @@ export type LcmMetricRecord =
   | CondensationStalledRow
   | CondensationReducedRow
   | CompactionCompleteRow
+  | HealStartRow
+  | HealNodeRow
+  | HealCompleteRow
   | SummarizerErrorRow
   | SummarizerCappedRow
   | SummarizerFallbackRow

@@ -1,0 +1,104 @@
+```text
+/lossless-status
+/lossless-report
+/lossless-pass
+/lossless-heal [--apply] [--max-nodes <n>]
+/lossless-backup [path]
+/lossless-export [path]
+/lossless-import <path>
+/lossless-diagnose [--save <path>] [--repair]
+/lossless-migrate [--apply]
+/lossless-gc [--older-than <days>] [--session <id>] [--apply]
+```
+
+Ten commands. `/lossless-pass` is absent with `assembly: false`; `/lossless-heal` stays available.
+
+## Settings
+
+There is no interactive settings panel in V2 scope; the host exposes a TUI extension point, so a separate TUI plugin could reuse the same command core later. Edit the plugin's `options` in `opencode.json` and reload the plugin. [Config](/reference/opencode/config) lists every key.
+
+## status
+
+```text
+/lossless-status
+```
+
+Message and compaction-summary counts for the live sidecars. A command cannot return text directly, so the status arrives as a prompt the loop answers from.
+
+## report
+
+```text
+/lossless-report
+```
+
+Projection, checkpoint, pass, summary, heal, recall, and reader rows for this session. It says so when the session has no rows.
+
+## pass
+
+```text
+/lossless-pass
+```
+
+One DAG pass over the stored span, on demand. Mounted only with `assembly` on.
+
+## heal
+
+```text
+/lossless-heal                  # dry-run: count the tainted nodes and their ancestors
+/lossless-heal --apply          # re-summarize them from their stored source
+/lossless-heal --apply --max-nodes 8
+```
+
+A non-clean summary is a candidate. A mechanical level-3 node starts with `[lcm:truncated]`; a clipped leaf or a derived parent may not. Heal reads the exact source rows that node points at, re-summarizes the tainted node, then recomputes every ancestor whose child changed. It rejects another level-3 answer, an empty answer, or an answer over twice the target, so a failed repair keeps the old text. `--max-nodes` bounds one run; `summarizerTokensPerHeal` bounds its spend. The dry run makes no provider call.
+
+## backup
+
+```text
+/lossless-backup [path]
+```
+
+Copies this session's sidecar to `<sidecar>.backup-<timestamp>`, or to the path you name.
+
+## export
+
+```text
+/lossless-export [path]
+```
+
+Writes the verbatim transcript and summaries as JSONL at mode 0600. The default lands beside the sidecars.
+
+## import
+
+```text
+/lossless-import <path>
+```
+
+Restores rows from a file written by `/lossless-export`. Refused while a pass is running, or into a store that already holds foreign messages.
+
+## gc
+
+```text
+/lossless-gc                  # dry-run list
+/lossless-gc --apply          # export each transcript, then delete
+```
+
+The host plugin API cannot list sessions, so `gc` selects by sidecar age (default 30 days) or an explicit id. It never touches the current session and exports each transcript before deleting it.
+
+## migrate
+
+```text
+/lossless-migrate             # dry-run list of older-schema sidecars
+/lossless-migrate --apply     # upgrade them in place
+```
+
+The only path that writes to a past session's sidecar, and the reason cross-session search can read sidecars written by older builds.
+
+## diagnose
+
+```text
+/lossless-diagnose
+/lossless-diagnose --save <path>      # or --save=<path>
+/lossless-diagnose --repair           # rebuild the index and repair integrity
+```
+
+One redacted, pasteable block: versions, store facts, the effective options, and this session's metrics. `--save` writes the exact bytes at mode 0600; `--repair` rebuilds the index and repairs integrity before the bundle is built.

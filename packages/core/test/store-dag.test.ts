@@ -350,6 +350,7 @@ function syntheticNode(id: number, depth: number, position: number): SummaryNode
     firstEntryId: `s${position}`,
     lastEntryId: `s${position}`,
     createdAt: 0,
+    quality: "clean",
   };
 }
 
@@ -553,6 +554,7 @@ test("compaction: a condensed insert refused mid-pass is replaced and reported a
           text: "stale ".repeat(100),
           tokens: 300,
           depth: 1,
+          quality: "mechanical",
           firstEntryId: "e0",
           lastEntryId: "e5",
         });
@@ -679,7 +681,7 @@ test("compaction: a lone node whose re-summary is not smaller records the stall"
   s.close();
 });
 
-test("compaction: a terse re-summary that grows the node falls to the truncate", async () => {
+test("compaction: a terse re-summary that grows a clean node does not downgrade it", async () => {
   const s = new LcmStore(":memory:");
   sixMessages(s);
   const leaf = s.insertSummary({
@@ -713,16 +715,23 @@ test("compaction: a terse re-summary that grows the node falls to the truncate",
   );
   const events = metricsSince(mark);
   assert.equal(calls, 1, "an answer that grows the node is not retried");
-  const reduced = events.filter((m) => m.kind === "condensation-reduced");
-  assert.equal(reduced.length, 1);
-  assert.equal(reduced[0]?.level, 3);
-  const after = reduced[0]?.afterTokens;
-  assert.ok(typeof after === "number" && after < 2500 * 0.75);
-  assert.ok(s.getSummary(node)?.text.startsWith("[lcm:truncated]"), "the truncate is tagged");
-  assert.equal(events.filter((m) => m.kind === "summary-replaced").length, 1);
-  const fallbacks = events.filter((m) => m.kind === "summary-fallback-stored");
-  assert.equal(fallbacks.length, 1, JSON.stringify(events));
-  assert.equal(fallbacks[0]?.stage, "condensed");
+  assert.deepEqual(
+    events.filter((m) => m.kind === "condensation-reduced"),
+    [],
+    "a clean node is not replaced by the truncate",
+  );
+  assert.deepEqual(
+    events.filter((m) => m.kind === "summary-replaced"),
+    [],
+  );
+  assert.deepEqual(
+    events.filter((m) => m.kind === "summary-fallback-stored"),
+    [],
+  );
+  const stalls = events.filter((m) => m.kind === "condensation-stalled");
+  assert.equal(stalls.length, 1);
+  assert.equal(s.getSummary(node)?.text, "long ".repeat(2000), "the clean row stands");
+  assert.equal(s.getSummary(node)?.quality, "clean");
   s.close();
 });
 

@@ -69,11 +69,12 @@ function deadLinks(source: string): string[] {
 
 test("publish surface: a shipped doc links only to what its tarball carries", () => {
   assert.deepEqual(deadLinks("[the roadmap](../../docs/roadmap.md)"), ["../../docs/roadmap.md"]);
-  // The comparison moved beside the docs site, so a shipped doc naming it by a
+  // The comparison lives in the docs site, so a shipped doc naming it by a
   // relative path is dead by construction, and the README links the site page.
-  assert.deepEqual(deadLinks("[the comparison](../../apps/docs/COMPARISON.md)"), [
-    "../../apps/docs/COMPARISON.md",
-  ]);
+  assert.deepEqual(
+    deadLinks("[the comparison](../../apps/docs/content/reference/pi/comparison.mdx)"),
+    ["../../apps/docs/content/reference/pi/comparison.mdx"],
+  );
   const problems = SHIPPED_DOCS.flatMap((name) =>
     deadLinks(readFileSync(join(PACKAGE_DIR, name), "utf8")).map((link) => `${name}: ${link}`),
   );

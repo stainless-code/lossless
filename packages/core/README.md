@@ -1,13 +1,16 @@
 # lossless-core
 
-The engine behind [pi-lossless](https://npmx.dev/package/pi-lossless): Lossless
+The engine behind [pi-lossless](https://npmx.dev/package/pi-lossless) and
+[opencode-lossless](https://npmx.dev/package/opencode-lossless): Lossless
 Context Management for a long-running agent. It stores every message verbatim,
 replaces aged context with searchable pointers, and keeps the original text
 readable by id, entry, or search. The algorithm is
 [Lossless Context Management](https://papers.voltropy.com/LCM), by Clint Ehrlich
 and Theodore Blackman (Voltropy PBC).
 
-It names no agent SDK. A host implements two ports, and the engine does the rest.
+It has no agent SDK dependency. A host supplies two ports, and the engine does the rest.
+Pi implements both; the OpenCode v2 adapter implements `ModelHost` and runs
+retrieval in a host child session instead of `Reader`.
 
 ```ts
 import { LcmStore, runCompaction, runRetrieval } from "lossless-core";
@@ -23,6 +26,8 @@ import type { ModelHost, Reader } from "lossless-core";
   deleted: the store still holds the verbatim text.
 - **Retrieval.** A reader answers a question by calling `lcm_grep`,
   `lcm_describe`, and `lcm_expand`, so the answer cites what was read.
+- **Repair.** `runHeal` re-derives a mechanically truncated summary and its
+  ancestors from the provenance rows it still points at.
 - **Redaction.** Secret-shaped text is masked on its way to a model and never
   at the door, so an export or a read can still return what was stored.
 
@@ -39,12 +44,14 @@ model's reply.
 | `Reader`    | What did the reader ask for, and what did it conclude |
 
 `src/host.ts` documents both. The engine's boundary test fails any module under
-`src/` that names an agent SDK, a bare specifier other than `node:*` and
+`src/` that imports an agent SDK, a bare specifier other than `node:*` and
 `typebox`, or a file outside the engine.
 
 ## Where the rest lives
 
 - [pi-lossless](https://npmx.dev/package/pi-lossless): the Pi adapter, and
   every user-facing command.
+- [opencode-lossless](https://npmx.dev/package/opencode-lossless): the
+  OpenCode v2 adapter, its commands, and the live loop.
 - [The docs site](https://stainless-code.com/lossless/): how LCM behaves in a
   session, the config keys, and the limits.

@@ -76,6 +76,7 @@ function summary(lastEntryId: string): SummaryNode {
     firstEntryId: "e0",
     lastEntryId,
     createdAt: 0,
+    quality: "clean",
   };
 }
 
@@ -163,6 +164,7 @@ function vineFrontier(): SummaryNode[] {
     firstEntryId: "e0",
     lastEntryId: "e1",
     createdAt: 0,
+    quality: "clean",
   };
   const leaves: SummaryNode[] = Array.from({ length: 25 }, (_, i) => ({
     id: 13 + i,
@@ -173,6 +175,7 @@ function vineFrontier(): SummaryNode[] {
     firstEntryId: "e0",
     lastEntryId: "e1",
     createdAt: 0,
+    quality: "clean",
   }));
   return [chain, ...leaves];
 }
@@ -954,6 +957,7 @@ function summaryNode(
     firstEntryId: span[0],
     lastEntryId: span[1],
     createdAt: 0,
+    quality: "clean",
   };
 }
 

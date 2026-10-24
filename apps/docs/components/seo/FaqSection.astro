@@ -3,6 +3,15 @@ import Accordion from "blume/components/content/Accordion.astro";
 import AccordionItem from "blume/components/content/AccordionItem.astro";
 import { contentHref } from "blume/components/content/base-href.ts";
 import { LCM_FAQS } from "./lcm-faqs.ts";
+import { OPENCODE_FAQS } from "./opencode-faqs.ts";
+import { PI_FAQS } from "./pi-faqs.ts";
+
+interface Props {
+  host?: "pi" | "opencode";
+}
+
+const { host } = Astro.props;
+const faqs = host === "pi" ? PI_FAQS : host === "opencode" ? OPENCODE_FAQS : LCM_FAQS;
 
 const toAnswerHtml = (text: string): string =>
 	text
@@ -23,7 +32,7 @@ const toPlainAnswer = (text: string): string =>
 const faqJsonLd = JSON.stringify({
 	"@context": "https://schema.org",
 	"@type": "FAQPage",
-	mainEntity: LCM_FAQS.map((faq) => ({
+	mainEntity: faqs.map((faq) => ({
 		"@type": "Question",
 		name: faq.question,
 		acceptedAnswer: { "@type": "Answer", text: toPlainAnswer(faq.answer) },
@@ -35,7 +44,7 @@ const faqJsonLd = JSON.stringify({
     Mirror the slot styles so `set:html` `<code>` matches body prose. */}
 <Accordion>
   {
-    LCM_FAQS.map((faq) => (
+    faqs.map((faq) => (
       <AccordionItem title={faq.question}>
         <p
           class="text-muted-foreground text-sm leading-relaxed [&_a]:font-medium [&_a]:text-foreground [&_a]:underline [&_a]:decoration-dotted [&_code]:rounded [&_code]:bg-[var(--blume-code-background)] [&_code]:px-[0.35em] [&_code]:py-[0.15em] [&_code]:font-mono [&_code]:font-medium [&_code]:text-foreground"

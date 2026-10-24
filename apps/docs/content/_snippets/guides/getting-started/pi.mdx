@@ -1,0 +1,62 @@
+## Install and run
+
+<Steps>
+  <Step title="Install the extension">
+    ```bash
+    pi install npm:pi-lossless
+    ```
+
+    No service, daemon, or config file.
+
+  </Step>
+
+  <Step title="Confirm the store is live">
+    ```bash
+    /lcm status
+    ```
+
+    <Expandable title="Sample output">
+      ```text
+      LCM: 412 messages, 9 summaries, 2140 KB
+      projection: pinned at cut 3 (applied at 71%)
+      context: 68% of 400.0k
+      thresholds: swap 70% / recut 85%
+      window: 400.0k (Pi's belief, uncorrected)
+      ```
+    </Expandable>
+
+    <Callout type="note" title="What normal looks like">
+      `projection: none` is normal before the first cut. The `window:` line shows Pi's own measurement; a provider-stated window, once stored, wins.
+    </Callout>
+
+  </Step>
+
+  <Step title="Set the cut line">
+    ```bash
+    /lcm settings
+    ```
+
+    The cockpit edits every threshold, the summarizer chain, the file-handle trigger, and two toggles in place. Changes apply to this session; save them to `~/.pi/agent/lcm.json` to keep them. The [configuration page](/guides/pi/configuration) documents every key. `smartZone` is a token count, not a ratio: swap at that count and re-cut at 1.18 times it. Explicit tokens win over ratios.
+
+  </Step>
+
+  <Step title="Read the cost">
+    ```bash
+    /lcm report
+    ```
+
+    The report shows what each swap moved, what the summarizer calls cost, which model answered, and whether a fallback ran.
+
+  </Step>
+
+  <Step title="Back up and remove">
+    ```bash
+    /lcm backup
+    /lcm export lcm-export.jsonl
+    /lcm gc
+    ```
+
+    `/lcm backup` writes a timestamped copy beside the store. `/lcm export` writes the full transcript at mode 0600. `/lcm gc` lists stores whose session file is gone; `--apply` exports then deletes each one. To remove everything, uninstall the extension and delete `~/.pi/agent/lcm/`.
+
+  </Step>
+</Steps>

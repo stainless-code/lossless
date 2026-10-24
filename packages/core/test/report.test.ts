@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 
 import { test } from "vite-plus/test";
 
+import { fmtDuration } from "../src/format.ts";
 import { metricsPath } from "../src/metrics.ts";
 import { buildReport, collectMetricsEvents, depthStats, type MetricsEvent } from "../src/report.ts";
 
@@ -498,4 +499,123 @@ test("report: a capped pass is a column, and its cause is named", () => {
   assert.match(report, /## Summarizer health \(3 error\/capped\/fallback\/abandoned events\)/);
   assert.match(report, /^\| 2023-11-14 \| 1 \| 0 \| 0 \| 0 \| 0 \| 0 \| 2 \|$/m);
   assert.match(report, /Capped passes by cause: rate-limit 2\./);
+});
+
+test("report: summary node latency is its own section, with percentiles and the slowest node", () => {
+  const events: MetricsEvent[] = [
+    ev({
+      kind: "summary-stored",
+      stage: "leaf",
+      summaryId: 1,
+      durationMs: 100,
+      span: ["e0", "e1"],
+    }),
+    ev({
+      kind: "summary-stored",
+      stage: "leaf",
+      summaryId: 2,
+      durationMs: 300,
+      span: ["e2", "e3"],
+    }),
+    ev({
+      kind: "summary-stored",
+      stage: "condensed",
+      summaryId: 3,
+      durationMs: 1000,
+      span: ["e0", "e3"],
+    }),
+    ev({ kind: "summary-replaced", stage: "condensed", summaryId: 4, durationMs: 2000 }),
+    ev({
+      kind: "summary-skipped-existing",
+      stage: "leaf",
+      summaryId: 5,
+      durationMs: 4000,
+      span: ["e4", "e5"],
+    }),
+    ev({ kind: "summary-fallback-stored", stage: "leaf", summaryId: 1 }),
+    ev({ kind: "summary-fallback-stored", stage: "condensed", summaryId: 3 }),
+  ];
+  const report = buildReport(events);
+  assert.match(report, /## Summary node latency \(5 timed nodes\)/);
+  assert.match(report, /\| condensed \| 2 \| 1\.0s \| 2\.0s \|/);
+  assert.match(report, /\| leaf \| 3 \| 300ms \| 4\.0s \|/);
+  assert.match(report, /Level-3 fallback share: 2 of 4 stored-node writes \(50\.0%\)\./);
+  assert.match(
+    report,
+    /Slowest node: summary-skipped-existing leaf #5 \(span e4\.\.e5\) at 4\.0s\./,
+  );
+});
+
+test("report: rows without node durations print no latency section", () => {
+  const report = buildReport([
+    ev({ kind: "summary-stored", stage: "leaf", summaryId: 1, span: ["e0", "e1"] }),
+    ev({ kind: "summary-replaced", stage: "leaf", summaryId: 1 }),
+  ]);
+  assert.ok(!report.includes("## Summary node latency"));
+});
+
+test("report: estimated summarizer usage is called out as a bounded estimate", () => {
+  const events: MetricsEvent[] = [
+    ev({
+      kind: "summarizer-usage",
+      model: "p/m",
+      stage: "direct",
+      outcome: "ok",
+      input: 1000,
+      output: 100,
+      costTotal: 0.02,
+      estimated: true,
+    }),
+    ev({
+      kind: "summarizer-usage",
+      model: "p/m",
+      stage: "direct",
+      outcome: "ok",
+      input: 500,
+      output: 50,
+      costTotal: 0.01,
+    }),
+  ];
+  const report = buildReport(events);
+  assert.match(
+    report,
+    /1 of 2 calls report estimated usage, not provider counters: \$0\.0200 of the \$0\.0300 above is a bounded estimate\./,
+  );
+  const measured = buildReport([events[1]!]);
+  assert.ok(!measured.includes("report estimated usage"));
+});
+
+test("report: heal runs show repaired, failed, blocked, and stop reasons", () => {
+  const report = buildReport([
+    ev({
+      kind: "heal-complete",
+      stop: "done",
+      candidates: 4,
+      attempted: 3,
+      repaired: 2,
+      failed: 1,
+      blocked: 0,
+      skipped: 1,
+      changedCount: 0,
+      notAttempted: 0,
+      calls: 5,
+      tokens: 42_000,
+      repairedIds: [4, 5],
+    }),
+  ]);
+  assert.match(report, /## Summary heal \(1 run\)/);
+  assert.match(report, /\| 2 \| 0 \| 1 \| 0 \(0\) \| 1 \| 5 \| 42\.0k \|/);
+  assert.match(report, /Stop reasons: done 1\./);
+});
+
+test("format: fmtDuration names milliseconds, seconds, and minutes", () => {
+  assert.deepEqual([0, 999, 1000, 1500, 59_000, 60_000, 65_000].map(fmtDuration), [
+    "0ms",
+    "999ms",
+    "1.0s",
+    "1.5s",
+    "59.0s",
+    "1m",
+    "1m 5s",
+  ]);
 });

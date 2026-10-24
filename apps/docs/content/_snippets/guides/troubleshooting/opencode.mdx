@@ -1,0 +1,12 @@
+Start with `/lossless-status` and `/lossless-report`.
+
+| Symptom                                 | First check                                                                                                                                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| No stored history                       | `opencode.json` lists the plugin, `enabled` is not false, and `sidecarDir` is writable. A relative `sidecarDir` resolves from the server working directory; prefer an absolute path. |
+| Nothing has been swapped                | `assembly` is true, the request is above `swapAtRatio`, and `metrics.jsonl` has a `projection` row with `action: bail`.                                                              |
+| The model sees raw history after a swap | The `reason` on the last projection row. `unaligned-outgoing` means the host draft and the stored history did not line up; the adapter fails closed rather than guessing.            |
+| A reader times out                      | Raise `readerTimeoutMs` or narrow the query. The reader has no per-child token or step cap, so the timeout is the bound.                                                             |
+| The summary looks estimated             | The host's `generate.text` returns text without usage, so summarizer spend is estimated from characters. Main-session and reader usage are exact.                                    |
+| A summary is mechanically truncated      | Run `/lossless-heal` to count the tainted nodes, then `/lossless-heal --apply` to re-summarize them from stored source within `summarizerTokensPerHeal`.                           |
+
+`/lossless-diagnose` builds a redacted block with versions, store facts, the effective options, and this session's metrics; `/lossless-diagnose --save lossless-diagnose.txt` writes it at mode 0600. [Config](/reference/opencode/config) lists every option. The package README's live loop is the reproduction path.

@@ -1,0 +1,32 @@
+---
+title: Comparison
+description: How the Pi and OpenCode v2 adapters compare with the engines and memory services their users choose between, and why the comparisons are separate.
+sidebar:
+  hidden: true
+mode: "center"
+noindex: true
+pagination: false
+search:
+  tags: ["reference", "comparison"]
+  boost: 3
+  keywords: [comparison, peers, pi, opencode]
+---
+
+The engine is shared. The peer sets are not.
+
+Pi sessions pick among compaction engines. OpenCode v2 sessions pick among context engines, memory services, or both, so each adapter has its own page.
+
+<Visibility for="web">
+  <HarnessCards variant="comparison" />
+</Visibility>
+
+<Visibility for="agents">
+- [Pi](/reference/pi/comparison): four Pi compaction engines on one matrix, with where each one leads and the gaps this package keeps.
+- [OpenCode v2](/reference/opencode/comparison): context engines and memory services in two matrices, because they solve different problems.
+</Visibility>
+
+## What a cell means
+
+Each cell comes from the peer's source at the commit named in that page's verification note, not from a README. The date on the page covers the peer cells and this package's own. Each page names where a peer leads and which gaps this package keeps.
+
+The audited sources are [comparison/pi.mdx](https://github.com/stainless-code/lossless/blob/main/apps/docs/content/reference/pi/comparison.mdx) and [comparison/opencode.mdx](https://github.com/stainless-code/lossless/blob/main/apps/docs/content/reference/opencode/comparison.mdx). The page and the source are the same file.

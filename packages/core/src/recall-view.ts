@@ -41,6 +41,8 @@ export function grepView(
      * names. A page cannot express where a clock ran out. */
     after?: string;
     now?: () => number;
+    /** Tool the continuation marker names. Defaults to `lcm_expand_query`. */
+    expandTool?: string;
   },
 ): ViewResult {
   let withinMessageIds: Set<number> | undefined;
@@ -53,6 +55,7 @@ export function grepView(
   const limit = params.limit ?? GREP_PAGE_HITS;
   const offset = Math.max(0, params.offset ?? 0);
   const includeRemoved = params.includeRemoved === true;
+  const expandTool = params.expandTool ?? "lcm_expand_query";
   if (params.pattern !== undefined && params.query !== undefined) {
     return { ok: false, text: "Pass query or pattern, not both." };
   }
@@ -72,6 +75,7 @@ export function grepView(
       includeRemoved,
       afterRowId,
       now: params.now ?? Date.now,
+      expandTool,
     });
   }
   if (params.after !== undefined) {
@@ -138,7 +142,7 @@ export function grepView(
     const dropped = flat.length - MAX_LINE_CHARS;
     const shown =
       dropped > 0
-        ? `${flat.slice(0, MAX_LINE_CHARS)} [lcm:more ${dropped} chars; read them with lcm_expand_query({entry_id:"${h.entryId}"})]`
+        ? `${flat.slice(0, MAX_LINE_CHARS)} [lcm:more ${dropped} chars; read them with ${expandTool}({entry_id:"${h.entryId}"})]`
         : flat;
     const line = `[${h.entryId}] (${h.role})${pointer}${removed} ${shown}`;
     budget -= line.length;
@@ -167,10 +171,12 @@ function patternView(
     includeRemoved: boolean;
     afterRowId: number;
     now: () => number;
+    expandTool: string;
   },
 ): ViewResult {
   const compiled = compilePattern(params.pattern, params.caseSensitive);
   if (!compiled.ok) return { ok: false, text: compiled.reason };
+  const expandTool = params.expandTool;
   const deadlineAt = params.now() + PATTERN_DEADLINE_MS;
   const outcome = scanPaged(store, compiled.pattern, params, deadlineAt);
   const lines: string[] = [];
@@ -197,7 +203,7 @@ function patternView(
     const dropped = flat.length - MAX_LINE_CHARS;
     const shown =
       dropped > 0
-        ? `${flat.slice(0, MAX_LINE_CHARS)} [lcm:more ${dropped} chars; read them with lcm_expand_query({entry_id:"${hit.row.entryId}"})]`
+        ? `${flat.slice(0, MAX_LINE_CHARS)} [lcm:more ${dropped} chars; read them with ${expandTool}({entry_id:"${hit.row.entryId}"})]`
         : flat;
     const line = `[${pointer}]${cut} ${shown}${more}`;
     budget -= line.length;

@@ -91,3 +91,29 @@ a:has(> span > .logo-svg):hover .logo-node {
 .landing-gutter {
   padding-inline: max(1.5rem, calc((100vw - 72.5rem) / 2));
 }
+
+/* Steps, Callout, Card, and Accordion are `not-prose`, so inline code inside
+   them would otherwise fall back to the browser default and read dimmer than
+   the body. Match the prose chip without touching fenced code. */
+:where(.not-prose) :not(pre) > code {
+  border-radius: 0.375rem;
+  background: var(--blume-muted);
+  padding: 0.15em 0.35em;
+  color: var(--blume-foreground);
+  font-family: var(--blume-font-mono);
+  font-size: 0.875em;
+  font-weight: 500;
+}
+
+/* The empty "next shell" card: recessive diagonal hatch, drawn from the
+   faint-text token so it follows the page theme. */
+.landing-hatch {
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--landing-faint) 0,
+    var(--landing-faint) 1px,
+    transparent 1px,
+    transparent 22px
+  );
+  opacity: 0.13;
+}

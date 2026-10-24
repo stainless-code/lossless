@@ -1,5 +1,5 @@
 import type { FileKind } from "./files.ts";
-import type { LcmStore, LcmRole, StoredMessage, SummaryNode } from "./store.ts";
+import type { LcmStore, LcmRole, StoredMessage, SummaryNode, SummaryQuality } from "./store.ts";
 
 /** The format this build writes, and the only one it reads. A range reads as a
  * compatibility promise while the row readers ignore the number, and the store,
@@ -35,6 +35,8 @@ export interface ExportSummaryRow {
   depth: number;
   firstEntryId: string;
   lastEntryId: string;
+  /** Absent in files written before the quality verdict existed. */
+  quality?: SummaryQuality;
   messageEntryIds: string[];
   childOrdinals: number[];
 }
@@ -83,6 +85,7 @@ export function exportTranscript(store: LcmStore): {
       depth: s.depth,
       firstEntryId: s.firstEntryId,
       lastEntryId: s.lastEntryId,
+      quality: s.quality,
       messageEntryIds:
         s.kind === "leaf"
           ? store.messagesByIds(store.coveredMessageIds(s.id)).map((m) => m.entryId)

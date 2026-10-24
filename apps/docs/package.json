@@ -8,13 +8,9 @@
     "check": "blume check",
     "dev": "blume dev",
     "preview": "blume preview",
-    "validate": "blume validate",
-    "prebuild": "bun scripts/build-comparison.ts",
-    "precheck": "bun scripts/build-comparison.ts",
-    "predev": "bun scripts/build-comparison.ts",
-    "prevalidate": "bun scripts/build-comparison.ts"
+    "validate": "blume validate"
   },
   "dependencies": {
-    "blume": "2.1.3"
+    "blume": "2.2.5"
   }
 }

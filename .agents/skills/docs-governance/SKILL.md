@@ -1,30 +1,38 @@
 ---
 name: docs-governance
-description: Doc lanes for this repo. Use when creating or editing README.md, docs/roadmap.md, CHANGELOG.md, COMPARISON.md, a package README, a changeset, or any file under .agents/; each doc has one job and content never gets copied between them.
+description: Doc lanes for this repo. Use when creating or editing README.md, docs/roadmap.md, CHANGELOG.md, the comparison sources, a package README, a changeset, or any file under .agents/; each doc has one job and content never gets copied between them.
 ---
 
 # Docs governance
 
 Each doc has exactly one job, keep content in its lane:
 
-| File                      | Is for                                                                                    | Never contains                                                                  |
-| ------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `README.md`               | Repo map: the two packages, where to work, the gates, doc links                           | Install, config or usage sections; version history; roadmap; internal rationale |
-| `packages/pi/README.md`   | The adapter's npm landing: what it does, install, commands, config pointers               | Version history, roadmap, repo map, engine internals                            |
-| `packages/*/CHANGELOG.md` | Each package's version history, written by changesets                                     | Marketing prose, roadmap                                                        |
-| `apps/docs/COMPARISON.md` | Peer comparison with verified cells, the source the site's comparison page generates from | Feature marketing                                                               |
-| `packages/core/README.md` | The engine's API: the entry, the two ports, the boundary rule                             | Pi-specific behaviour, the split's rationale                                    |
-| `docs/roadmap.md`         | Forward-looking work, evidence gates, rejected items                                      | Shipped-feature history                                                         |
-| `.agents/**`              | Agent rules, skills, lessons                                                              | Product docs                                                                    |
+| File                                                  | Is for                                                                                        | Never contains                                                                  |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `README.md`                                           | Repo map: the three packages, where to work, the gates, doc links                             | Install, config or usage sections; version history; roadmap; internal rationale |
+| `packages/pi/README.md`                               | The adapter's npm landing: what it does, install, commands, config pointers                   | Version history, roadmap, repo map, engine internals                            |
+| `packages/opencode/README.md`                         | The OpenCode adapter's npm landing: what it does, install, commands, tools, live loop         | Version history, roadmap, repo map, engine internals                            |
+| `packages/*/CHANGELOG.md`                             | Each package's version history, written by changesets                                         | Marketing prose, roadmap                                                        |
+| `apps/docs/content/reference/pi/comparison.mdx`       | Audited Pi peer comparison; the page and the source are one file                              | Feature marketing, unverified cells                                             |
+| `apps/docs/content/reference/opencode/comparison.mdx` | Audited OpenCode v2 peer comparison; the page and the source are one file                     | Feature marketing, unverified cells                                             |
+| `apps/docs/content/_snippets/**`                      | Shared Markdown or MDX fragments, spliced into the per-harness wrapper pages with `<include>` | Frontmatter, a second full copy of a page, or the other harness's content       |
+| `packages/core/README.md`                             | The engine's API: the entry, the two ports, the boundary rule                                 | Pi-specific behaviour, the split's rationale                                    |
+| `docs/roadmap.md`                                     | Forward-looking work, evidence gates, rejected items                                          | Shipped-feature history                                                         |
+| `.agents/**`                                          | Agent rules, skills, lessons                                                                  | Product docs                                                                    |
 
 ## Rules
 
 1. **Never duplicate content across these docs**, package READMEs included, link
-   instead.
+   instead. The per-harness guide and reference pages are the one exception in
+   form, not in content: `apps/docs/content/_snippets/**` holds the shared
+   fragments, plus one partial per harness where the page differs. The wrappers
+   under `apps/docs/content/{guides,reference}/{pi,opencode}/*.mdx` hold
+   frontmatter and `<include>` statements only. Edit the snippet, never the
+   wrapper body.
 2. **Version bumps flow through changesets**, run `bun run changeset` with
    your change; `bun run version` generates the CHANGELOG entry. Every changeset
-   names the package it bumps in the frontmatter, the engine included: both
-   packages publish, so both take changesets. Never hand-bump `package.json`
+   names the package it bumps in the frontmatter, the engine included: all
+   three packages publish, so all three take changesets. Never hand-bump `package.json`
    version for shipped work. The generator in
    `.changeset/config.json` must stay `@changesets/cli/changelog`: the
    `changelog-github` generator aborts `bun run version` without a
@@ -39,31 +47,32 @@ Each doc has exactly one job, keep content in its lane:
    never cut. `apps/docs` is private and ships nothing to npm, so a site-only
    change takes no changeset.
 3. **Comparison claims are verified against tarballs, dated, and peer-named
-   only in `COMPARISON.md`.** Check a peer package against its published
+   only in the comparison sources.** Check a peer package against its published
    tarball and npm metadata (`npm view <pkg> peerDependencies dependencies
-time.modified`), never against its README, and stamp `COMPARISON.md` with
+   time.modified`), never against its README, and stamp each source with
    "Last verified: …" before treating a cell as settled. Credit a peer's win in
    the cell: a comparison that shows only our wins is marketing.
-   Peer package names appear in `COMPARISON.md` and in the page generated
-   from it (`apps/docs/content/reference/comparison.mdx`, written by
-   `apps/docs/scripts/build-comparison.ts`), and nowhere else in this repo or
-   on the site (owner policy). The generated page restates no cell
-   and is never hand-edited: `COMPARISON.md` is the only writer's source. There
-   are no inspiration credits: the design cites the LCM paper (algorithmic
+   Peer package names appear in
+   `apps/docs/content/reference/{pi,opencode}/comparison.mdx`, and nowhere else
+   in this repo or on the site (owner policy). Those two pages are both the
+   audited source and the rendered page: edit a cell there, with its
+   verification note and date, never in a second copy. There are no inspiration
+   credits: the design cites the LCM paper (algorithmic
    spec) and the smart-zone framing (Matt Pocock) only, because the code is an
    original implementation. The docs site carries no credit line; a concept page
    cites the paper where a mechanism comes from, as
    [how it works](../../../apps/docs/content/concepts/how-it-works.mdx) does.
-   Attribution lives in `packages/*/README.md`, `apps/docs/COMPARISON.md`, and
+   Attribution lives in `packages/*/README.md`, the comparison sources, and
    the licence preamble (owner decision).
-   `COMPARISON.md` is not a spec: a design decision cites a paper section or a
+   The comparison sources are not a spec: a design decision cites a paper section or a
    measured result, never a comparison cell, and a cell that scores a
    mechanism as a peer's cost is not a reason to lack it.
-4. **Each published package owns its landing docs.** `packages/pi/README.md` is
-   the landing npm shows, `packages/pi/CHANGELOG.md` is the version history
-   changesets writes in place, and `packages/pi/LICENSE` is a copy of the root
-   licence. The comparison lives beside the docs site (`apps/docs/COMPARISON.md`)
-   and generates the site's comparison page, so the tarball no longer ships it. The
+4. **Each published package owns its landing docs.** `packages/<name>/README.md` is
+   the landing npm shows, `packages/<name>/CHANGELOG.md` is the version history
+   changesets writes in place, and `packages/<name>/LICENSE` is a copy of the root
+   licence. The comparisons live in
+   `apps/docs/content/reference/{pi,opencode}/comparison.mdx`, so the tarball
+   no longer ships them. The
    holder named there is the org brand, `stainless-code`, as in every other
    stainless-code package, never a personal name. npm
    always includes `README` and `LICENSE` from the package directory, so the

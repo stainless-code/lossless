@@ -40,6 +40,8 @@ once context crosses the soft threshold (default: 70% of the model's window).
                 # stores as lcm-export-gc-<timestamp>.jsonl before any deletion)
 /lcm migrate    # dry-run list of stores left at an older schema; add --apply to
                 # upgrade them in place so cross-session search can read them
+/lcm heal       # dry-run repair of tainted summaries; add --apply to spend
+                # model calls, --max-nodes <n> to bound the run
 /lcm diagnose   # one pasteable block for a bug report (see Reporting a problem);
                 # add --save <path> to write it to a file instead
 ```
@@ -134,7 +136,7 @@ stored bytes, secrets included.
   entries are dropped, and an entry the registry cannot find is reported once
   per session and recorded as a `summarizer-model` event. A chain that needed
   more than one model records a `summarizer-fallback` event, which `/lcm
-report` shows as `model-fallback`. `/lcm doctor` prints the chain that
+  report` shows as `model-fallback`; the report also summarizes heal runs. `/lcm doctor` prints the chain that
   actually runs, next to the config it came from, so `auto` expansion and the
   appended session model are visible rather than implied. A substitution also
   raises one UI warning per session.
@@ -153,6 +155,16 @@ report` shows as `model-fallback`. `/lcm doctor` prints the chain that
   fraction of either cap.
   A pass that crosses one finishes its remaining chunks with the mechanical
   truncate and records `summarizer-capped` with `source: "budget"`.
+- `summarizerTokensPerHeal`: what one `/lcm heal --apply` run may spend across all
+  of its calls, counted the same way. Default 120,000. A dry run spends nothing.
+  The run is bounded separately from a compaction pass because it re-derives
+  nodes a pass already paid for.
+- `healSourceTokens`: source tokens one heal map window may read. Unset derives
+  it from `summaryTokens` at 8x, clamped to 3,000 through 24,000 and to
+  `summarizerTokensPerCall`. A leaf that fits one window is sent once; a larger
+  leaf maps up to eight windows and reduces them once. A source beyond eight
+  windows is blocked without a model call; a mechanical node gets one
+  improvement. Raising the value makes the next run attempt it.
 
 The file must be valid strict JSON, so `//` comments and trailing commas are
 rejected, and a corrupt file is left untouched with defaults applied. A number
@@ -265,7 +277,7 @@ refused rather than quietly printing the block.
   depth cap of 8 is a structural assert, not a policy, and with 8 children per
   node it covers 8^8 leaf chunks; a pass that cannot meet its budget records
   `condensation-stalled`. The engine writes `[lcm:summary #id depth d span
-a..b]` next to every summary the model sees (paper §2.4).
+  a..b]` next to every summary the model sees (paper §2.4).
 - **Three-level escalation** (paper Fig. 3): preserve-details → bullets →
   deterministic truncate of the source text, accepted only on strict token
   reduction. Level 3 is stored like any other level (tagged
@@ -306,8 +318,8 @@ a..b]` next to every summary the model sees (paper §2.4).
   with the first line of its summary. The exploration summary is built by rule,
   with no model call and no parser: code names its top-level declarations
   (`TypeScript, 240 lines; 18 top-level declaration(s): function compact, class
-Engine, ...`), JSON names its shape and one level of nesting (`array of 412
-objects, keys: id, name`), JSONL names its row keys, a table names its columns,
+  Engine, ...`), JSON names its shape and one level of nesting (`array of 412
+  objects, keys: id, name`), JSONL names its row keys, a table names its columns,
   Markdown names its headings, and text names its size and first line. A family
   with no rule reports its size rather than guessing, names are capped at 12 with
   `(+N more)`, and the whole summary line stays under a line of the preview. A body that large with no path is
@@ -343,7 +355,8 @@ objects, keys: id, name`), JSONL names its row keys, a table names its columns,
 - **Telemetry**: `~/.pi/agent/lcm/metrics.jsonl` logs every context decision,
   per-message provider usage (fresh vs cached, cost), one row per summarizer
   call with the model, stage, and what the provider billed, one row per recall
-  call, one per externalized file, and one per branch change.
+  call, a heal-start row, one heal-node per attempted node, a heal-complete row,
+  one per externalized file, and one per branch change.
   `/lcm doctor` reports the thresholds, the zone, and the summarizer chain that
   are in effect, which answers what the log recorded after the fact.
 - **Verbatim storage**: message text is stored whole, whatever its size.

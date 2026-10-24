@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "vite-plus/test";
 
 import {
+  DEFAULT_CONFIG,
   parseLcmConfig,
   passConditions,
   changedPassConditions,
@@ -19,10 +20,12 @@ const COCKPIT_CONFIG = {
   recutAtRatio: 0.95,
   summaryTokens: 750,
   leafChunkTokens: 2000,
+  healSourceTokens: 18_000,
   keepRecentTokens: 10_000,
   maxAsyncChunks: 6,
   summarizerTokensPerCall: 60_000,
   summarizerTokensPerPass: 250_000,
+  summarizerTokensPerHeal: 120_000,
   redactSecrets: false,
   assemblyEnabled: true,
   zones: { "one/model": { swapAtRatio: 0.9, swapAtTokens: 0, smartZone: 0 } },
@@ -35,16 +38,26 @@ test("config-io: the values the cockpit writes all survive the parse", () => {
   assert.deepEqual(config, COCKPIT_CONFIG);
 });
 
+test("config-io: the heal budget defaults to 120k", () => {
+  assert.equal(DEFAULT_CONFIG.summarizerTokensPerHeal, 120_000);
+});
+
 test("config-io: a number outside its range is dropped by key, not coerced", () => {
   const cases: Array<[string, number]> = [
     ["summaryTokens", 0],
     ["summaryTokens", -1500],
     ["summaryTokens", 0.5],
     ["leafChunkTokens", 0],
+    ["healSourceTokens", 0],
+    ["healSourceTokens", 24_001],
+    ["healSourceTokens", 1.5],
     ["maxAsyncChunks", 0],
     ["summarizerTokensPerCall", 0],
     ["summarizerTokensPerPass", 0],
     ["summarizerTokensPerPass", -1],
+    ["summarizerTokensPerHeal", 0],
+    ["summarizerTokensPerHeal", -1],
+    ["summarizerTokensPerHeal", 1.5],
     ["keepRecentTokens", -1],
     ["smartZone", -1],
     ["swapAtTokens", -1],
@@ -65,7 +78,9 @@ test("config-io: the edges of every range are kept", () => {
   const edges = {
     summaryTokens: 1,
     leafChunkTokens: 1,
+    healSourceTokens: 24_000,
     maxAsyncChunks: 1,
+    summarizerTokensPerHeal: 1,
     keepRecentTokens: 0,
     smartZone: 0,
     swapAtTokens: 0,

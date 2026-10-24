@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "blume";
 import { orama } from "blume/search";
-import { filesystem } from "blume/sources";
+import { filesystem, githubReleases } from "blume/sources";
 
 import { CURATED_POPULAR } from "./components/curated-popular.js";
 
@@ -71,36 +71,39 @@ export default defineConfig({
   lastModified: "git",
 
   content: {
-    sources: [filesystem({ root: "content" })],
+    sources: [
+      filesystem({ root: "content" }),
+      githubReleases({
+        owner: "stainless-code",
+        repo: "lossless",
+        prefix: "changelog",
+      }),
+    ],
+  },
+
+  changelog: {
+    title: "Changelog",
+    description: "Every Lossless package release, newest first.",
   },
 
   integrations: [webAppHeadIntegration],
 
   navigation: {
     tabs: [
-      { label: "Guides", path: "/guides" },
+      { label: "Guides", path: "/guides", href: "/guides/pi/getting-started" },
       { label: "Concepts", path: "/concepts" },
-      { label: "Reference", path: "/reference" },
-    ],
-    featured: [
-      {
-        label: "Comparison",
-        href: "/reference/comparison",
-        icon: "scale",
-      },
-      {
-        label: "GitHub",
-        href: "https://github.com/stainless-code/lossless",
-        icon: "github",
-      },
+      { label: "Reference", path: "/reference", href: "/reference/pi/tools" },
+      { label: "Roadmap", path: "/roadmap" },
+      { label: "Changelog", path: "/changelog" },
     ],
     sidebar: { display: "flat" },
   },
 
   footer: {
     links: [
-      { label: "Comparison", href: "/reference/comparison" },
-      { label: "Roadmap", href: "/reference/roadmap" },
+      { label: "Comparison", href: "/reference/pi/comparison" },
+      { label: "Roadmap", href: "/roadmap" },
+      { label: "Changelog", href: "/changelog" },
       { label: "npm", href: "https://npmx.dev/package/pi-lossless" },
       {
         label: "MIT license",

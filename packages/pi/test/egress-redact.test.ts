@@ -144,7 +144,7 @@ function assistant(content: AssistantMessage["content"]): AssistantMessage {
   };
 }
 
-function call(id: string, name: string, args: Record<string, unknown>): ToolCall {
+function call(id: string, name: string, args: ToolCall["arguments"]): ToolCall {
   return { type: "toolCall", id, name, arguments: args };
 }
 

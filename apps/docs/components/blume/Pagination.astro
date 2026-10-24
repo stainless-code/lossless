@@ -5,6 +5,8 @@ import type { UIStrings } from "blume/core/i18n-ui.ts";
 import type { FlatPage } from "blume/components/layout/nav-utils.ts";
 import Icon from "blume/components/Icon.astro";
 
+import { HOSTS, hostFromRoute } from "../../harness-nav.ts";
+
 interface Props {
   prev: FlatPage | null;
   next: FlatPage | null;
@@ -17,6 +19,27 @@ const { prev, next, strings } = Astro.props;
 // from a not-yet-regenerated snapshot) still renders instead of coming out
 // blank, which is the PageActions pattern.
 const s = { ...EN_UI.page, ...strings };
+
+const hostOf = (page: FlatPage | null) => {
+  if (page === null) return undefined;
+  const id = hostFromRoute(page.route);
+  return HOSTS.find((host) => host.id === id);
+};
+
+const prevHost = hostOf(prev);
+const nextHost = hostOf(next);
+
+// Pagination follows the same host boundary as the sidebar: from a Pi page the
+// next link never jumps into the OpenCode tree (and the reverse). Shared pages
+// carry no host and still link to whichever page comes next.
+const base = import.meta.env.BASE_URL.replace(/\/+$/, "");
+const currentRoute =
+  base && Astro.url.pathname.startsWith(base)
+    ? Astro.url.pathname.slice(base.length) || "/"
+    : Astro.url.pathname;
+const currentHost = hostFromRoute(currentRoute);
+const showPrev = prevHost === undefined || currentHost === undefined || prevHost.id === currentHost;
+const showNext = nextHost === undefined || currentHost === undefined || nextHost.id === currentHost;
 ---
 
 {
@@ -25,15 +48,16 @@ const s = { ...EN_UI.page, ...strings };
       aria-label={s.pagination}
       class="mx-auto mt-12 flex max-w-[42rem] justify-between gap-4 border-border border-t pt-6 max-md:flex-col"
     >
-      {prev ? (
+      {prev && showPrev ? (
         <a
           class="flex max-w-[48%] flex-1 items-center gap-2 rounded-blume border border-border px-4 py-3 text-foreground transition-colors hover:border-foreground max-md:max-w-full"
           href={withBase(prev.route)}
         >
           <Icon class="rtl:-scale-x-100" name="arrow-left" size={16} />
           <span>
-            <span class="block text-muted-foreground text-xs max-md:hidden">
-              {s.previous}
+            <span class="flex items-center gap-1.5 text-muted-foreground text-xs">
+              {prevHost && <Icon name={prevHost.icon} size={12} />}
+              {prevHost ? `${s.previous} in ${prevHost.label}` : s.previous}
             </span>
             <span class="block font-medium">{prev.label}</span>
           </span>
@@ -41,14 +65,15 @@ const s = { ...EN_UI.page, ...strings };
       ) : (
         <span />
       )}
-      {next && (
+      {next && showNext && (
         <a
           class="ms-auto flex max-w-[48%] flex-1 items-center justify-end gap-2 rounded-blume border border-border px-4 py-3 text-end text-foreground transition-colors hover:border-foreground max-md:max-w-full"
           href={withBase(next.route)}
         >
           <span>
-            <span class="block text-muted-foreground text-xs max-md:hidden">
-              {s.next}
+            <span class="flex items-center justify-end gap-1.5 text-muted-foreground text-xs">
+              {nextHost && <Icon name={nextHost.icon} size={12} />}
+              {nextHost ? `${s.next} in ${nextHost.label}` : s.next}
             </span>
             <span class="block font-medium">{next.label}</span>
           </span>

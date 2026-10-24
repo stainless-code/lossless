@@ -41,6 +41,7 @@ This decides where things go, so it is worth getting right:
 | Repo-root stub (tools / humans)      | [`AGENTS.md`](../AGENTS.md) → this README                                       |
 | Verify each step (gates)             | [`skills/verify-after-each-step`](skills/verify-after-each-step/SKILL.md)       |
 | Docs governance, comparison claims   | [`skills/docs-governance`](skills/docs-governance/SKILL.md)                     |
+| Docs drift audit and factual refresh | [`skills/docs-sync`](skills/docs-sync/SKILL.md)                                 |
 | Docs-site voice and build order      | [`skills/docs-voice`](skills/docs-voice/SKILL.md)                               |
 | Past corrections                     | [`lessons.md`](lessons.md)                                                      |
 | Writing style (every prose surface)  | [`skills/unslop`](skills/unslop/SKILL.md)                                       |
