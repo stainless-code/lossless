@@ -2,8 +2,8 @@
 
 Lossless Context Management for the DeepSeek harness, built on `lossless-core`.
 Status: evaluation spike on a branch. It implements the plan in
-`docs/second-consumer-plan.md` phase by phase, and `docs/roadmap.md` item 10
-stays closed until the owner reopens it.
+`docs/deepseek-plan.md` phase by phase, and `docs/roadmap.md` item 10
+tracks this work until the live-proof gate is met.
 
 ## Pins
 

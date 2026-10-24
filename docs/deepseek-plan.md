@@ -1,11 +1,11 @@
-# Second consumer plan
+# DeepSeek plan
 
-Status: proposal. No code is written under this plan, and `docs/roadmap.md`
-item 10 stays unchanged until the owner reopens it.
+Status: active spike. The code lives on `feat/deepseek`, extracted from
+`spike/second-consumer`. OpenCode v2 already shipped alongside Pi; this plan
+tracks the DeepSeek adapter. Roadmap item 10 describes the live-proof gate.
 
-Goal: answer whether `lossless-core` can serve a second harness, using the
-DeepSeek harness as the evaluation target, without weakening the engine
-boundary or the Pi adapter.
+Goal: answer whether `lossless-core` can serve the DeepSeek harness as one
+more adapter, without weakening the engine boundary or the Pi adapter.
 
 ## Constraints the design must honor
 
@@ -13,7 +13,7 @@ These come from the tree, not from preference.
 
 - The engine boundary holds. `packages/core/src/host.ts` is the only host
   surface (`ModelHost` plus `Reader`), and the boundary check fails any module
-  under `packages/core/src/` that imports a host SDK. A second adapter proves
+  under `packages/core/src/` that imports a host SDK. Another adapter proves
   the boundary instead of widening it.
 - The target harness owns surface mutation. Its session is an append-only log,
   `deriveMessages()` renders the model history, and loop-built requests arrive
@@ -274,15 +274,14 @@ typecheck, pack.
   test now pins the DAG shape (condensed plus leaf records under one
   id). Gates green: `vp check`, 592 tests, typecheck, pack.
 
-## Comparison docs direction (staged, waits on item 10)
+## Comparison docs direction (staged, waits on live proof)
 
-- `COMPARISON.md` becomes the root: host-independent guarantees (verbatim
-  preservation, the DAG, budgets, metrics rows), how to read the sub-pages,
-  no host-specific claims.
-- One sub-page per adapter (`pi`, `deepseek`): host-specific facts only.
-  Claims that later prove shared get promoted to the root; nothing is ever
-  copied between pages.
-- The docs-governance skill gains a lane for the root-plus-pages structure.
+- The shipped docs keep per-harness reference pages (`pi`, `opencode`,
+  and `deepseek` when it ships): host-specific facts only. A root page
+  with shared guarantees stays a staged idea until the adapter proves
+  itself live; nothing is ever copied between pages.
+- The docs-governance skill gains a lane for the root-plus-pages structure
+  only if the root page happens.
 - Package READMEs stay as they are. Only the docs site changes.
 
 ## Quality bar for this workstream
@@ -356,12 +355,12 @@ roadmap item 10, not a reason to start the next phase.
   `packages/pi` holding `pi-lossless` convention (internal only; the shipped
   name is what matters).
 - Comparison docs: restructure toward a root page with per-package sub-pages
-  (see below). Implementation waits on item 10 reopening.
+  (see below). Implementation waits on live proof, per roadmap item 10.
 - Candidate C: proceeded as DAG-parity work in slices (done: C1 refs, C2
   carryover, C3 already-memory). The item 1 measurement is blocked (no
   DeepSeek account, so no live-model DeepSeek arm); the work continues on
   the confirmed DAG-wins assumption, with the numbers as a stop/confirm
-  gate when a key exists. Item 10 stays closed.
+  gate when a key exists. Roadmap item 10 tracks this work until then.
 
 ## Evidence (spike branch `spike/second-consumer`)
 
@@ -427,17 +426,18 @@ Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
   target storage backend later.
 - The package name, the config key spellings, and the compat pins against a
   harness that warns of breaking changes.
-- Whether item 10 reopens at all, and whether the spike branch merges to
-  main. The item 1 evaluation stays unrunnable until a DeepSeek key
-  exists; its numbers are a stop/confirm gate on the transaction flow,
-  not a precondition.
+- Whether item 10 ever advances past tracking, and whether the extracted
+  branch merges to main. The item 1 evaluation stays unrunnable until a
+  DeepSeek key exists; its numbers are a stop/confirm gate on the
+  transaction flow, not a precondition.
 
 ## What this plan does not change
 
-No source, no config, and no version. No changeset, because nothing ships.
-No edit to `COMPARISON.md`, the docs site, or either package README. The
-B1-B3 bracket spike is the last artifact on this plan; item 10 stays
-closed, so no spike log attaches to it.
+No source, no config, and no version beyond what `feat/deepseek` already
+carries. No changeset, because nothing ships. No edit to the docs site or
+any package README beyond this file. The B1-B3 bracket spike was proven on
+scripted models; roadmap item 10 stays a tracking item, so no spike log
+attaches to it beyond this plan.
 
 Spike verdict: the custom transaction flow is proven on scripted models
 across all three production paths (seam auto, bracket manual, bracket auto
