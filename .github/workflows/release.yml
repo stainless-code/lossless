@@ -27,18 +27,22 @@ jobs:
           fetch-depth: 0
 
       # npm trusted publishing (OIDC) needs npm >= 11.5.1 (docs.npmjs.com/trusted-publishers).
-      # setup-bun leaves the runner's npm 10.x in PATH, so `npm publish` can't detect OIDC
-      # and fails with ENEEDAUTH. Node 24 ships npm 11.x; npm then auto-authenticates via OIDC
-      # (no token). This repo keeps zero native dependencies (node:sqlite), so unlike native-addon
-      # repos there is no node-gyp ABI concern with switching Node before `bun install`.
+      #
+      # This step MUST run after `Setup Bun and install`: that composite runs
+      # its own setup-node (Node 22, npm 10.x), which puts npm 10 back on PATH.
+      # Whatever runs last owns PATH at publish time, and npm 10 cannot detect
+      # OIDC, so `npm publish` goes out anonymous and the registry answers
+      # every PUT with E404. Node 24 ships npm 11.x, which auto-authenticates
+      # via OIDC (no token). This repo keeps zero native dependencies
+      # (node:sqlite), so switching Node after install has no ABI consequences.
+      - name: Setup Bun and install
+        uses: ./.github/actions/setup
+
       - name: Setup Node + npm for trusted publishing
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
-
-      - name: Setup Bun and install
-        uses: ./.github/actions/setup
 
       # Opens/updates the Version PR when `.changeset/*.md` exist. When there are none, the action
       # can still run `publish` (see changesets/action) so a just-merged Version PR can ship.
