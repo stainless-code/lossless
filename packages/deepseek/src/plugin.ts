@@ -82,12 +82,14 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
       sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
     redact: redactSecrets,
     record,
+    pastSessions: { list: (exclude) => sidecars.list(exclude) },
   });
   const stopExpandQuery = registerExpandQueryTool(ctx, {
     store: (sessionId) =>
       sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
     redact: redactSecrets,
     record,
+    pastSessions: { list: (exclude) => sidecars.list(exclude) },
   });
   // Hydration fallback: a resumed session rebuilds its last checkpoint
   // from its sidecar until it compacts again. Reads only; a lookup miss

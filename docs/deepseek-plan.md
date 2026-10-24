@@ -445,6 +445,13 @@ Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
   core default budgets until slice 5 calibrates this adapter. Suite: 54
   tests green (`vp check`, `tsc`, `bun run test packages/deepseek`,
   `bun run pack`).
+- Parity slice 4: `lcm_grep` reaches Pi param parity (`pattern`,
+  `case_sensitive`, `offset`, `after`, `summary_id`, `include_removed`,
+  `scope`) over core `grepView`, `lcm_expand` gains `session`, and
+  cross-session search plus reads run through the sidecar listing with Pi
+  caps (20 stores, 40 hits, 1.5 s) and `sessionsScanned` recorded; the
+  default scope stays the current session. Suite: 63 tests green
+  (`vp check`, `tsc`, `bun run test packages/deepseek`).
 
 ## Open questions for the owner
 

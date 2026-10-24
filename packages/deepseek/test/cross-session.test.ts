@@ -1,0 +1,220 @@
+import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { LcmStore, SidecarStores, ingestEntries } from "lossless-core";
+import { describe, expect, it } from "vite-plus/test";
+
+import type { DshRoute } from "../src/model-host.ts";
+import { dshRef } from "../src/model-host.ts";
+import { dshReader } from "../src/reader.ts";
+import { answerGrep, expandAnswer, expandQueryAnswer, type RecallDeps } from "../src/tools.ts";
+import { setupContext, textChunks, toolCallChunks } from "./support/script-adapter.ts";
+
+const ROUTE: DshRoute = { provider: "test-provider", model: "test-model" };
+
+const CURRENT = "ses_current";
+const PAST = "ses_past";
+
+function tempDir(): string {
+  return mkdtempSync(join(tmpdir(), "deepseek-lossless-cross-"));
+}
+
+function seed(dir: string, sessionId: string, texts: readonly string[]): void {
+  const store = new LcmStore(join(dir, `${sessionId}.sqlite`));
+  try {
+    ingestEntries(
+      store,
+      texts.map((text, index) => ({
+        entryId: `${sessionId}:prompt:msg_${index + 1}`,
+        role: "user" as const,
+        text,
+        timestamp: index + 1,
+      })),
+    );
+  } finally {
+    store.close();
+  }
+}
+
+const identity = (text: string): string => text;
+
+function deps(
+  dir: string,
+  current: LcmStore | undefined,
+): { sidecars: SidecarStores; recall: RecallDeps } {
+  const sidecars = new SidecarStores({ dir });
+  return {
+    sidecars,
+    recall: {
+      store: () => current,
+      redact: identity,
+      pastSessions: { list: (exclude?: string) => sidecars.list(exclude) },
+    },
+  };
+}
+
+describe("cross-session recall", () => {
+  it("labels a hit from another sidecar and never reads the calling session", () => {
+    const dir = tempDir();
+    seed(dir, CURRENT, ["the passphrase is MARIGOLD-4421"]);
+    seed(dir, PAST, ["the passphrase is ORCHID-7319"]);
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      const found = answerGrep(recall, CURRENT, { query: "ORCHID", scope: "sessions" });
+      expect(found).toContain("ORCHID-7319");
+      expect(found).toContain(`[lcm:session ${PAST}]`);
+      expect(found).toContain("lcm_expand({session, entry_id})");
+
+      const own = answerGrep(recall, CURRENT, { query: "MARIGOLD", scope: "sessions" });
+      expect(own).not.toContain("MARIGOLD-4421");
+      expect(own).toContain("No matches");
+
+      const all = answerGrep(recall, CURRENT, { query: "ORCHID", scope: "all_sessions" });
+      expect(all).toContain(`[lcm:session ${PAST}]`);
+    } finally {
+      sidecars.close();
+    }
+  });
+
+  it("records sessionsScanned on a cross-session hit", () => {
+    const dir = tempDir();
+    seed(dir, PAST, ["the passphrase is ORCHID-7319"]);
+    const { sidecars, recall } = deps(dir, undefined);
+    const rows: Record<string, unknown>[] = [];
+    try {
+      const found = answerGrep({ ...recall, record: (row) => rows.push(row) }, CURRENT, {
+        query: "ORCHID",
+        scope: "sessions",
+      });
+      expect(found).toContain("ORCHID-7319");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ tool: "lcm_grep", scope: "sessions" });
+      expect(typeof rows[0]?.["sessionsScanned"]).toBe("number");
+      expect(rows[0]?.["sessionsScanned"] as number).toBeGreaterThanOrEqual(1);
+    } finally {
+      sidecars.close();
+    }
+  });
+
+  it("keeps the default scope on the current session", () => {
+    const dir = tempDir();
+    seed(dir, PAST, ["the passphrase is ORCHID-7319"]);
+    const current = new LcmStore(":memory:");
+    try {
+      ingestEntries(current, [
+        { entryId: "cur-1", role: "user", text: "the passphrase is MARIGOLD-4421", timestamp: 1 },
+      ]);
+      const { sidecars, recall } = deps(dir, current);
+      try {
+        const found = answerGrep(recall, CURRENT, { query: "MARIGOLD" });
+        expect(found).toContain("MARIGOLD-4421");
+        expect(found).not.toContain(`[lcm:session ${PAST}]`);
+        const scoped = answerGrep(recall, CURRENT, { query: "MARIGOLD", scope: "session" });
+        expect(scoped).toBe(found);
+      } finally {
+        sidecars.close();
+      }
+    } finally {
+      current.close();
+    }
+  });
+
+  it("reads a past entry through lcm_expand and refuses a missing session or entry", () => {
+    const dir = tempDir();
+    seed(dir, PAST, ["the passphrase is ORCHID-7319"]);
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      const entryId = `${PAST}:prompt:msg_1`;
+      const past = { pastSessions: recall.pastSessions };
+      const read = expandAnswer(undefined, identity, { session: PAST, entry_id: entryId }, past);
+      expect(read).toContain(`[lcm:session ${PAST}]`);
+      expect(read).toContain("past session's history");
+      expect(read).toContain("ORCHID-7319");
+
+      const ghost = expandAnswer(
+        undefined,
+        identity,
+        { session: "ses_ghost", entry_id: "ses_ghost:prompt:msg_1" },
+        past,
+      );
+      expect(ghost).toContain("no stored session with id ses_ghost");
+      expect(existsSync(join(dir, "ses_ghost.sqlite"))).toBe(false);
+
+      const missing = expandAnswer(
+        undefined,
+        identity,
+        { session: PAST, entry_id: `${PAST}:prompt:msg_404` },
+        past,
+      );
+      expect(missing).toContain("No stored message with entry id");
+      expect(missing).not.toContain("ORCHID-7319");
+
+      const empty = expandAnswer(undefined, identity, { session: "   ", entry_id: entryId }, past);
+      expect(empty).toContain("session must be a non-empty session id");
+    } finally {
+      sidecars.close();
+    }
+  });
+
+  it("answers expand_query from a past sidecar through the listing", async () => {
+    const dir = tempDir();
+    seed(dir, PAST, ["deciding the recall pipeline rollout for next week"]);
+    const sidecars = new SidecarStores({ dir });
+    try {
+      const { ctx } = setupContext(ROUTE, [
+        toolCallChunks("call-1", "lcm_grep", { query: "recall pipeline rollout" }),
+        textChunks(
+          "The recall pipeline rollout was approved for next week [ses_past:prompt:msg_1].",
+        ),
+      ]);
+      const rows: Record<string, unknown>[] = [];
+      const answer = await expandQueryAnswer(
+        undefined,
+        identity,
+        dshReader(ctx, { ref: dshRef(ROUTE) }),
+        CURRENT,
+        { query: "recall pipeline rollout", session: PAST },
+        (row) => rows.push(row),
+        { list: (exclude?: string) => sidecars.list(exclude) },
+      );
+      expect(answer).toContain("a past session's history (session ses_past)");
+      expect(answer).toContain(`session="ses_past"`);
+      expect(answer).toContain("recall pipeline rollout");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ kind: "retrieval", stop: "answered" });
+      expect(existsSync(join(dir, `${CURRENT}.sqlite`))).toBe(false);
+    } finally {
+      sidecars.close();
+    }
+  });
+
+  it("does not modify a past store", () => {
+    const dir = tempDir();
+    seed(dir, PAST, ["the passphrase is ORCHID-7319"]);
+    const path = join(dir, `${PAST}.sqlite`);
+    const before = {
+      bytes: readFileSync(path),
+      mtimeMs: statSync(path).mtimeMs,
+    };
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      expect(answerGrep(recall, CURRENT, { query: "ORCHID", scope: "sessions" })).toContain(
+        "ORCHID-7319",
+      );
+      expect(
+        expandAnswer(
+          undefined,
+          identity,
+          { session: PAST, entry_id: `${PAST}:prompt:msg_1` },
+          { pastSessions: recall.pastSessions },
+        ),
+      ).toContain("ORCHID-7319");
+    } finally {
+      sidecars.close();
+    }
+    expect(readFileSync(path).equals(before.bytes)).toBe(true);
+    expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
+    expect(existsSync(join(dir, `${CURRENT}.sqlite`))).toBe(false);
+  });
+});
