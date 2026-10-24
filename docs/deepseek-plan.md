@@ -361,6 +361,22 @@ roadmap item 10, not a reason to start the next phase.
   DeepSeek account, so no live-model DeepSeek arm); the work continues on
   the confirmed DAG-wins assumption, with the numbers as a stop/confirm
   gate when a key exists. Roadmap item 10 tracks this work until then.
+- Parity program (slices 1-6 done on `feat/deepseek`, scripted models only):
+  answered retrieval, metrics rows, full `/lcm` verb set, recall param
+  parity with cross-session reads, seam knob and budget forwarding, async
+  backfill. Suite stands at 79 package tests green with gates clean.
+- `enabled` default stays opt-in (`enabled !== true` returns noop).
+  OpenCode defaults true; flipping here changes mount behavior for every
+  existing composition, so it waits on an explicit owner call. Recorded as
+  a known divergence, not an oversight.
+- `bracketAuto` default stays off until the bracket manual path proves
+  itself live. The B-path regression suite pins the seam default.
+- Blocked pending harness seams (verified in harness source, not assumed):
+  settings cockpit overlay (no custom-render seam on the composition ctx),
+  Pi-style projection policy (auto pressure belongs to the seam engine),
+  synchronous pre-mount scan (prohibited; async observation is the
+  permitted path and is now the backfill), provider window auto-correction
+  (no named-window error seam; `tokenMeter.measure` covers steady state).
 
 ## Evidence (spike branch `spike/second-consumer`)
 
