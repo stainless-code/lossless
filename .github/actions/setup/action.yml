@@ -10,7 +10,7 @@ runs:
         bun-version: 1.4.4
 
     - name: Setup Node (the npm publish dry runs and the node-based scripts)
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version: 22
 
