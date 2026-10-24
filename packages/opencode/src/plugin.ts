@@ -233,7 +233,7 @@ export async function setupOpencodeLossless(
               const stats = store.stats();
               return statusLine(id, sidecars.pathFor(id), {
                 messages: stats.messages,
-                summaries: store.entryCountWithPrefix(`${id}:summary:`),
+                summaries: stats.summaries,
               });
             }),
           prompt: (sessionID, text) => ctx.session.prompt({ sessionID, text }),

@@ -30,6 +30,7 @@ import {
   modelKey,
   parseExport,
   repairIntegrity,
+  sanitizeSidecarId,
   storeGeneration,
   type DiagnoseBundleInput,
   type FactConfig,
@@ -448,6 +449,8 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       }
       const sessionId = valueOf(args, "--session");
       const live = new Set(deps.sidecars.ids());
+      // Disk stems are sanitized session ids, so compare those, not raw ids.
+      const liveStems = new Set([...live].map((id) => sanitizeSidecarId(id)));
       if (sessionId !== undefined && live.has(sessionId)) {
         await deps.prompt(
           input.sessionID,
@@ -461,7 +464,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         await deps.prompt(input.sessionID, "LCM gc: --older-than takes a number of days.");
         return;
       }
-      const refs = deps.sidecars.list(input.sessionID).filter((ref) => !live.has(ref.id));
+      const refs = deps.sidecars.list(input.sessionID).filter((ref) => !liveStems.has(ref.id));
       const selected = sessionId === undefined ? refs : refs.filter((ref) => ref.id === sessionId);
       if (sessionId !== undefined && selected.length === 0) {
         await deps.prompt(
@@ -510,9 +513,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         return;
       }
       const exportTarget = join(deps.sidecars.dir, `lossless-export-gc-${STAMP()}.jsonl`);
-      // Create the file before the loop so its mode is 0600 even when every
-      // candidate turns out to hold no rows.
-      writeFileSync(exportTarget, "", { encoding: "utf8", mode: 0o600 });
+      // The export file is created on the first real write, so a no-op gc leaves no file.
       let removed = 0;
       let exported = 0;
       let failed = 0;

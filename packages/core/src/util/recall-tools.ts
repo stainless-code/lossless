@@ -2,16 +2,21 @@ import { describeView, expandView, grepView } from "../recall-view.ts";
 import { MAX_EXPAND_CHARS } from "../retrieval.ts";
 import type { LcmStore } from "../store.ts";
 
+/** Reply when the caller has no store: nothing ingested yet, or the session is ephemeral. */
 export const NO_STORE =
   "LCM: no stored history for this session yet (nothing has been ingested, or the session is ephemeral).";
 
+/** Search scopes `lcm_grep` accepts: this session only, plus the past-session scopes. */
 export const RECALL_SCOPES = ["session", "sessions", "all_sessions"] as const;
+/** One of `RECALL_SCOPES`; `sessions` and `all_sessions` are equivalent and both read past sidecars. */
 export type RecallScope = (typeof RECALL_SCOPES)[number];
 
+/** What `lcm_expand` reads: a summary listing by id, or one message by entry id with an optional summary check. */
 export type Address =
   | { readonly kind: "summary"; readonly id: number }
   | { readonly kind: "entry"; readonly entryId: string; readonly id?: number };
 
+/** Past-search outcome: redacted text plus hit, scanned, and skipped session counts. */
 export interface RecallPastSearchResult {
   readonly text: string;
   readonly hits: number;
@@ -19,6 +24,7 @@ export interface RecallPastSearchResult {
   readonly skipped: number;
 }
 
+/** Past-session open outcome: the read-only store and id, or why it could not be opened. */
 export type OpenPastResult =
   | {
       readonly kind: "opened";
@@ -27,6 +33,7 @@ export type OpenPastResult =
     }
   | { readonly kind: "missing" | "unreadable" };
 
+/** Host seams the recall answers read through: store lookup, redactor, metrics recorder, and past-session hooks. */
 export interface RecallToolDeps {
   readonly storeFor: (sessionId: string | undefined) => LcmStore | undefined;
   readonly redact: (text: string) => string;
@@ -49,6 +56,7 @@ const DEFAULT_PAST_SEARCH_UNREACHABLE =
 const DEFAULT_PAST_READ_UNREACHABLE =
   "Nothing was read: past sessions are not reachable in this process.";
 
+/** Answer `lcm_grep`: the session `grepView`, or past sidecars when the scope names them; readers stay session-scoped. */
 export function grepAnswer(deps: RecallToolDeps, callerSessionID: string, input: unknown): string {
   const started = Date.now();
   const args = asRecord(input);
@@ -149,6 +157,7 @@ function grepPastSessions(
   return result.text;
 }
 
+/** Answer `lcm_describe`: the redacted cost and contents of one summary id, or why it missed. */
 export function describeAnswer(
   deps: RecallToolDeps,
   callerSessionID: string,
@@ -184,6 +193,7 @@ export function describeAnswer(
   return view.text;
 }
 
+/** Answer `lcm_expand`: list a summary or read one message, capped at `MAX_EXPAND_CHARS`; a foreign `session` id reads a past sidecar read-only. */
 export function expandAnswer(
   deps: RecallToolDeps,
   callerSessionID: string,
@@ -275,6 +285,7 @@ function expandPastSession(
   }
 }
 
+/** Parse `id`/`entry_id` args into an `Address`: error text when malformed, undefined when neither is present. */
 export function readAddress(args: Record<string, unknown>): Address | string | undefined {
   const hasId = args.id !== undefined;
   const hasEntry = args.entry_id !== undefined;
@@ -296,6 +307,7 @@ export function readAddress(args: Record<string, unknown>): Address | string | u
   return undefined;
 }
 
+/** Refusal text when an address names no stored summary or message, else undefined. */
 export function addressProblem(store: LcmStore, address: Address): string | undefined {
   if (address.kind === "summary") {
     return store.getSummary(address.id) ? undefined : `No summary with id ${address.id}.`;
@@ -309,6 +321,7 @@ export function addressProblem(store: LcmStore, address: Address): string | unde
   return undefined;
 }
 
+/** Read a validated address with `char_offset` paging capped at `maxChars` characters. */
 export function readAddressed(
   store: LcmStore,
   redact: (text: string) => string,
@@ -334,6 +347,7 @@ export function readAddressed(
   });
 }
 
+/** Classify an `lcm_expand` reply as hit, miss, refused, or error for metric rows. */
 export function expandQueryOutcome(text: string): "hit" | "miss" | "refused" | "error" {
   if (text === NO_STORE) return "miss";
   if (text.startsWith("Nothing was read")) return "refused";

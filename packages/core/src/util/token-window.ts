@@ -5,7 +5,9 @@
  * parser from the core entry; OpenCode reads the lookup and the key from
  * here through its thin wrappers, so the two adapters cannot drift. */
 
+/** Token math shared with adapters: `tokensFromChars` counts chars at four per token, `scaledBudget` calibrates a budget. */
 export { scaledBudget, tokensFromChars } from "../estimate-tokens.ts";
+/** Overflow parser shared with adapters: the window in tokens a provider error names, or null. */
 export { windowFromError } from "../overflow-window.ts";
 
 /** Either provider spelling hosts use: OpenCode names `providerID`, Pi names

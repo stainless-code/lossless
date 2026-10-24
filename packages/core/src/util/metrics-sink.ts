@@ -11,20 +11,26 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+/** Basename of the JSONL metrics log inside a sidecar directory. */
 export const METRICS_FILE = "metrics.jsonl";
+/** Size in bytes that triggers rotation (5 MiB); the full log is renamed aside. */
 export const METRICS_MAX_BYTES = 5 * 1024 * 1024;
+/** Rotated generations kept beside the live log; older timestamped files are deleted. */
 export const METRICS_KEEP_GENERATIONS = 3;
 
+/** One metrics row: free-form fields plus an optional unix-ms stamp, session id, and kind. */
 export interface MetricSinkRow extends Record<string, unknown> {
   ts?: number;
   session?: string;
   kind?: string;
 }
 
+/** The live metrics file inside a sidecar directory. */
 export function metricsFilePath(dir: string): string {
   return join(dir, METRICS_FILE);
 }
 
+/** Rename an over-budget log to `<file>.<Date.now()>` and keep only the newest generations. Never throws. */
 export function rotateMetricsIfNeeded(dir: string): void {
   const path = metricsFilePath(dir);
   try {
@@ -50,6 +56,7 @@ function pruneGenerations(path: string, keep: number): void {
   } catch {}
 }
 
+/** Append one JSONL row, stamping `ts` in unix ms when absent; creates the dir with mode 0700. Never throws. */
 export function appendMetricRow(dir: string, row: Record<string, unknown>): void {
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -62,6 +69,7 @@ export function appendMetricRow(dir: string, row: Record<string, unknown>): void
   } catch {}
 }
 
+/** Read rotated generations oldest-first plus the live log, skipping missing files and malformed lines. */
 export function readMetricRows(dir: string): unknown[] {
   const paths: string[] = [];
   const base = metricsFilePath(dir);

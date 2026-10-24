@@ -46,6 +46,7 @@ export interface HealBudgetOptions {
   readonly summarizerTokensPerCall?: number;
 }
 
+/** Calibrated heal budgets in tokens: node target, per-call cap, and optional source window. */
 export interface HealBudgets {
   readonly targetTokens: number;
   readonly callBudgetTokens: number;

@@ -71,17 +71,17 @@ cd apps/docs && bun run build && bun run validate --strict && bun run audit
 
 ## Docs
 
-|                                                                                |                                                                  |
-| ------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| [The docs site](https://stainless-code.com/lossless/)                          | How LCM behaves in a session, the config keys, the limits        |
-| [pi-lossless](packages/pi/README.md)                                           | Install, the commands, and the three recall tools                |
-| [opencode-lossless](packages/opencode/README.md)                               | Install, the commands, the four recall tools, and the live loop  |
-| [lossless-core](packages/core/README.md)                                       | The engine's API and the ports a host supplies                   |
-| [pi/comparison.mdx](apps/docs/content/reference/pi/comparison.mdx)             | Audited Pi peer comparison, page and source in one file          |
-| [opencode/comparison.mdx](apps/docs/content/reference/opencode/comparison.mdx) | Audited OpenCode v2 peer comparison, page and source in one file |
-| [docs/roadmap.md](docs/roadmap.md)                                             | Forward-looking work, evidence gates, and rejected items         |
-| [CHANGELOG.md](packages/pi/CHANGELOG.md)                                       | Per-package version history, generated from changesets           |
-| [AGENTS.md](AGENTS.md)                                                         | Agent rules, with the skills and lessons under `.agents/`        |
+|                                                                                                                                                       |                                                                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [The docs site](https://stainless-code.com/lossless/)                                                                                                 | How LCM behaves in a session, the config keys, the limits        |
+| [pi-lossless](packages/pi/README.md)                                                                                                                  | Install, the commands, and the three recall tools                |
+| [opencode-lossless](packages/opencode/README.md)                                                                                                      | Install, the commands, the four recall tools, and the live loop  |
+| [lossless-core](packages/core/README.md)                                                                                                              | The engine's API and the ports a host supplies                   |
+| [pi/comparison.mdx](apps/docs/content/reference/pi/comparison.mdx)                                                                                    | Audited Pi peer comparison, page and source in one file          |
+| [opencode/comparison.mdx](apps/docs/content/reference/opencode/comparison.mdx)                                                                        | Audited OpenCode v2 peer comparison, page and source in one file |
+| [docs/roadmap.md](docs/roadmap.md)                                                                                                                    | Forward-looking work, evidence gates, and rejected items         |
+| [pi CHANGELOG.md](packages/pi/CHANGELOG.md), [core CHANGELOG.md](packages/core/CHANGELOG.md), [opencode CHANGELOG.md](packages/opencode/CHANGELOG.md) | Per-package version history, generated from changesets           |
+| [AGENTS.md](AGENTS.md)                                                                                                                                | Agent rules, with the skills and lessons under `.agents/`        |
 
 ## License
 

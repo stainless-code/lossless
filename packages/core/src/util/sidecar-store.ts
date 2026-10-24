@@ -23,6 +23,7 @@ export function ensureSidecarDir(dir: string): void {
   chmodSync(dir, 0o700);
 }
 
+/** Sidecar file for a session id: sanitized stem plus extension, joined under the sidecar dir. */
 export function sidecarPathFor(
   dir: string,
   sessionId: string,
@@ -31,6 +32,7 @@ export function sidecarPathFor(
   return join(dir, `${sanitizeSidecarId(sessionId)}${extension}`);
 }
 
+/** Live sidecar refs newest-first (mtime, then id); skips non-files and one optionally excluded path. */
 export function listSidecarRefs(
   dir: string,
   opts: { extension?: string; excludePath?: string } = {},
@@ -69,6 +71,7 @@ export function dropSidecarFiles(path: string): void {
   for (const file of [path, `${path}-wal`, `${path}-shm`]) rmSync(file, { force: true });
 }
 
+/** Where sidecars live and which extension names them; defaults to `.sqlite`. */
 export interface SidecarStoresOptions {
   readonly dir: string;
   readonly extension?: string;
@@ -78,19 +81,24 @@ export interface SidecarStoresOptions {
 export class SidecarStores {
   private readonly stores = new Map<string, LcmStore>();
 
+  /** Sidecar directory this cache reads and writes. */
   readonly dir: string;
+  /** File extension naming sidecar databases, including the leading dot. */
   readonly extension: string;
 
+  /** Open the cache, creating the dir (mode 0700) when missing; stores open lazily. */
   constructor(options: SidecarStoresOptions) {
     this.dir = options.dir;
     this.extension = options.extension ?? SIDECAR_EXTENSION;
     ensureSidecarDir(this.dir);
   }
 
+  /** File path for one session id under this cache's dir and extension. */
   pathFor(sessionId: string): string {
     return sidecarPathFor(this.dir, sessionId, this.extension);
   }
 
+  /** Open-once store for a session id, reused across calls until dropped or closed. */
   for(sessionId: string): LcmStore {
     let store = this.stores.get(sessionId);
     if (!store) {
@@ -100,14 +108,17 @@ export class SidecarStores {
     return store;
   }
 
+  /** Open store already held for a session id, if any, without opening one. */
   peek(sessionId: string): LcmStore | undefined {
     return this.stores.get(sessionId);
   }
 
+  /** Session ids with an open store in this cache. */
   ids(): string[] {
     return [...this.stores.keys()];
   }
 
+  /** Live sidecar refs newest-first, optionally excluding one session id. */
   list(excludeSessionId?: string): SidecarRef[] {
     const excluded = excludeSessionId === undefined ? undefined : this.pathFor(excludeSessionId);
     return listSidecarRefs(this.dir, {
@@ -116,6 +127,7 @@ export class SidecarStores {
     });
   }
 
+  /** Close the held store, forget it, and delete its database plus WAL and SHM files. */
   drop(sessionId: string): void {
     const store = this.stores.get(sessionId);
     if (store) {
@@ -125,6 +137,7 @@ export class SidecarStores {
     dropSidecarFiles(this.pathFor(sessionId));
   }
 
+  /** Close every held store and forget them; files stay on disk. */
   close(): void {
     for (const store of this.stores.values()) store.close();
     this.stores.clear();

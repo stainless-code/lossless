@@ -7,6 +7,7 @@
 
 import { makeRedact } from "../redact.ts";
 
+/** Flag carrier both adapters satisfy: unset redacts, `false` disables. */
 export interface RedactConfig {
   readonly redactSecrets?: boolean;
 }

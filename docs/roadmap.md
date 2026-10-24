@@ -189,8 +189,8 @@ Each of these was verified in peer source and is worth doing only with a reason.
 **All three packages are unscoped.** `pi-lossless` is the Pi adapter,
 `opencode-lossless` is the OpenCode v2 adapter, and `lossless-core`
 is the engine. A `@stainless-code/` scope arrives only on a real collision, and
-then it arrives once, for every package at the same time. All three names are
-published. The unscoped `lossless` on npm is an unrelated published
+then it arrives once, for every package at the same time. `pi-lossless` 0.1.0 and `lossless-core` 0.1.0 are
+published; `opencode-lossless` is pending its first release. The unscoped `lossless` on npm is an unrelated published
 package, which is what the harness prefix is for; and the docs app is already
 scoped and private (`@stainless-code/lossless-docs`), so scoping stays a
 decision available rather than one made by accident. What would force the scope
