@@ -16,7 +16,7 @@ import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 import { SessionSeq } from "@deepseek-ai/dsh-session";
 import type { Session, SessionEvent } from "@deepseek-ai/dsh-session";
 import type { TokenMeasurement, TokenMeter, TokenSurfaceNode } from "@deepseek-ai/dsh-token-meter";
-import type { CompactionSpanEntry } from "lossless-core";
+import { selectCompactableRange, type CompactionSpanEntry } from "lossless-core";
 
 import type { LadderOutcome, LosslessEngineDeps } from "./ladder.ts";
 import { resolveSummarizationTarget, runLadder, withSummaryRefs } from "./ladder.ts";
@@ -261,8 +261,10 @@ function assertDagInactive(
 
 /** Resolve the next range starting at the first non-system surface node
  * while retaining a priced recent tail and never splitting an assistant
- * tool-call/result pair. Mirrors selectCompactableRange
- * (lib/index.js:409-448). */
+ * tool-call/result pair. The index math lives in the core seam's
+ * selectCompactableRange (which mirrors the host seam at
+ * lib/index.js:409-448); this wrapper keeps the fail-closed surface check
+ * and the system-head offset. */
 export function selectDagRange(
   session: Session,
   measurement: TokenMeasurement,
@@ -284,24 +286,12 @@ export function selectDagRange(
   // A system/message at surface node 0 is the retained head, never inside
   // the range; without one the range starts at node 0.
   const firstIdx = dagSystemHead(session, head) === undefined ? 0 : 1;
-  let accumulated = 0;
-  let keepFromIdx = pricedNodes.length;
-  for (let index = pricedNodes.length - 1; index >= 0; index -= 1) {
-    accumulated += pricedNodes[index]?.tokens ?? 0;
-    keepFromIdx = index;
-    if (accumulated >= retainTokens) break;
-  }
-  if (keepFromIdx <= firstIdx) return null;
-  while (keepFromIdx > firstIdx) {
-    const node = surfaceNodes[keepFromIdx];
-    if (node !== undefined && toolPairingBalancedBefore(session, node)) break;
-    keepFromIdx -= 1;
-  }
-  if (keepFromIdx <= firstIdx) return null;
-  const start = surfaceNodes[firstIdx];
-  const end = surfaceNodes[keepFromIdx - 1];
-  if (start === undefined || end === undefined) return null;
-  return { start, end };
+  return selectCompactableRange(
+    surfaceNodes.map((seq, index) => ({ seq, tokens: pricedNodes[index]?.tokens ?? 0 })),
+    firstIdx,
+    retainTokens,
+    (seq) => toolPairingBalancedBefore(session, seq),
+  );
 }
 
 function dagSystemHead(session: Session, headSeq: SessionSeq) {

@@ -1,8 +1,5 @@
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
-
 import type { Context } from "@deepseek-ai/cordis";
-import { LcmStore, redactSecrets } from "lossless-core";
+import { SidecarStores, redactSecrets, type LcmStore } from "lossless-core";
 
 import { registerLcmCommand } from "./command.ts";
 import { LosslessSummarizerEngine, checkpointMemory } from "./engine.ts";
@@ -27,8 +24,37 @@ export interface LosslessPluginConfig {
 
 const DEFAULT_SIDECAR_DIR = "./.lossless";
 
-function sanitize(sessionId: string): string {
-  return sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
+/** Per-session sidecars: stores delegate to the shared core seam while each
+ * session keeps its own live message index beside its store. */
+class SessionSidecars extends SidecarStores {
+  private readonly indexes = new Map<string, MessageIndex>();
+
+  constructor(dir: string) {
+    super({ dir });
+  }
+
+  entryFor(sessionId: string): { store: LcmStore; index: MessageIndex } {
+    const store = this.for(sessionId);
+    let index = this.indexes.get(sessionId);
+    if (!index) {
+      index = new MessageIndex();
+      this.indexes.set(sessionId, index);
+    }
+    return { store, index };
+  }
+
+  peekIndex(sessionId: string): MessageIndex | undefined {
+    return this.indexes.get(sessionId);
+  }
+
+  storesMap(): Map<string, LcmStore> {
+    const map = new Map<string, LcmStore>();
+    for (const id of this.ids()) {
+      const store = this.peek(id);
+      if (store) map.set(id, store);
+    }
+    return map;
+  }
 }
 
 /** Compose lossless memory into a harness context: mirror every session
@@ -40,19 +66,9 @@ function sanitize(sessionId: string): string {
 export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): () => void {
   if (config.enabled !== true) return () => undefined;
   const dir = config.sidecarDir ?? DEFAULT_SIDECAR_DIR;
-  mkdirSync(dir, { recursive: true });
-  const sidecars = new Map<string, { store: LcmStore; index: MessageIndex }>();
-  const sidecarFor = (sessionId: string): { store: LcmStore; index: MessageIndex } => {
-    let entry = sidecars.get(sessionId);
-    if (!entry) {
-      entry = {
-        store: new LcmStore(join(dir, `${sanitize(sessionId)}.sqlite`)),
-        index: new MessageIndex(),
-      };
-      sidecars.set(sessionId, entry);
-    }
-    return entry;
-  };
+  const sidecars = new SessionSidecars(dir);
+  const sidecarFor = (sessionId: string): { store: LcmStore; index: MessageIndex } =>
+    sidecars.entryFor(sessionId);
   const stopMirror = ctx.on("session/event", (live, event) => {
     const entry = sidecarFor(String(live.id));
     mirrorEvent(live, event, entry.store, entry.index);
@@ -64,7 +80,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   // Hydration fallback: a resumed session rebuilds its last checkpoint
   // from its sidecar until it compacts again. Reads only; a lookup miss
   // creates no store.
-  const memory = checkpointMemory((sessionId) => sidecars.get(sessionId)?.store);
+  const memory = checkpointMemory((sessionId) => sidecars.peek(sessionId));
   void new LosslessSummarizerEngine(
     ctx,
     {
@@ -77,8 +93,8 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
         : { summarizationModel: config.summarizationModel }),
     },
     {
-      store: (sessionId) => sidecars.get(sessionId)?.store,
-      index: (sessionId) => sidecars.get(sessionId)?.index,
+      store: (sessionId) => sidecars.peek(sessionId),
+      index: (sessionId) => sidecars.peekIndex(sessionId),
       memory,
       redact: redactSecrets,
       ...(config.summaryTokens === undefined ? {} : { summaryTokens: config.summaryTokens }),
@@ -87,7 +103,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
     },
   );
   const stopCommand = registerLcmCommand(ctx, {
-    stores: () => new Map([...sidecars].map(([id, entry]) => [id, entry.store])),
+    stores: () => sidecars.storesMap(),
   });
   return () => {
     stopMirror();

@@ -109,3 +109,85 @@ export function readMetricRows(dir: string): unknown[] {
   }
   return rows;
 }
+
+/** Running provider counts one ladder sums across calls. Host-free so every
+ * adapter tallies the same four legs without importing a provider SDK. */
+export interface UsageTally {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** Empty tally: no call has been added yet. */
+export function createUsageTally(): UsageTally {
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+}
+
+/** Add one call's counts. Missing legs count as zero so a partial report
+ * cannot turn the total into NaN. */
+export function addUsageTally(
+  tally: UsageTally,
+  delta: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number },
+): void {
+  tally.input += delta.input ?? 0;
+  tally.output += delta.output ?? 0;
+  tally.cacheRead += delta.cacheRead ?? 0;
+  tally.cacheWrite += delta.cacheWrite ?? 0;
+}
+
+/** Fold a tally into provider token names. Undefined when nothing was billed,
+ * so the caller keeps the absent usage signal instead of a zero row. */
+export function tokenUsageOfTally(tally: UsageTally):
+  | {
+      inputTokens: number;
+      outputTokens: number;
+      totalTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+    }
+  | undefined {
+  if (tally.input === 0 && tally.output === 0) return undefined;
+  return {
+    inputTokens: tally.input,
+    outputTokens: tally.output,
+    totalTokens: tally.input + tally.output,
+    cacheReadTokens: tally.cacheRead,
+    cacheWriteTokens: tally.cacheWrite,
+  };
+}
+
+/** Build the usage record with zeroed cost legs: nothing offline knows what a
+ * token costs here, so every cost leg is zero and the totals stay exact. */
+export function zeroCostUsageOfTokens(
+  usage:
+    | {
+        inputTokens: number;
+        outputTokens: number;
+        totalTokens?: number;
+        cacheReadTokens?: number;
+        cacheWriteTokens?: number;
+      }
+    | undefined,
+):
+  | {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      totalTokens: number;
+      cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+    }
+  | undefined {
+  if (!usage) return undefined;
+  const input = usage.inputTokens;
+  const output = usage.outputTokens;
+  return {
+    input,
+    output,
+    cacheRead: usage.cacheReadTokens ?? 0,
+    cacheWrite: usage.cacheWriteTokens ?? 0,
+    totalTokens: usage.totalTokens ?? input + output,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}

@@ -1,7 +1,15 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { TokenUsage } from "@deepseek-ai/dsh-llm";
-import { makeLlm, runCompaction } from "lossless-core";
+import {
+  addUsageTally,
+  createUsageTally,
+  makeLlm,
+  resolveFallbackTarget,
+  runCompaction,
+} from "lossless-core";
+import { tokenUsageOfTally } from "lossless-core";
+import type { UsageTally } from "lossless-core";
 import type {
   CompactionSpanEntry,
   CompletionRequest,
@@ -87,7 +95,9 @@ export class SpanAlreadyMemoryError extends Error {
 }
 
 /** Shared provider/model fallback chain (explicit config, latest routed
- * request, agent options) for the seam path and the DAG bracket alike. */
+ * request, agent options) for the seam path and the DAG bracket alike. The
+ * ordering lives in the core resolveFallbackTarget seam; this wrapper keeps
+ * only the host session and option reads. */
 export function resolveSummarizationTarget(
   config: { summarizationProvider: string; summarizationModel: string },
   agent: Agent,
@@ -109,7 +119,7 @@ export function resolveSummarizationTarget(
     options.model.length > 0
       ? { provider: options.provider, model: options.model }
       : undefined;
-  return configured ?? latest ?? agentTarget;
+  return resolveFallbackTarget([configured, latest, agentTarget]);
 }
 
 /** What one ladder run stored: the condensed text plus the sidecar ids and
@@ -202,12 +212,9 @@ export function withSummaryRefs(text: string, ids: readonly number[]): string {
   return `${text}\n\nStored summaries: ${ids.map((id) => `[lcm:summary #${id}]`).join(" ")}`;
 }
 
-/** Sums provider counts across every ladder call into one envelope. The route reported is the one that produced the stored text. */
+/** Sums provider counts across every ladder call into one envelope. The route reported is the one that produced the stored text. The accumulation lives in the core usage tally seam; this wrapper keeps only the route beside the host. */
 class UsageTracker {
-  private input = 0;
-  private output = 0;
-  private cacheRead = 0;
-  private cacheWrite = 0;
+  private tally: UsageTally = createUsageTally();
   route: DshRoute | undefined = undefined;
 
   wrap(host: ModelHost<DshRoute>): ModelHost<DshRoute> {
@@ -221,10 +228,7 @@ class UsageTracker {
         this.route = model.model;
         const usage = answer.usage;
         if (usage) {
-          this.input += usage.input;
-          this.output += usage.output;
-          this.cacheRead += usage.cacheRead;
-          this.cacheWrite += usage.cacheWrite;
+          addUsageTally(this.tally, usage);
         }
         return answer;
       },
@@ -232,13 +236,6 @@ class UsageTracker {
   }
 
   tokenUsage(): TokenUsage | undefined {
-    if (this.input === 0 && this.output === 0) return undefined;
-    return {
-      inputTokens: this.input,
-      outputTokens: this.output,
-      totalTokens: this.input + this.output,
-      cacheReadTokens: this.cacheRead,
-      cacheWriteTokens: this.cacheWrite,
-    };
+    return tokenUsageOfTally(this.tally);
   }
 }

@@ -1,7 +1,12 @@
 import type { Context } from "@deepseek-ai/cordis";
 import { defineTool } from "@deepseek-ai/dsh-tools";
 import type { ToolRunContext } from "@deepseek-ai/dsh-tools";
-import { MAX_EXPAND_CHARS, describeView, expandView, grepView } from "lossless-core";
+import {
+  describeAnswer as coreDescribeAnswer,
+  expandAnswer as coreExpandAnswer,
+  grepAnswer as coreGrepAnswer,
+  type RecallToolDeps as CoreRecallDeps,
+} from "lossless-core";
 import type { LcmStore } from "lossless-core";
 
 export interface RecallDeps {
@@ -25,16 +30,29 @@ export function registerRecallTools(ctx: Context, deps: RecallDeps): () => void 
   };
 }
 
-const NO_STORE =
-  "LCM: no stored history for this session yet (nothing has been ingested, or the session is ephemeral).";
+function toCoreDeps(deps: RecallDeps): CoreRecallDeps {
+  return {
+    storeFor: (sessionId) => deps.store(sessionId === "" ? undefined : sessionId),
+    redact: deps.redact,
+  };
+}
+
+function coreDepsFor(
+  store: LcmStore | undefined,
+  redact: (text: string) => string,
+): CoreRecallDeps {
+  return {
+    storeFor: () => store,
+    redact,
+  };
+}
 
 export function grepAnswer(
   store: LcmStore | undefined,
   redact: (text: string) => string,
   args: { query: string; limit?: number },
 ): string {
-  if (!store) return NO_STORE;
-  return grepView(store, redact, { query: args.query, limit: args.limit }).text;
+  return coreGrepAnswer(coreDepsFor(store, redact), "", args);
 }
 
 export function describeAnswer(
@@ -42,8 +60,7 @@ export function describeAnswer(
   redact: (text: string) => string,
   args: { id: number },
 ): string {
-  if (!store) return NO_STORE;
-  return describeView(store, redact, args.id).text;
+  return coreDescribeAnswer(coreDepsFor(store, redact), "", args);
 }
 
 export function expandAnswer(
@@ -58,25 +75,7 @@ export function expandAnswer(
     max_chars?: number;
   },
 ): string {
-  if (!store) return NO_STORE;
-  const maxChars = Math.min(args.max_chars ?? MAX_EXPAND_CHARS, MAX_EXPAND_CHARS);
-  if (args.entry_id !== undefined) {
-    return expandView(store, redact, {
-      mode: "message",
-      ...(args.id === undefined ? {} : { id: args.id }),
-      entryId: args.entry_id,
-      charOffset: args.char_offset ?? 0,
-      maxChars,
-    }).text;
-  }
-  if (args.id === undefined) return "lcm_expand needs an id (a summary to list) or an entry_id.";
-  return expandView(store, redact, {
-    mode: "list",
-    id: args.id,
-    offset: args.offset ?? 0,
-    limit: args.limit ?? 25,
-    maxChars,
-  }).text;
+  return coreExpandAnswer(coreDepsFor(store, redact), "", args);
 }
 
 function sessionOf(exec: ToolRunContext): string | undefined {
@@ -102,7 +101,7 @@ function lcmGrepTool(deps: RecallDeps) {
       render: (_args, value) => [{ type: "text", text: value }],
     },
     async execute(args, exec) {
-      return grepAnswer(deps.store(sessionOf(exec)), deps.redact, args);
+      return coreGrepAnswer(toCoreDeps(deps), sessionOf(exec) ?? "", args);
     },
   });
 }
@@ -124,7 +123,7 @@ function lcmDescribeTool(deps: RecallDeps) {
       render: (_args, value) => [{ type: "text", text: value }],
     },
     async execute(args, exec) {
-      return describeAnswer(deps.store(sessionOf(exec)), deps.redact, args);
+      return coreDescribeAnswer(toCoreDeps(deps), sessionOf(exec) ?? "", args);
     },
   });
 }
@@ -147,7 +146,7 @@ function lcmExpandTool(deps: RecallDeps) {
       render: (_args, value) => [{ type: "text", text: value }],
     },
     async execute(args, exec) {
-      return expandAnswer(deps.store(sessionOf(exec)), deps.redact, args);
+      return coreExpandAnswer(toCoreDeps(deps), sessionOf(exec) ?? "", args);
     },
   });
 }

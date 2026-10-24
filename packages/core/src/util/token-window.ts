@@ -114,6 +114,52 @@ export function createWindowLookup<M extends WindowModel = WindowModel>(
   };
 }
 
+/** One priced surface position the range selector reads. */
+export interface CompactableNode<S> {
+  readonly seq: S;
+  readonly tokens: number;
+}
+
+/** Inclusive seq range to compact. */
+export interface CompactableRange<S> {
+  readonly start: S;
+  readonly end: S;
+}
+
+/** The next range starting at `firstIdx` while retaining a priced recent tail
+ * and never splitting a tool-call/result pair. The DeepSeek adapter reads
+ * this through its selectDagRange wrapper, which keeps the fail-closed
+ * surface check and the system-head offset beside the host session; the
+ * accumulation, the admission, and the boundary walk live here, so the two
+ * copies cannot drift. Null means no safe useful range exists: no nodes, the
+ * retained tail already reaches the head, or no balanced boundary is left. */
+export function selectCompactableRange<S>(
+  nodes: readonly CompactableNode<S>[],
+  firstIdx: number,
+  retainTokens: number,
+  isBalanced: (seq: S) => boolean,
+): CompactableRange<S> | null {
+  if (nodes.length === 0) return null;
+  let accumulated = 0;
+  let keepFromIdx = nodes.length;
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    accumulated += nodes[index]?.tokens ?? 0;
+    keepFromIdx = index;
+    if (accumulated >= retainTokens) break;
+  }
+  if (keepFromIdx <= firstIdx) return null;
+  while (keepFromIdx > firstIdx) {
+    const seq = nodes[keepFromIdx]?.seq;
+    if (seq !== undefined && isBalanced(seq)) break;
+    keepFromIdx -= 1;
+  }
+  if (keepFromIdx <= firstIdx) return null;
+  const start = nodes[firstIdx]?.seq;
+  const end = nodes[keepFromIdx - 1]?.seq;
+  if (start === undefined || end === undefined) return null;
+  return { start, end };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }

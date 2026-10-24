@@ -9,6 +9,7 @@ import type {
   Notices,
   Usage,
 } from "lossless-core";
+import { zeroCostUsageOfTokens } from "lossless-core";
 
 /** One model route on the composition: the provider key that selects the
  * adapter instance, and the model id that adapter serves. */
@@ -126,20 +127,10 @@ function joinedText(assembler: BlockAssembler): string {
     .join("\n");
 }
 
-/** The provider's counts with no prices attached: nothing offline knows what a
- * token costs here, so every cost leg is zero and the totals stay exact. */
+/** The provider's counts with no prices attached. The zeroing lives in the
+ * core seam; this wrapper keeps only the TokenUsage to Usage shape. */
 export function usageOf(usage: TokenUsage | undefined): Usage | undefined {
-  if (!usage) return undefined;
-  const input = usage.inputTokens;
-  const output = usage.outputTokens;
-  return {
-    input,
-    output,
-    cacheRead: usage.cacheReadTokens ?? 0,
-    cacheWrite: usage.cacheWriteTokens ?? 0,
-    totalTokens: usage.totalTokens ?? input + output,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
+  return zeroCostUsageOfTokens(usage);
 }
 
 function message(error: unknown): string {
