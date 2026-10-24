@@ -159,6 +159,32 @@ describe("lcm mutating verbs", () => {
     expect(gcExports.length).toBe(1);
   });
 
+  it("gc apply on an empty stale sidecar removes it without naming an export file", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "live-gc-empty";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-empty"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    const live = deps.storeFor!(liveId);
+    seedMessages(live, ["live stays"]);
+    const emptyPath = join(dir, "empty-old.sqlite");
+    const empty = new LcmStore(emptyPath);
+    empty.close();
+    ageFile(emptyPath, 31);
+    ageFile(join(dir, `${sanitizeSidecarId(liveId)}.sqlite`), 31);
+    const applied = await invoke(ctx, deps, liveId, "gc --apply");
+    expect(applied.kind).toBe("success");
+    expect(applied.text).toContain("removed 1 of 1");
+    expect(applied.text).toContain("transcripts were empty so no export file was written");
+    expect(applied.text).not.toContain("lcm-export-gc-");
+    expect(existsSync(emptyPath)).toBe(false);
+    const gcExports = readdirSync(dir).filter((name) => name.startsWith("lcm-export-gc-"));
+    expect(gcExports.length).toBe(0);
+  });
+
   it("migrate dry-run describes a stale sidecar and apply upgrades it", async () => {
     const { ctx } = setupContext(ROUTE, []);
     await mountBase(ctx);

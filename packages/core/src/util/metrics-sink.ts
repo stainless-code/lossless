@@ -69,8 +69,57 @@ export function appendMetricRow(dir: string, row: Record<string, unknown>): void
   } catch {}
 }
 
+/** Filter for {@link readMetricRows}: narrows to one session and keeps only the newest rows. */
+export interface ReadMetricRowsOptions {
+  readonly session?: string;
+  readonly limit?: number;
+}
+
 /** Read rotated generations oldest-first plus the live log, skipping missing files and malformed lines. */
-export function readMetricRows(dir: string): unknown[] {
+export function readMetricRows(dir: string, opts?: ReadMetricRowsOptions): unknown[] {
+  const session =
+    typeof opts?.session === "string" && opts.session.length > 0 ? opts.session : undefined;
+  const limit =
+    typeof opts?.limit === "number" && Number.isFinite(opts.limit) ? opts.limit : undefined;
+  if (session === undefined && (limit === undefined || limit < 0)) {
+    return readAllMetricRows(dir);
+  }
+  if (limit !== undefined && limit <= 0) return [];
+  const capped = limit === undefined ? undefined : Math.floor(limit);
+  const paths = metricPaths(dir);
+  const kept: unknown[] = [];
+  for (let i = paths.length - 1; i >= 0; i -= 1) {
+    let text: string;
+    try {
+      text = readFileSync(paths[i] as string, "utf8");
+    } catch {
+      continue;
+    }
+    const lines = text.split("\n");
+    for (let j = lines.length - 1; j >= 0; j -= 1) {
+      const trimmed = (lines[j] as string).trim();
+      if (trimmed.length === 0) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) continue;
+      if (session !== undefined && (parsed as Record<string, unknown>).session !== session)
+        continue;
+      kept.push(parsed);
+      if (capped !== undefined && kept.length >= capped) {
+        kept.reverse();
+        return kept;
+      }
+    }
+  }
+  kept.reverse();
+  return kept;
+}
+
+function metricPaths(dir: string): string[] {
   const paths: string[] = [];
   const base = metricsFilePath(dir);
   try {
@@ -84,6 +133,11 @@ export function readMetricRows(dir: string): unknown[] {
     (a, b) => Number(a.slice(a.lastIndexOf(".") + 1)) - Number(b.slice(b.lastIndexOf(".") + 1)),
   );
   paths.push(base);
+  return paths;
+}
+
+function readAllMetricRows(dir: string): unknown[] {
+  const paths = metricPaths(dir);
 
   const rows: unknown[] = [];
   for (const path of paths) {

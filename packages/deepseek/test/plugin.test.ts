@@ -125,8 +125,6 @@ describe("applyLossless", () => {
       if (result.kind !== "success") throw new Error(`compact failed: ${result.text}`);
       expect(result.text).toMatch(/Compacted \d+ history items/);
       expect(session.deriveMessages().length).toBeLessThan(before);
-      // The production manual path commits the DAG: one condensed record
-      // plus at least one log-only leaf record under one compaction id.
       const logSummaries = session
         .snapshotEvents()
         .filter(

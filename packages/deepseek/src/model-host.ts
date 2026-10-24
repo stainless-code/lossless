@@ -1,4 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
+import type { Agent } from "@deepseek-ai/dsh-agent";
 import { BlockAssembler } from "@deepseek-ai/dsh-llm";
 import type { FinishReason, GenerateOptions, TokenUsage } from "@deepseek-ai/dsh-llm";
 import type {
@@ -35,6 +36,33 @@ export interface DshHostOptions {
  * reasoning model therefore never silently spends the output cap here. */
 export function dshRef(route: DshRoute): ModelRef<DshRoute> {
   return { key: `${route.provider}/${route.model}`, reasoning: false, model: route };
+}
+
+/** The calling session's route: header first, agent options second. */
+export function agentRoute(agent: Agent | undefined): DshRoute | undefined {
+  // requestHeader crosses the host boundary and can throw.
+  try {
+    const header = agent?.session.requestHeader?.()?.config;
+    if (
+      header !== undefined &&
+      typeof header.provider === "string" &&
+      header.provider.length > 0 &&
+      typeof header.model === "string" &&
+      header.model.length > 0
+    ) {
+      return { provider: header.provider, model: header.model };
+    }
+  } catch {}
+  const options = agent?.options as { provider?: unknown; model?: unknown } | undefined;
+  if (
+    typeof options?.provider === "string" &&
+    options.provider.length > 0 &&
+    typeof options?.model === "string" &&
+    options.model.length > 0
+  ) {
+    return { provider: options.provider, model: options.model };
+  }
+  return undefined;
 }
 
 /** The core port over one streaming call. `session()` answers the configured

@@ -1,6 +1,7 @@
 import { Context } from "@deepseek-ai/cordis";
+import { ToolCallId, type StreamChunk } from "@deepseek-ai/dsh-llm";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
-import ToolRuntime from "@deepseek-ai/dsh-tools";
+import ToolRuntime, { type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import { LcmStore, ingestEntries } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -8,7 +9,7 @@ import type { DshRoute } from "../src/model-host.ts";
 import { dshRef } from "../src/model-host.ts";
 import { dshReader } from "../src/reader.ts";
 import { expandQueryAnswer, registerExpandQueryTool } from "../src/tools.ts";
-import { setupContext, textChunks, toolCallChunks } from "./support/script-adapter.ts";
+import { errorChunks, setupContext, textChunks, toolCallChunks } from "./support/script-adapter.ts";
 
 const ROUTE: DshRoute = { provider: "test-provider", model: "test-model" };
 
@@ -42,6 +43,28 @@ function seedStoreWithSummary(): { store: LcmStore; summaryId: number } {
 }
 
 const identity = (text: string): string => text;
+
+/** One step carrying both findings text and a tool call, so the run can
+ * exhaust its steps with a partial answer in hand. */
+function textAndCallChunks(
+  text: string,
+  callId: string,
+  name: string,
+  args: unknown,
+): StreamChunk[] {
+  const id = ToolCallId(callId);
+  const json = JSON.stringify(args);
+  return [
+    { type: "block-start", index: 0, blockType: "text" },
+    { type: "text-delta", index: 0, text },
+    { type: "block-end", index: 0, block: { type: "text", text } },
+    { type: "block-start", index: 1, blockType: "tool-call" },
+    { type: "tool-call-delta", index: 1, id, name, argumentsDelta: json },
+    { type: "block-end", index: 1, block: { type: "tool-call", id, name, arguments: json } },
+    { type: "usage", usage: { inputTokens: 10, outputTokens: 5 } },
+    { type: "finish", reason: { kind: "tool-calls" } },
+  ];
+}
 
 describe("lcm_expand_query", () => {
   it("registers the fourth tool whose schema names every param", async () => {
@@ -188,5 +211,175 @@ describe("lcm_expand_query", () => {
     expect(answer).toContain("no stored history");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ event: "lcm", kind: "retrieval", stop: "refused" });
+  });
+
+  it("reports a reader failure with its reason and billed counters", async () => {
+    const store = seedStore();
+    const { ctx } = setupContext(ROUTE, [
+      toolCallChunks("call-1", "lcm_grep", { query: "recall pipeline rollout" }),
+      errorChunks(),
+    ]);
+    const rows: Record<string, unknown>[] = [];
+    const answer = await expandQueryAnswer(
+      store,
+      identity,
+      dshReader(ctx, { ref: dshRef(ROUTE) }),
+      "session-1",
+      { query: "recall pipeline rollout" },
+      (row) => rows.push(row),
+    );
+    expect(answer).toBe("Retrieval failed: AUTH: bad key");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      kind: "retrieval",
+      stop: "failed",
+      reason: "AUTH: bad key",
+      steps: 2,
+      input: 10,
+      output: 5,
+    });
+  });
+
+  it("stops with partial findings when the steps run out", async () => {
+    const store = seedStore();
+    const scripts = Array.from({ length: 6 }, (_, i) =>
+      textAndCallChunks(`partial note ${i} [e01]`, `call-${i}`, "lcm_grep", {
+        query: "recall pipeline rollout",
+      }),
+    );
+    const { ctx } = setupContext(ROUTE, scripts);
+    const rows: Record<string, unknown>[] = [];
+    const answer = await expandQueryAnswer(
+      store,
+      identity,
+      dshReader(ctx, { ref: dshRef(ROUTE) }),
+      "session-1",
+      { query: "recall pipeline rollout" },
+      (row) => rows.push(row),
+    );
+    expect(answer).toContain("stopped: steps");
+    expect(answer).toContain("<recovered_findings>");
+    expect(rows[0]).toMatchObject({ kind: "retrieval", stop: "stopped", steps: 6 });
+  });
+
+  it("stops empty when no step left an answer", async () => {
+    const store = seedStore();
+    const scripts = Array.from({ length: 6 }, (_, i) =>
+      toolCallChunks(`call-${i}`, "lcm_grep", { query: "recall pipeline rollout" }),
+    );
+    const { ctx } = setupContext(ROUTE, scripts);
+    const rows: Record<string, unknown>[] = [];
+    const answer = await expandQueryAnswer(
+      store,
+      identity,
+      dshReader(ctx, { ref: dshRef(ROUTE) }),
+      "session-1",
+      { query: "recall pipeline rollout" },
+      (row) => rows.push(row),
+    );
+    expect(answer).toContain("Retrieval stopped (steps) after 6 step(s) without an answer");
+    expect(rows[0]).toMatchObject({ kind: "retrieval", stop: "stopped", reason: "steps" });
+  });
+
+  it("refuses an empty entry id", async () => {
+    const store = seedStore();
+    const { ctx } = setupContext(ROUTE, []);
+    const rows: Record<string, unknown>[] = [];
+    const answer = await expandQueryAnswer(
+      store,
+      identity,
+      dshReader(ctx, { ref: dshRef(ROUTE) }),
+      "session-1",
+      { query: "recall pipeline rollout", entry_id: "" },
+      (row) => rows.push(row),
+    );
+    expect(answer).toBe("Nothing was read: entry_id is empty.");
+    expect(rows[0]).toMatchObject({ kind: "retrieval", stop: "refused" });
+  });
+
+  it("refuses a summary id the store does not hold", async () => {
+    const store = seedStore();
+    const { ctx } = setupContext(ROUTE, []);
+    const rows: Record<string, unknown>[] = [];
+    const answer = await expandQueryAnswer(
+      store,
+      identity,
+      dshReader(ctx, { ref: dshRef(ROUTE) }),
+      "session-1",
+      { query: "recall pipeline rollout", summary_id: 4242 },
+      (row) => rows.push(row),
+    );
+    expect(answer).toBe("Nothing was read: no summary with id 4242.");
+    expect(rows[0]).toMatchObject({
+      kind: "retrieval",
+      stop: "refused",
+      reason: "no summary with id 4242",
+    });
+  });
+
+  it("refuses an empty session string", async () => {
+    const store = seedStore();
+    const { ctx } = setupContext(ROUTE, []);
+    const rows: Record<string, unknown>[] = [];
+    const answer = await expandQueryAnswer(
+      store,
+      identity,
+      dshReader(ctx, { ref: dshRef(ROUTE) }),
+      "session-1",
+      { query: "recall pipeline rollout", session: "" },
+      (row) => rows.push(row),
+    );
+    expect(answer).toBe("Nothing was read: session must be a non-empty session id.");
+    expect(rows[0]).toMatchObject({ kind: "retrieval", stop: "refused" });
+  });
+
+  it("refuses a past session no sidecar holds", async () => {
+    const store = seedStore();
+    const { ctx } = setupContext(ROUTE, []);
+    const rows: Record<string, unknown>[] = [];
+    const answer = await expandQueryAnswer(
+      store,
+      identity,
+      dshReader(ctx, { ref: dshRef(ROUTE) }),
+      "session-1",
+      { query: "recall pipeline rollout", session: "ghost" },
+      (row) => rows.push(row),
+      { list: () => [] },
+    );
+    expect(answer).toBe("Nothing was read: no stored session with id ghost.");
+    expect(rows[0]).toMatchObject({ kind: "retrieval", stop: "refused" });
+  });
+
+  it("fails the tool run when no provider backs the reader", async () => {
+    const ctx = new Context();
+    await ctx.plugin(SystemPrompt, {});
+    void new ToolRuntime(ctx);
+    const store = seedStore();
+    const rows: Record<string, unknown>[] = [];
+    const dispose = registerExpandQueryTool(ctx, {
+      store: () => store,
+      redact: identity,
+      record: (row) => rows.push(row),
+    });
+    try {
+      const tool = ctx.tools.get("lcm_expand_query");
+      expect(tool).toBeDefined();
+      const exec = {
+        agent: undefined,
+        signal: new AbortController().signal,
+      } as unknown as ToolRunContext;
+      const answer = await tool?.execute({ query: "recall pipeline rollout" }, exec);
+      expect(answer).toBe(
+        "lossless retrieval: no provider/model available for the reader: route one request or set both agent options fields.",
+      );
+      expect(rows[0]).toMatchObject({
+        kind: "retrieval",
+        stop: "failed",
+        reason: "no provider/model available for the reader",
+        steps: 0,
+      });
+    } finally {
+      dispose();
+    }
   });
 });

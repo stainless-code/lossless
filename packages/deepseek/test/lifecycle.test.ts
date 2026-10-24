@@ -194,6 +194,37 @@ describe("lcm read-only verbs", () => {
     expect(result.text).toContain("[REDACTED]");
   });
 
+  it("diagnose names the calling provider and model", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("diag-model"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "diag-model", ["diagnose model hello"]);
+    const result = await invoke(
+      ctx,
+      depsFor(dir, new Map([["diag-model", store]])),
+      "diag-model",
+      "diagnose",
+    );
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("test-provider/test-model");
+  });
+
+  it("report caps the rows it reads", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("cap-1"), { meta: { cwd: dir } });
+    const record = createRecord(dir);
+    for (let i = 0; i < 650; i += 1) {
+      record({ kind: "pass", session: "cap-1", outcome: "stored", leaf: 1, condensed: 0, seq: i });
+    }
+    const result = await invoke(ctx, depsFor(dir, new Map()), "cap-1", "report");
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("500 row(s) for session cap-1");
+    expect(result.text).not.toContain("650 row(s)");
+  });
+
   it("diagnose --save writes the bundle to a file", async () => {
     const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
     await mountBase(ctx);

@@ -34,7 +34,7 @@ import {
 } from "lossless-core";
 
 import { healLlmConfig, healRunBudgets } from "./ladder.ts";
-import { dshModelHost } from "./model-host.ts";
+import { agentRoute, dshModelHost } from "./model-host.ts";
 
 export interface LcmCommandDeps {
   readonly stores: () => ReadonlyMap<string, LcmStore>;
@@ -59,33 +59,6 @@ export interface LcmCommandDeps {
 
 const STAMP = (): string => new Date().toISOString().replace(/[:.]/g, "-");
 
-/** The calling session's route: the latest routed request first, agent options second. */
-function agentRoute(agent: Agent): { provider: string; model: string } | undefined {
-  try {
-    const header = agent.session.requestHeader?.()?.config;
-    if (
-      header !== undefined &&
-      typeof header.provider === "string" &&
-      header.provider.length > 0 &&
-      typeof header.model === "string" &&
-      header.model.length > 0
-    ) {
-      return { provider: header.provider, model: header.model };
-    }
-  } catch {}
-  const options = agent.options as { provider?: unknown; model?: unknown } | undefined;
-  if (
-    typeof options?.provider === "string" &&
-    options.provider.length > 0 &&
-    typeof options?.model === "string" &&
-    options.model.length > 0
-  ) {
-    return { provider: options.provider, model: options.model };
-  }
-  return undefined;
-}
-
-/** Model window in tokens, or undefined when the host cannot name one. */
 async function resolveWindowTokens(ctx: Context, agent: Agent): Promise<number | undefined> {
   const route = agentRoute(agent);
   if (!route) return undefined;
@@ -98,7 +71,6 @@ async function resolveWindowTokens(ctx: Context, agent: Agent): Promise<number |
   }
 }
 
-/** Current request pressure for the calling session, or undefined without a meter. */
 function measureTotalTokens(ctx: Context, agent: Agent): number | undefined {
   try {
     const measurement = ctx.tokenMeter?.measure(agent.session);
@@ -112,8 +84,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function metricRows(deps: LcmCommandDeps): Record<string, unknown>[] {
-  return readMetricRows(deps.sidecarDir).filter((row): row is Record<string, unknown> =>
+const METRIC_ROWS_LIMIT = 500;
+
+function metricRows(deps: LcmCommandDeps, sessionId?: string): Record<string, unknown>[] {
+  const opts =
+    sessionId === undefined
+      ? { limit: METRIC_ROWS_LIMIT }
+      : { session: sessionId, limit: METRIC_ROWS_LIMIT };
+  return readMetricRows(deps.sidecarDir, opts).filter((row): row is Record<string, unknown> =>
     isRecord(row),
   );
 }
@@ -129,7 +107,6 @@ function numberOf(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-/** One-line summary of the newest pass row, the way the report phrases it. */
 function lastPassLine(passRows: readonly Record<string, unknown>[]): string {
   const last = passRows[passRows.length - 1];
   if (!last) return "none recorded";
@@ -159,7 +136,8 @@ export async function handleStatus(
   if (stores.size === 0) return { kind: "success", text: "LCM has mirrored no sessions yet." };
   const sessionId = String(invocation.agent.session.id);
   const lines = [...stores].map(([id, store]) => {
-    const messages = store.allMessages().length;
+    const messages = store.messageCount();
+    // Summary payloads stay small beside message bodies, so listing them costs little.
     const summaries = store.allSummaries().length;
     return `${id}: ${messages} messages, ${summaries} summaries`;
   });
@@ -182,12 +160,14 @@ export async function handleStatus(
     lines.push("window: unknown (no model window resolved)");
     lines.push("thresholds: window unknown");
   }
-  const passes = sessionRows(metricRows(deps), sessionId).filter((row) => row.kind === "pass");
+  const passes = sessionRows(metricRows(deps, sessionId), sessionId).filter(
+    (row) => row.kind === "pass",
+  );
   lines.push(`last pass (${sessionId}): ${lastPassLine(passes)}`);
   return { kind: "success", text: lines.join("\n") };
 }
 
-/** Session-scoped metrics rollup over the slice-2 rows, in the OpenCode vocabulary. */
+/** Session-scoped metrics rollup over the metrics rows, in the OpenCode vocabulary. */
 export function formatSessionReport(
   rows: readonly Record<string, unknown>[],
   sessionId: string,
@@ -232,7 +212,7 @@ export function formatSessionReport(
 
 export function handleReport(deps: LcmCommandDeps, invocation: CommandInvocation): CommandResult {
   const sessionId = String(invocation.agent.session.id);
-  return { kind: "success", text: formatSessionReport(metricRows(deps), sessionId) };
+  return { kind: "success", text: formatSessionReport(metricRows(deps, sessionId), sessionId) };
 }
 
 /** Timestamped copy of the calling session's sidecar, mode 0600. */
@@ -333,7 +313,10 @@ export async function handleDiagnose(
   const stats = store.stats();
   const integrity = checkIntegrity(store);
   const route = agentRoute(invocation.agent);
-  const model = route === undefined ? "(session model)" : modelKey(route);
+  const model =
+    route === undefined
+      ? "(session model)"
+      : modelKey({ provider: route.provider, id: route.model });
   const window = await resolveWindowTokens(ctx, invocation.agent);
   const bundle = buildDiagnoseBundle({
     versions: { plugin: pluginLabel, host: () => "deepseek harness" },
@@ -368,7 +351,7 @@ export async function handleDiagnose(
       effective: JSON.stringify({ swapAtRatio: 0.7, recutAtRatio: 0.85 }),
       path: "plugin options",
     },
-    metrics: sessionRows(metricRows(deps), sessionId),
+    metrics: sessionRows(metricRows(deps, sessionId), sessionId),
     redact: redactSecrets,
     home: homedir(),
   });
@@ -539,10 +522,14 @@ export function handleGc(
     try {
       chmodSync(exportTarget, 0o600);
     } catch {}
+    return {
+      kind: "success",
+      text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
+    };
   }
   return {
     kind: "success",
-    text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
+    text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); transcripts were empty so no export file was written${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
   };
 }
 
@@ -646,8 +633,7 @@ const healInFlight = new Set<string>();
 
 /** Repair mechanically truncated nodes from their stored sources. Dry-run
  * default; only --apply calls the model. Budgets ride the plugin config
- * through these deps (slice 5); unset keys keep the core heal defaults, so
- * compositions that omit them behave exactly as slice 3b did. */
+ * through these deps; unset keys keep the core heal defaults. */
 export async function handleHeal(
   ctx: Context,
   deps: LcmCommandDeps,

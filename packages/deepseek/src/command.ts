@@ -26,7 +26,6 @@ function assertNever(value: never): never {
   throw new Error(`unknown manual compaction error code: ${String(value)}`);
 }
 
-/** Convert expected capability failures into concise human-only outcomes. */
 function expectedFailure(error: ManualCompactionError): CommandResult {
   switch (error.code) {
     case "busy":

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,7 +8,17 @@ import { describe, expect, it } from "vite-plus/test";
 import type { DshRoute } from "../src/model-host.ts";
 import { dshRef } from "../src/model-host.ts";
 import { dshReader } from "../src/reader.ts";
-import { answerGrep, expandAnswer, expandQueryAnswer, type RecallDeps } from "../src/tools.ts";
+import {
+  CROSS_SESSION_DEADLINE_MS,
+  CROSS_SESSION_HITS_LIMIT,
+  CROSS_SESSION_PER_STORE_HITS,
+  CROSS_SESSION_STORE_LIMIT,
+  answerGrep,
+  expandAnswer,
+  expandQueryAnswer,
+  searchPastSessions,
+  type RecallDeps,
+} from "../src/tools.ts";
 import { setupContext, textChunks, toolCallChunks } from "./support/script-adapter.ts";
 
 const ROUTE: DshRoute = { provider: "test-provider", model: "test-model" };
@@ -216,5 +226,124 @@ describe("cross-session recall", () => {
     expect(readFileSync(path).equals(before.bytes)).toBe(true);
     expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
     expect(existsSync(join(dir, `${CURRENT}.sqlite`))).toBe(false);
+  });
+});
+
+describe("cross-session caps", () => {
+  it("stops at the store cap and names it", () => {
+    const dir = tempDir();
+    for (let i = 0; i < CROSS_SESSION_STORE_LIMIT + 5; i += 1) {
+      seed(dir, `ses_cap_${String(i).padStart(2, "0")}`, ["the passphrase is ORCHID-7319"]);
+    }
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      const result = searchPastSessions(
+        { past: recall.pastSessions!, redact: identity },
+        CURRENT,
+        "ORCHID",
+      );
+      expect(result.stoppedBy).toBe("stores");
+      expect(result.scanned).toBe(CROSS_SESSION_STORE_LIMIT);
+      expect(result.text).toContain(`${CROSS_SESSION_STORE_LIMIT}-store cap`);
+    } finally {
+      sidecars.close();
+    }
+  });
+
+  it("stops at the hit cap with at most ten hits per store", () => {
+    const dir = tempDir();
+    for (let s = 0; s < 5; s += 1) {
+      seed(
+        dir,
+        `ses_hits_${s}`,
+        Array.from({ length: 12 }, (_, i) => `ORCHID marker s${s} m${i}`),
+      );
+    }
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      const result = searchPastSessions(
+        { past: recall.pastSessions!, redact: identity },
+        CURRENT,
+        "ORCHID",
+      );
+      expect(result.stoppedBy).toBe("hits");
+      expect(result.hits).toBe(CROSS_SESSION_HITS_LIMIT);
+      expect(result.text).toContain(`${CROSS_SESSION_HITS_LIMIT}-hit cap`);
+    } finally {
+      sidecars.close();
+    }
+  });
+
+  it("caps one chatty store at ten hits", () => {
+    const dir = tempDir();
+    seed(
+      dir,
+      PAST,
+      Array.from({ length: 15 }, (_, i) => `ORCHID marker m${i}`),
+    );
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      const result = searchPastSessions(
+        { past: recall.pastSessions!, redact: identity },
+        CURRENT,
+        "ORCHID",
+      );
+      expect(result.stoppedBy).toBeUndefined();
+      expect(result.hits).toBe(CROSS_SESSION_PER_STORE_HITS);
+      expect(result.scanned).toBe(1);
+    } finally {
+      sidecars.close();
+    }
+  });
+
+  it("stops at the deadline when the clock runs past it", () => {
+    const dir = tempDir();
+    seed(dir, PAST, ["the passphrase is ORCHID-7319"]);
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      let calls = 0;
+      const now = (): number => {
+        calls += 1;
+        return calls <= 1 ? 1_000 : 1_000 + CROSS_SESSION_DEADLINE_MS + 1;
+      };
+      const result = searchPastSessions(
+        { past: recall.pastSessions!, redact: identity },
+        CURRENT,
+        "ORCHID",
+        { now },
+      );
+      expect(result.stoppedBy).toBe("deadline");
+      expect(result.scanned).toBe(0);
+      expect(result.text).toContain(`${CROSS_SESSION_DEADLINE_MS} ms deadline`);
+    } finally {
+      sidecars.close();
+    }
+  });
+
+  it("counts an unreadable sidecar as skipped", () => {
+    const dir = tempDir();
+    seed(dir, PAST, ["the passphrase is ORCHID-7319"]);
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      const good = recall.pastSessions!.list(CURRENT).find((ref) => ref.id === PAST);
+      expect(good).toBeDefined();
+      const corruptPath = join(dir, "ses_corrupt.sqlite");
+      writeFileSync(corruptPath, "not a database");
+      const result = searchPastSessions(
+        {
+          past: { list: () => [good!, { id: "ses_corrupt", path: corruptPath }] },
+          redact: identity,
+        },
+        CURRENT,
+        "ORCHID",
+      );
+      expect(result.skipped).toBe(1);
+      expect(result.scanned).toBe(1);
+      expect(result.hits).toBe(1);
+      expect(result.stoppedBy).toBeUndefined();
+      expect(result.text).toContain("skipped 1 unreadable");
+    } finally {
+      sidecars.close();
+    }
   });
 });

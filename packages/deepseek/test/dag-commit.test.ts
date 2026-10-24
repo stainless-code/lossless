@@ -115,7 +115,6 @@ describe("commitDagTransaction", () => {
       { owner: "current-turn", stability: "whole-surface" },
     );
     expect(result.compactionId.length).toBeGreaterThan(0);
-    // One condensed record plus at least one leaf record.
     expect(result.summarySeqs).toHaveLength(result.leafSeqs.length + 1);
     expect(result.leafSeqs.length).toBeGreaterThan(0);
     expect(result.startSeq).toBeLessThan(result.summarySeqs[0]!);
@@ -137,7 +136,6 @@ describe("commitDagTransaction", () => {
       isCompactCheckpointSource(event.data.source),
     );
     expect(checkpoints).toHaveLength(1);
-    // The condensed replace shrinks the derived surface.
     expect(session.deriveMessages().length).toBeLessThan(before);
     // No unmatched start remains: the lock is released.
     let depth = 0;
@@ -146,6 +144,38 @@ describe("commitDagTransaction", () => {
       if (event.type === "compaction/end") depth -= 1;
     }
     expect(depth).toBe(0);
+  });
+
+  it("emits one compaction-checkpoint row carrying the committed seqs", async () => {
+    const session = buildSession("checkpoint notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const agent = fakeAgent(session, ROUTE);
+    const nodes = session.surface.nodes;
+    const rows: Record<string, unknown>[] = [];
+    const result = await commitDagTransaction(
+      { ...deps(ctx, store, index), record: (row) => rows.push(row) },
+      agent,
+      { start: nodes[1]!, end: nodes[nodes.length - 1]! },
+      { owner: "current-turn", stability: "whole-surface" },
+    );
+    const checkpoints = rows.filter((row) => row.kind === "compaction-checkpoint");
+    expect(checkpoints).toHaveLength(1);
+    expect(checkpoints[0]).toMatchObject({
+      event: "lcm",
+      session: "dag-commit-1",
+      summarySeqs: [...result.summarySeqs],
+      leafSeqs: [...result.leafSeqs],
+    });
+    expect(typeof checkpoints[0]?.ts).toBe("number");
   });
 
   it("closes the bracket with the error and releases the lock when the ladder fails", async () => {

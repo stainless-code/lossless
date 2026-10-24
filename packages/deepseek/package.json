@@ -23,7 +23,8 @@
   },
   "files": [
     "dist",
-    "CHANGELOG.md"
+    "README.md",
+    "LICENSE"
   ],
   "type": "module",
   "main": "./dist/index.mjs",

@@ -26,7 +26,9 @@ import type { DshRoute } from "./model-host.ts";
 import { usageOf } from "./model-host.ts";
 
 export interface DshReaderOptions {
+  /** Model the reader calls, as provider plus model on one route. */
   readonly ref: ModelRef<DshRoute>;
+  /** Cancellation for the streaming call; an abort fails the step. */
   readonly signal?: AbortSignal;
 }
 

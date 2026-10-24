@@ -129,7 +129,7 @@ export interface BackfillOptions {
   pageSize?: number;
   /** Absolute per-session event ceiling. Default BACKFILL_MAX_EVENTS. */
   maxEvents?: number;
-  /** Slice-2 metrics recorder; receives one `backfill` row per session. */
+  /** Metrics recorder; receives one `backfill` row per session. */
   record?: (row: Record<string, unknown>) => void;
 }
 

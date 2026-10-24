@@ -193,7 +193,7 @@ pays only for the condensed node.
 Caller usage first:
 
 ```ts
-// B1 implements this shape, with one amendment recorded below
+// Implements this shape, with one amendment recorded below
 const result = await commitDagTransaction(deps, agent, selection, {
   owner: null, // or a non-null marker for the auto path
   stability: "whole-surface", // or "selected-span"
@@ -307,7 +307,11 @@ packages/deepseek/
     ingest.ts      log observation mapped to ingestible entries
     tools.ts       recall tool definitions
     engine.ts      summarizer subclass over the lossless ladder
+    ladder.ts      shared ladder the seam and bracket paths both run
+    dag-commit.ts  bracket transaction around one condensed replace
     command.ts     operator command and config verbs
+    lifecycle.ts   read-only and dry-run verbs behind the command
+    metrics.ts     JSONL rows beside the sidecar
     plugin.ts      composition wiring behind the enabled flag
 ```
 
@@ -382,6 +386,7 @@ roadmap item 10, not a reason to start the next phase.
 
 Target checkout `38286a6cf9` (release `dsh-0.1.7-alpha.2`, vendor `4.0.4`).
 Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
+Current pins: `dsh-*@0.2.1-rc.3`, `cordis@4.0.5`, against harness HEAD `22ddee3792`.
 
 - Target baseline: `pnpm vitest run packages/compaction` in the checkout,
   13 files and 263 tests green.

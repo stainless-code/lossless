@@ -22,6 +22,7 @@ import {
 
 import type { MessageIndex } from "./ingest.ts";
 import { dshModelHost } from "./model-host.ts";
+import { agentRoute } from "./model-host.ts";
 import type { DshRoute } from "./model-host.ts";
 
 export interface LosslessEngineDeps {
@@ -52,7 +53,7 @@ export interface LosslessEngineDeps {
    * through 24,000 and to the request budget. */
   readonly healSourceTokens?: number;
   /** Route automatic pressure compaction through the DAG bracket instead of
-   * the seam. Default false: the B path stays the observable auto behavior
+   * the seam. Default false: the seam stays the observable auto behavior
    * while the bracket proves itself on the manual path. */
   readonly bracketAuto?: boolean;
 }
@@ -179,20 +180,7 @@ export function resolveSummarizationTarget(
     config.summarizationProvider.length > 0
       ? { provider: config.summarizationProvider, model: config.summarizationModel }
       : undefined;
-  const header = agent.session.requestHeader()?.config;
-  const latest =
-    header && header.provider.length > 0 && header.model.length > 0
-      ? { provider: header.provider, model: header.model }
-      : undefined;
-  const options = agent.options;
-  const agentTarget =
-    options.provider !== undefined &&
-    options.provider.length > 0 &&
-    options.model !== undefined &&
-    options.model.length > 0
-      ? { provider: options.provider, model: options.model }
-      : undefined;
-  return configured ?? latest ?? agentTarget;
+  return configured ?? agentRoute(agent);
 }
 
 /** What one ladder run stored: the condensed text plus the sidecar ids and

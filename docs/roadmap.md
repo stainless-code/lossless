@@ -128,7 +128,7 @@ Where this implementation departs from the paper, and what it does not claim:
     (`packages/opencode`); the live gate and the two host limits (a child-session
     reader, estimated summarizer usage) are recorded in that package's README.
     The next consumer is the DeepSeek harness. It stays on the spike branch
-    until it is proven live and extracted on its own branch; the open questions
+    until it is proven live and extracted on `feat/deepseek`; the open questions
     are its plugin surface, its reader substitute, and whether its summarizer
     reports usage. The comparison has an audited page for each shipping adapter,
     [Pi](../apps/docs/content/reference/pi/comparison.mdx) and
@@ -186,8 +186,9 @@ Each of these was verified in peer source and is worth doing only with a reason.
 
 ## Names
 
-**All three packages are unscoped.** `pi-lossless` is the Pi adapter,
-`opencode-lossless` is the OpenCode v2 adapter, and `lossless-core`
+**All four workspace packages are unscoped.** `pi-lossless` is the Pi adapter,
+`opencode-lossless` is the OpenCode v2 adapter, `deepseek-lossless` is the
+unshipped DeepSeek adapter, and `lossless-core`
 is the engine. A `@stainless-code/` scope arrives only on a real collision, and
 then it arrives once, for every package at the same time. `pi-lossless` 0.1.0 and `lossless-core` 0.1.0 are
 published; `opencode-lossless` is pending its first release. The unscoped `lossless` on npm is an unrelated published

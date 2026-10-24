@@ -374,7 +374,6 @@ function prepareDagCommit(
   }
   const store = deps.store(sessionId);
   if (!store) throw new Error(`lossless compaction: no sidecar store for session ${sessionId}`);
-  const rowsByEntry = new Map(store.allMessages().map((row) => [row.entryId, row]));
   // Core reads a span as a storage range, so frontierFrom must name the
   // storage minimum. Surface order diverges from storage order after a
   // replace (the checkpoint row is newest), so order by rowid here.
@@ -383,7 +382,7 @@ function prepareDagCommit(
     // Entry ids mirror the ingest projection (ingest.ts projectedEntry), so
     // the seq maps to its row without touching the live message index.
     const entryId = `${session.id}:${seq}`;
-    const row = rowsByEntry.get(entryId);
+    const row = store.messageByEntryId(entryId);
     if (!row) throw new Error(`lossless dag commit: sidecar holds no row for ${entryId}`);
     items.push({ rowId: row.id, entry: { entryId, role: row.role, text: row.text } });
   }
@@ -450,8 +449,8 @@ function frameCondensed(
  * first so the condensed metering event sits directly before the checkpoint,
  * preserving the seam's shadow-price adjacency contract
  * (lib/index.js:627-675 and the compaction/summary doc at types/types.d.ts).
- * B1 is the second deliberate divergence: the seam commits one summary
- * record; the bracket commits the stored leaves alongside it. */
+ * The seam commits one summary record; the bracket commits the stored
+ * leaves alongside it. */
 function commitDagBody(
   session: Session,
   startEvent: StartEvent,

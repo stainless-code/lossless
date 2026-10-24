@@ -20,7 +20,7 @@ import {
 } from "lossless-core";
 
 import type { DshRoute } from "./model-host.ts";
-import { dshRef } from "./model-host.ts";
+import { agentRoute, dshRef } from "./model-host.ts";
 import { dshReader } from "./reader.ts";
 
 export interface PastSessions {
@@ -182,6 +182,7 @@ export function searchPastSessions(
       if (!view.ok) {
         // A query this store rejects was rejected by every store; report the
         // view's own message rather than a fake "no matches".
+        skipped++;
         return finishPastSearch(view.text, {
           hits: 0,
           scanned,
@@ -217,7 +218,7 @@ export function searchPastSessions(
           ...lines,
           "Read a hit with lcm_expand({session, entry_id}); the text it returns is that past session's history, never this one's.",
         ].join("\n");
-  const stopped = stoppedBy === undefined ? undefined : stopNote(stoppedBy);
+  const stopped = stoppedBy === undefined ? undefined : stopNote(stoppedBy, hitLimit);
   return finishPastSearch(stopped === undefined ? body : `${body}\n${stopped}`, {
     hits,
     scanned,
@@ -231,12 +232,15 @@ export function searchPastSessions(
 
 /** The cap that ended the scan, named so a short answer is not read as a
  * complete one. */
-export function stopNote(stoppedBy: PastSearchStop | undefined): string | undefined {
+export function stopNote(
+  stoppedBy: PastSearchStop | undefined,
+  hitLimit: number = CROSS_SESSION_HITS_LIMIT,
+): string | undefined {
   switch (stoppedBy) {
     case "stores":
       return `Stopped at the ${CROSS_SESSION_STORE_LIMIT}-store cap; older sessions were not searched.`;
     case "hits":
-      return `Stopped at the ${CROSS_SESSION_HITS_LIMIT}-hit cap; narrow the query or read one session.`;
+      return `Stopped at the ${hitLimit}-hit cap; narrow the query or read one session.`;
     case "deadline":
       return `Stopped at the ${CROSS_SESSION_DEADLINE_MS} ms deadline; narrow the query.`;
     default:
@@ -286,6 +290,11 @@ function finishPastSearch(
 function clampLimit(raw: number | undefined, max: number): number {
   const value = raw !== undefined && Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : max;
   return Math.min(max, Math.max(1, value));
+}
+
+// SQLite returns no rows for LIMIT 0 and every row for a negative LIMIT.
+function clampSessionLimit(raw: number): number | undefined {
+  return Number.isFinite(raw) ? Math.max(1, Math.trunc(raw)) : undefined;
 }
 
 export interface GrepArgs {
@@ -420,13 +429,14 @@ export function answerGrep(deps: RecallDeps, callerSessionId: string, args: Grep
     });
     return NO_STORE;
   }
+  const sessionLimit = typeof args.limit === "number" ? clampSessionLimit(args.limit) : undefined;
   const view = grepView(store, deps.redact, {
     ...(query === undefined ? {} : { query }),
     ...(args.pattern === undefined ? {} : { pattern: args.pattern }),
     ...(args.case_sensitive === undefined ? {} : { caseSensitive: args.case_sensitive }),
     ...(typeof args.offset === "number" ? { offset: args.offset } : {}),
     ...(args.after === undefined ? {} : { after: args.after }),
-    ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+    ...(sessionLimit === undefined ? {} : { limit: sessionLimit }),
     ...(typeof args.summary_id === "number" ? { summaryId: args.summary_id } : {}),
     ...(args.include_removed === undefined ? {} : { includeRemoved: args.include_removed }),
     expandTool: "lcm_expand",
@@ -523,8 +533,6 @@ export function expandQueryAnswer(
   return answerExpandQuery(toCoreDeps(deps), reader, sessionId, args);
 }
 
-/** What the reader answers when the caller names no prompt: the question
- * itself, answered from the stored history with citations. */
 const DEFAULT_EXPAND_QUERY_PROMPT =
   "Answer the question from the stored history, citing the entry or summary ids relied on.";
 
@@ -695,20 +703,8 @@ function recordRetrieval(
 /** The reader calls the calling agent's model: the latest routed request
  * first, agent options second, mirroring the ladder's fallback order. */
 function readerRoute(agent: Agent | undefined): DshRoute | undefined {
-  const header = agent?.session.requestHeader()?.config;
-  if (header !== undefined && header.provider.length > 0 && header.model.length > 0) {
-    return { provider: header.provider, model: header.model };
-  }
-  const options = agent?.options;
-  if (
-    options?.provider !== undefined &&
-    options.provider.length > 0 &&
-    options.model !== undefined &&
-    options.model.length > 0
-  ) {
-    return { provider: options.provider, model: options.model };
-  }
-  return undefined;
+  // One route contract; the guards live in model-host.
+  return agentRoute(agent);
 }
 
 function sessionOf(exec: ToolRunContext): string | undefined {

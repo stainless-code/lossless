@@ -16,6 +16,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { lcmCommandDefinition, type LcmCommandDeps } from "../src/command.ts";
 import { LosslessSummarizerEngine } from "../src/engine.ts";
+import type { LosslessEngineDeps } from "../src/engine.ts";
 import { MessageIndex, mirrorEvent } from "../src/ingest.ts";
 import { healLlmConfig, healRunBudgets, passLlmConfig } from "../src/ladder.ts";
 import type { DshRoute } from "../src/model-host.ts";
@@ -173,6 +174,49 @@ describe("summarizer caps", () => {
     const capped = rows.filter((row) => row.kind === "summarizer-capped");
     expect(capped).toHaveLength(1);
     expect(capped[0]).toMatchObject({ reason: "call", budgetTokens: 10 });
+  });
+});
+
+describe("summarizer budgets", () => {
+  function losslessOf(ctx: Context): LosslessEngineDeps {
+    const engine = engineOf(ctx);
+    return (engine as unknown as { lossless: LosslessEngineDeps }).lossless;
+  }
+
+  it("forwards non-empty budgets through plugin wiring", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dispose = applyLossless(ctx, {
+      enabled: true,
+      sidecarDir: tempDir(),
+      summaryTokens: 40,
+      leafChunkTokens: 500,
+      summarizerTokensPerPass: 1_000,
+      summarizerTokensPerHeal: 2_000,
+    });
+    try {
+      const lossless = losslessOf(ctx);
+      expect(lossless.summaryTokens).toBe(40);
+      expect(lossless.leafChunkTokens).toBe(500);
+      expect(lossless.summarizerTokensPerPass).toBe(1_000);
+      expect(lossless.summarizerTokensPerHeal).toBe(2_000);
+      expect(passLlmConfig(lossless)).toEqual({ summarizerTokensPerPass: 1_000 });
+      expect(healLlmConfig(lossless)).toEqual({ summarizerTokensPerPass: 2_000 });
+      expect(healRunBudgets(lossless)).toMatchObject({ maxTokens: 2_000, targetTokens: 40 });
+    } finally {
+      dispose();
+    }
+  });
+
+  it("keeps bracketAuto off unless configured", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: tempDir() });
+    try {
+      expect(losslessOf(ctx).bracketAuto ?? false).toBe(false);
+    } finally {
+      dispose();
+    }
   });
 });
 

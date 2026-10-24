@@ -8,6 +8,9 @@ const engine = fileURLToPath(new URL("../core/src/index.ts", import.meta.url));
 
 export default defineConfig({
   pack: {
+    deps: {
+      resolveDepSubpath: true,
+    },
     entry: ["src/index.ts"],
     format: ["esm"],
     dts: true,

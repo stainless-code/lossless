@@ -1,12 +1,62 @@
+import type { Agent } from "@deepseek-ai/dsh-agent";
 import { summarizeWithEscalation } from "lossless-core";
 import type { LlmComplete } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
-import { dshModelHost } from "../src/model-host.ts";
+import { agentRoute, dshModelHost } from "../src/model-host.ts";
 import type { DshRoute } from "../src/model-host.ts";
 import { cappedChunks, errorChunks, setupContext, textChunks } from "./support/script-adapter.ts";
 
 const ROUTE: DshRoute = { provider: "test-provider", model: "test-model" };
+
+function stubAgent(header: unknown, options?: unknown): Agent {
+  return {
+    session:
+      header === undefined
+        ? {}
+        : {
+            requestHeader: () => ({ config: header }),
+          },
+    options,
+  } as unknown as Agent;
+}
+
+describe("agentRoute", () => {
+  it("prefers the latest routed header over agent options", () => {
+    const agent = stubAgent(
+      { provider: "header-provider", model: "header-model" },
+      { provider: "options-provider", model: "options-model" },
+    );
+    expect(agentRoute(agent)).toEqual({ provider: "header-provider", model: "header-model" });
+  });
+
+  it("falls back to agent options without a header", () => {
+    const agent = stubAgent(undefined, { provider: "options-provider", model: "options-model" });
+    expect(agentRoute(agent)).toEqual({ provider: "options-provider", model: "options-model" });
+  });
+
+  it("returns undefined when nothing resolves", () => {
+    expect(agentRoute(stubAgent(undefined, undefined))).toBeUndefined();
+    expect(agentRoute(undefined)).toBeUndefined();
+  });
+
+  it("falls back to options when requestHeader throws", () => {
+    const agent = {
+      session: {
+        requestHeader: () => {
+          throw new Error("header blew up");
+        },
+      },
+      options: { provider: "options-provider", model: "options-model" },
+    } as unknown as Agent;
+    expect(agentRoute(agent)).toEqual({ provider: "options-provider", model: "options-model" });
+  });
+
+  it("ignores malformed header strings and returns undefined", () => {
+    const agent = stubAgent({ provider: 42, model: "" }, undefined);
+    expect(agentRoute(agent)).toBeUndefined();
+  });
+});
 
 describe("dshModelHost.complete", () => {
   it("answers with text assembled from the chunk stream", async () => {

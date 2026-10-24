@@ -11,45 +11,62 @@ import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 export interface LosslessPluginConfig {
   /** Master flag. Nothing registers, mirrors, or mounts until true. */
   readonly enabled?: boolean;
-  /** Automatic pressure compaction inside the turn. Default false. */
+  /** Automatic pressure compaction inside the turn.
+   * @default false */
   readonly auto?: boolean;
   /** Route automatic pressure compaction through the DAG bracket instead of
-   * the seam. Default false. */
+   * the seam.
+   * @default false */
   readonly bracketAuto?: boolean;
-  /** Directory for one sidecar file per session. Created when missing. */
+  /** Directory for one sidecar file per session. Created when missing.
+   * @default "./.lossless" */
   readonly sidecarDir?: string;
+  /** Tokens one summary aims for. Rides the engine deps, not the seam.
+   * @default 1500 */
   readonly summaryTokens?: number;
+  /** Tokens one leaf chunk may hold before it splits. Rides the engine
+   * deps, not the seam.
+   * @default 3000 */
   readonly leafChunkTokens?: number;
+  /** Provider the summarizer calls. Unset follows the routed model.
+   * @default unset */
   readonly summarizationProvider?: string;
+  /** Model the summarizer calls. Unset follows the routed model.
+   * @default unset */
   readonly summarizationModel?: string;
   /** Pressure fraction of the priced window that trips automatic compaction.
-   * Seam default 0.8. Rides the seam config. */
+   * Rides the seam config.
+   * @default 0.8 */
   readonly thresholdRatio?: number;
   /** Recent context retained as an absolute token budget. Mutually exclusive
    * with retainRatio; the seam default shape is the ratio form (0.16).
    * Rides the seam config; the manual path keeps the seam's 0 retain. */
   readonly retainTokens?: number;
-  /** Recent context retained as a fraction of the priced window. Seam
-   * default 0.16; mutually exclusive with retainTokens. Rides the seam. */
+  /** Recent context retained as a fraction of the priced window. Mutually
+   * exclusive with retainTokens. Rides the seam.
+   * @default 0.16 */
   readonly retainRatio?: number;
-  /** Pressure headroom beyond the routed output reservation. Seam default
-   * 65536; the seam also defaults its summary cap to it. Rides the seam. */
+  /** Pressure headroom beyond the routed output reservation. The seam also
+   * defaults its summary cap to it. Rides the seam.
+   * @default 65536 */
   readonly headroomTokens?: number;
   /** Exact provider/model policy overrides, merged over the defaults by the
    * seam per routed target. Duplicate targets fail load. Rides the seam. */
   readonly modelPolicies?: ModelCompactPolicyConfig[];
-  /** Tokens one summarizer request may cost before it is refused. Default
-   * 60000. Adapter-only: never rides the seam config. */
+  /** Tokens one summarizer request may cost before it is refused.
+   * Adapter-only: never rides the seam config.
+   * @default 60000 */
   readonly summarizerTokensPerCall?: number;
-  /** Tokens one pass may spend across all of its calls. Default 250000.
-   * Adapter-only. */
+  /** Tokens one pass may spend across all of its calls. Adapter-only.
+   * @default 250000 */
   readonly summarizerTokensPerPass?: number;
-  /** Tokens one heal run may spend across all of its calls. Default 120000.
-   * Adapter-only. */
+  /** Tokens one heal run may spend across all of its calls. Adapter-only.
+   * @default 120000 */
   readonly summarizerTokensPerHeal?: number;
   /** Estimated tokens one heal node may read as source. Unset derives 8 x
    * summaryTokens, clamped to 3000 through 24000 and the request budget.
-   * Adapter-only. */
+   * Adapter-only.
+   * @default 8 x summaryTokens, clamped 3000..24000 */
   readonly healSourceTokens?: number;
 }
 
@@ -64,7 +81,6 @@ class SessionSidecars extends SidecarStores {
     super({ dir });
   }
 
-  /** Store plus live index for one session, creating both on first use. */
   entryFor(sessionId: string): { store: LcmStore; index: MessageIndex } {
     const store = this.for(sessionId);
     let index = this.indexes.get(sessionId);
@@ -75,7 +91,6 @@ class SessionSidecars extends SidecarStores {
     return { store, index };
   }
 
-  /** Live index for a session without creating a store, if mirrored yet. */
   peekIndex(sessionId: string): MessageIndex | undefined {
     return this.indexes.get(sessionId);
   }
@@ -95,7 +110,11 @@ class SessionSidecars extends SidecarStores {
  * session, mount the summarizer engine as the compaction backend, and
  * register `/lcm`. Disabled by default; enable on one composition at a
  * time. The returned disposer stops the mirror, the tools, and the command.
- * The engine follows the composition lifetime. */
+ * The engine follows the composition lifetime.
+ * @example
+ * ```ts
+ * const stop = applyLossless(ctx, { enabled: true });
+ * ``` */
 export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): () => void {
   if (config.enabled !== true) return () => undefined;
   const dir = config.sidecarDir ?? DEFAULT_SIDECAR_DIR;

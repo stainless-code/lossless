@@ -43,13 +43,13 @@ interface SpanSummary {
   rawOutput?: ContentBlock[];
 }
 
-/** Candidate B: the shipped backend keeps range selection, the transaction,
+/** The shipped backend keeps range selection, the transaction,
  * the meter, and the shrink check. Only the summarizer runs through the
  * lossless ladder and the sidecar, and the checkpoint text it returns is
  * what the engine frames and commits. Manual compaction (`compactNow`)
  * commits through the DAG bracket instead; automatic pressure compaction
  * (`compactRegion`) stays on this seam unless `bracketAuto` routes it
- * through the bracket too, so the B path keeps its regression suite. */
+ * through the bracket too, so the regression suite keeps pinning it. */
 export class LosslessSummarizerEngine extends BasicCompactionEngine {
   constructor(
     ctx: Context,
@@ -185,7 +185,6 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
   }
 
   private spanOf(input: SpanInput, store: LcmStore, index: MessageIndex): CompactionSpanEntry[] {
-    const rowsByEntry = new Map(store.allMessages().map((row) => [row.entryId, row]));
     // A leading system message is the retained head, not shadowed content.
     const startAt = input.messages[0]?.role === "system" ? 1 : 0;
     const items: Array<{ rowId: number; entry: CompactionSpanEntry }> = [];
@@ -196,7 +195,7 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
           `lossless compaction: message ${message.id} has no sidecar row; the span is not fully mirrored`,
         );
       }
-      const row = rowsByEntry.get(entryId);
+      const row = store.messageByEntryId(entryId);
       if (!row) {
         throw new Error(`lossless compaction: sidecar holds no row for ${entryId}`);
       }

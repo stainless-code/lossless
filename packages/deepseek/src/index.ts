@@ -9,5 +9,5 @@ export { lcmCommandDefinition, registerLcmCommand } from "./command.ts";
 export type { LcmCommandDeps } from "./command.ts";
 export { applyLossless } from "./plugin.ts";
 export type { LosslessPluginConfig } from "./plugin.ts";
-export { describeAnswer, expandAnswer, grepAnswer, registerRecallTools } from "./tools.ts";
+export { registerRecallTools } from "./tools.ts";
 export type { RecallDeps } from "./tools.ts";

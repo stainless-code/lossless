@@ -6,7 +6,7 @@ import { LcmStore, ingestEntries } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
 import { MessageIndex } from "../src/ingest.ts";
-import { runLadder } from "../src/ladder.ts";
+import { SpanAlreadyMemoryError, runLadder } from "../src/ladder.ts";
 import { createRecord, metricsPath, readMetricRows } from "../src/metrics.ts";
 import { dshRef } from "../src/model-host.ts";
 import type { DshRoute } from "../src/model-host.ts";
@@ -94,6 +94,88 @@ describe("metrics sink", () => {
     });
     const usage = passRows[0]?.usage as { inputTokens?: number } | undefined;
     expect(usage?.inputTokens).toBeGreaterThan(0);
+  });
+
+  it("records one nothing pass when the span is already memory", async () => {
+    const store = new LcmStore(":memory:");
+    const span = Array.from({ length: 4 }, (_, i) => ({
+      entryId: `nothing:e${i}`,
+      role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+      text: `nothing notes ${i} ${"detail ".repeat(60)}`,
+    }));
+    const rows: Record<string, unknown>[] = [];
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    const shared = {
+      store: () => store,
+      index: () => new MessageIndex(),
+      redact: identity,
+      record: (row: Record<string, unknown>) => rows.push(row),
+    };
+    const first = await runLadder(ctx, shared, ROUTE, "metrics-nothing", span);
+    expect(first.leafSummaryIds.length).toBeGreaterThan(0);
+    rows.length = 0;
+    // A sub-span of a stored run is covered on every row, so the pass records nothing.
+    await expect(
+      runLadder(ctx, shared, ROUTE, "metrics-nothing", span.slice(1, 3)),
+    ).rejects.toThrow(SpanAlreadyMemoryError);
+    const passRows = rows.filter((row) => row.kind === "pass");
+    expect(passRows).toHaveLength(1);
+    expect(passRows[0]).toMatchObject({
+      event: "lcm",
+      session: "metrics-nothing",
+      stage: "blocking",
+      outcome: "nothing",
+      reason: "covered",
+      span: ["nothing:e1", "nothing:e2"],
+    });
+    expect(typeof passRows[0]?.durationMs).toBe("number");
+  });
+
+  it("records one failed pass when the ladder throws", async () => {
+    const store = new LcmStore(":memory:");
+    const rows: Record<string, unknown>[] = [];
+    const { ctx } = setupContext(ROUTE, [textChunks(SUMMARY)]);
+    // A write failure escapes the escalation fallback, so the run records failed.
+    store.insertSummary = () => {
+      throw new Error("sidecar write failed");
+    };
+    await expect(
+      runLadder(
+        ctx,
+        {
+          store: () => store,
+          index: () => new MessageIndex(),
+          redact: identity,
+          record: (row) => rows.push(row),
+        },
+        ROUTE,
+        "metrics-failed",
+        [
+          { entryId: "failed:e1", role: "user", text: `failing notes ${"detail ".repeat(60)}` },
+          {
+            entryId: "failed:e2",
+            role: "assistant",
+            text: `failing reply ${"detail ".repeat(60)}`,
+          },
+        ],
+      ),
+    ).rejects.toThrow("sidecar write failed");
+    const passRows = rows.filter((row) => row.kind === "pass");
+    expect(passRows).toHaveLength(1);
+    expect(passRows[0]).toMatchObject({
+      event: "lcm",
+      session: "metrics-failed",
+      stage: "blocking",
+      outcome: "failed",
+      error: "sidecar write failed",
+      span: ["failed:e1", "failed:e2"],
+    });
+    expect(typeof passRows[0]?.durationMs).toBe("number");
   });
 
   it("records a recall call through the wired recorder", async () => {

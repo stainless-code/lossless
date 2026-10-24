@@ -361,7 +361,6 @@ describe("LosslessSummarizerEngine", () => {
         );
         expect(ids.length).toBeGreaterThan(0);
         for (const id of ids) expect(store.getSummary(id)).toBeDefined();
-        // And a new checkpoint overwrites the hydrated text.
         resumed.note(sessionId, "fresh checkpoint");
         expect(resumed.previous(sessionId)).toBe("fresh checkpoint");
       });
