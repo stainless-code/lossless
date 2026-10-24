@@ -183,6 +183,18 @@ Each of these was verified in peer source and is worth doing only with a reason.
   today: every writer of provider text uses `error`, which is on the list. The
   item becomes live the first time a metrics writer puts foreign text under a new
   key.
+- **Four grafts from the DeepSeek harness, none touching the DAG.** Cache-aligned
+  ladder inputs (ordered span replay, instruction trailing, so calls ride the
+  provider prefix cache); structured rung prompts (sectioned shape with verbatim
+  quoting rules inside the existing thorough/terse levels); untrusted framing
+  for past-history answers (labelled, immutable, never instructions); provider
+  usage reuse in estimation (believe reported usage over chars-per-token math,
+  worked under item 5). Each passes the three-property test: verbatim originals
+  stay reachable, child pointers never break, the model sees less. The merge
+  half of structured prompts carries one hard constraint: merging prose must
+  never drop child pointers. Deliberately not grafted: surface pruning (rewrites
+  live history this package promises verbatim; externalization already covers
+  the need) and goals/objectives (a second product, not a better memory).
 
 ## Names
 
