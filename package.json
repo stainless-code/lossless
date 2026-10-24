@@ -38,6 +38,24 @@
     "vitest": "catalog:"
   },
   "overrides": {
+    "@deepseek-ai/dsh-commands": {
+      "zod": "^4.6.6"
+    },
+    "@deepseek-ai/dsh-llm": {
+      "zod": "^4.6.6"
+    },
+    "@deepseek-ai/dsh-llm-retry": {
+      "zod": "^4.6.6"
+    },
+    "@deepseek-ai/dsh-sandbox-policy": {
+      "zod": "^4.6.6"
+    },
+    "@deepseek-ai/dsh-session-projection": {
+      "zod": "^4.6.6"
+    },
+    "@deepseek-ai/dsh-token-meter": {
+      "zod": "^4.6.6"
+    },
     "@earendil-works/pi-coding-agent": {
       "undici": "^8.12.2"
     },
