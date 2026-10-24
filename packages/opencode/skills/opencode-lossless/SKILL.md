@@ -5,7 +5,7 @@ license: MIT
 metadata:
   type: composition
   library: "opencode-lossless"
-  library_version: "0.1.1"
+  library_version: "0.1.2"
 requires:
   - lossless
 sources:
