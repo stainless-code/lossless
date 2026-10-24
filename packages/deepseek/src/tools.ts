@@ -596,7 +596,17 @@ async function answerExpandQuery(
   } else {
     target = deps.storeFor(pastId);
   }
-  if (!target) return NO_STORE;
+  if (!target) {
+    recordRetrieval(deps, sessionId, {
+      queryChars: args.query.length,
+      budgetTokens,
+      steps: 0,
+      retrievedTokens: 0,
+      stop: "refused",
+      reason: "no stored history for this session yet",
+    });
+    return NO_STORE;
+  }
   let run: Awaited<ReturnType<typeof runRetrieval>>;
   try {
     run = await runRetrieval(

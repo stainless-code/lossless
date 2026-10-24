@@ -120,10 +120,13 @@ describe("lcm read-only verbs", () => {
       steps: 2,
       retrievedTokens: 10,
     });
+    record({ kind: "backfill", session: "rep-1", ingested: 3, skipped: 1 });
+    record({ kind: "backfill", session: "rep-1", ingested: 4, skipped: 0 });
     const result = await invoke(ctx, depsFor(dir, new Map()), "rep-1", "report");
     expect(result.kind).toBe("success");
     expect(result.text).toContain("passes: 2 (stored 1, nothing 1, failed 0); 2 leaf, 1 condensed");
     expect(result.text).toContain("checkpoints: 1 commit(s)");
+    expect(result.text).toContain("backfill: 2 session(s), 7 ingested");
     expect(result.text).toContain("recall: 1 (hit 1)");
     expect(result.text).toContain("retrieval: 1 (answered 1)");
     expect(result.text).toContain("last pass: nothing (span covered)");

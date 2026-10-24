@@ -186,6 +186,7 @@ describe("lcm_expand_query", () => {
       (row) => rows.push(row),
     );
     expect(answer).toContain("no stored history");
-    expect(rows).toHaveLength(0);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ event: "lcm", kind: "retrieval", stop: "refused" });
   });
 });

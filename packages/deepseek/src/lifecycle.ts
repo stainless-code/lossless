@@ -208,6 +208,9 @@ export function formatSessionReport(
   );
   const checkpoints = mine.filter((row) => row.kind === "compaction-checkpoint").length;
   lines.push(`checkpoints: ${checkpoints} commit(s)`);
+  const backfills = mine.filter((row) => row.kind === "backfill");
+  const backfilled = backfills.reduce((sum, row) => sum + numberOf(row.ingested), 0);
+  lines.push(`backfill: ${backfills.length} session(s), ${backfilled} ingested`);
   const recall = mine.filter((row) => row.kind === "recall");
   const recallOutcomes = ["hit", "miss", "refused", "error"].flatMap((outcome) => {
     const count = recall.filter((row) => row.outcome === outcome).length;
@@ -726,10 +729,12 @@ export async function handleHeal(
   }
 }
 
+/** Session-less lookup for tests: the gc dry-run default window in days. */
 export function gcDryRunDefaultDays(): number {
   return GC_DEFAULT_DAYS;
 }
 
+/** Session-less lookup for tests: the ids of sessions with a heal in flight. */
 export function healInFlightSessions(): readonly string[] {
   return [...healInFlight];
 }

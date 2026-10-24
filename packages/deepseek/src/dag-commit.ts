@@ -214,8 +214,9 @@ export async function commitDagTransaction(
     );
   }
   if (result === undefined) throw new Error("compaction committed without a result");
-  // One row per bracket commit: the condensed record first, then the leaf
-  // records, so the checkpoint shape stays countable in the metrics log.
+  // One row per bracket commit: a single compaction-checkpoint row carrying
+  // the condensed summary seqs plus the leaf seqs, so the checkpoint shape
+  // stays countable in the metrics log.
   deps.record?.({
     ts: Date.now(),
     event: "lcm",
