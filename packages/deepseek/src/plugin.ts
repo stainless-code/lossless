@@ -4,6 +4,7 @@ import { SidecarStores, redactSecrets, type LcmStore } from "lossless-core";
 import { registerLcmCommand } from "./command.ts";
 import { LosslessSummarizerEngine, checkpointMemory } from "./engine.ts";
 import { MessageIndex, mirrorEvent } from "./ingest.ts";
+import { createRecord } from "./metrics.ts";
 import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 
 export interface LosslessPluginConfig {
@@ -73,17 +74,20 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
     const entry = sidecars.entryFor(String(live.id));
     mirrorEvent(live, event, entry.store, entry.index);
   });
+  // One recorder per composition: recall, ladder-run, and bracket rows all
+  // land in the same sidecar directory as the stores they describe.
+  const record = createRecord(dir);
   const stopTools = registerRecallTools(ctx, {
     store: (sessionId) =>
       sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
     redact: redactSecrets,
-    // No recorder yet: the metrics sink file is a later slice, so the
-    // expand-query seam records nothing for now.
+    record,
   });
   const stopExpandQuery = registerExpandQueryTool(ctx, {
     store: (sessionId) =>
       sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
     redact: redactSecrets,
+    record,
   });
   // Hydration fallback: a resumed session rebuilds its last checkpoint
   // from its sidecar until it compacts again. Reads only; a lookup miss
@@ -105,6 +109,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
       index: (sessionId) => sidecars.peekIndex(sessionId),
       memory,
       redact: redactSecrets,
+      record,
       ...(config.summaryTokens === undefined ? {} : { summaryTokens: config.summaryTokens }),
       ...(config.leafChunkTokens === undefined ? {} : { leafChunkTokens: config.leafChunkTokens }),
       ...(config.bracketAuto === undefined ? {} : { bracketAuto: config.bracketAuto }),

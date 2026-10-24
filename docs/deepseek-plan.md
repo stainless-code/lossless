@@ -420,6 +420,13 @@ Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
   in-process reader and cites the entry or summary id, with one
   retrieval-kind row per run and no cross-session search yet. Suite: 41
   tests green (`vp check`, `tsc`, `bun run test`).
+- Parity slice 2: the DeepSeek adapter writes metrics rows beside the sidecar
+  (new `packages/deepseek/src/metrics.ts` with the OpenCode rotation policy
+  and 0600 modes): one `pass`-kind row per ladder run with the outcome plus
+  leaf and condensed counts and tracker usage, one `compaction-checkpoint`-kind
+  row per DAG bracket commit with condensed plus leaf seqs, and `recall` plus
+  `retrieval` rows through the wired recorder. Suite: 44 tests green
+  (`vp check`, `tsc`, `bun run test`, `bun run pack`).
 
 ## Open questions for the owner
 

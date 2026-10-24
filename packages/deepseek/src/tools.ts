@@ -27,7 +27,8 @@ export interface RecallDeps {
   readonly store: (sessionId: string | undefined) => LcmStore | undefined;
   readonly redact: (text: string) => string;
   /** Diagnostic sink for retrieval rows. Optional, so a test can observe
-   * retrieval without a metrics file; the JSONL writer is a later slice. */
+   * retrieval without a metrics file; production passes the per-composition
+   * JSONL writer. */
   readonly record?: (row: Record<string, unknown>) => void;
 }
 

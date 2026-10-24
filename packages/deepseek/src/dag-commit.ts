@@ -214,6 +214,16 @@ export async function commitDagTransaction(
     );
   }
   if (result === undefined) throw new Error("compaction committed without a result");
+  // One row per bracket commit: the condensed record first, then the leaf
+  // records, so the checkpoint shape stays countable in the metrics log.
+  deps.record?.({
+    ts: Date.now(),
+    event: "lcm",
+    kind: "compaction-checkpoint",
+    session: String(agent.session.id),
+    summarySeqs: [...result.summarySeqs],
+    leafSeqs: [...result.leafSeqs],
+  });
   return result;
 }
 

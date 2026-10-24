@@ -10,6 +10,7 @@ import {
   type CompactionSpanEntry,
   type CompletionRequest,
   type LcmStore,
+  type MetricsSink,
   type ModelAnswer,
   type ModelHost,
   type ModelRef,
@@ -28,6 +29,10 @@ export interface LosslessEngineDeps {
    * summary. Absent until the engine stores its first checkpoint here. */
   readonly memory?: CheckpointMemory;
   readonly redact: (text: string) => string;
+  /** Diagnostic sink: one run row per ladder run plus every engine row the
+   * run causes. Optional so scripted tests can observe without a metrics
+   * file; production passes the per-composition JSONL writer. */
+  readonly record?: (row: Record<string, unknown>) => void;
   readonly summaryTokens?: number;
   readonly leafChunkTokens?: number;
   /** Route automatic pressure compaction through the DAG bracket instead of
@@ -150,6 +155,12 @@ export async function runLadder(
     ...(signal === undefined ? {} : { signal }),
   });
   const tracker = new UsageTracker();
+  const record = lossless.record;
+  // Every engine and completer row belongs to this run, so they go through
+  // the same record callback as the run row. Without one this stays unset
+  // and the rows fall back to the global log, never a half-wired file.
+  const sink: MetricsSink | undefined =
+    record === undefined ? undefined : (row) => record({ ...row });
   const llm = makeLlm(
     tracker.wrap(host),
     {},
@@ -157,12 +168,15 @@ export async function runLadder(
       session: sessionId,
       stage: "blocking",
       span: { firstEntryId: first.entryId, lastEntryId: last.entryId },
+      ...(sink === undefined ? {} : { sink }),
     },
   );
   if (!llm) throw new Error("lossless compaction: no summarizer model resolves");
   const store = lossless.store(sessionId);
   if (!store) throw new Error(`lossless compaction: no sidecar store for session ${sessionId}`);
   const { token } = store.openRun({ session: sessionId });
+  const started = Date.now();
+  const spanPair: [string, string] = [first.entryId, last.entryId];
   try {
     const outcome = await runCompaction(
       store.forRun(token),
@@ -182,10 +196,36 @@ export async function runLadder(
     );
     store.commitRun(token);
     if (outcome.kind === "nothing") {
+      record?.({
+        ts: Date.now(),
+        event: "lcm",
+        kind: "pass",
+        session: sessionId,
+        stage: "blocking",
+        outcome: "nothing",
+        reason: outcome.reason,
+        ingested: outcome.ingested,
+        span: spanPair,
+        durationMs: Date.now() - started,
+      });
       throw new SpanAlreadyMemoryError(`${first.entryId}..${last.entryId} (${outcome.reason})`);
     }
     const route = tracker.route ?? target;
     const usage = tracker.tokenUsage();
+    record?.({
+      ts: Date.now(),
+      event: "lcm",
+      kind: "pass",
+      session: sessionId,
+      stage: "blocking",
+      outcome: "stored",
+      leaf: outcome.leafSummaryIds.length,
+      condensed: outcome.condensedSummaryIds.length,
+      ingested: outcome.ingested,
+      ...(usage === undefined ? {} : { usage }),
+      span: spanPair,
+      durationMs: Date.now() - started,
+    });
     return {
       summaryText: outcome.summaryText,
       leafSummaryIds: outcome.leafSummaryIds,
@@ -194,6 +234,20 @@ export async function runLadder(
       model: route.model,
       ...(usage === undefined ? {} : { usage }),
     };
+  } catch (error) {
+    if (error instanceof SpanAlreadyMemoryError) throw error;
+    record?.({
+      ts: Date.now(),
+      event: "lcm",
+      kind: "pass",
+      session: sessionId,
+      stage: "blocking",
+      outcome: "failed",
+      error: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
+      span: spanPair,
+      durationMs: Date.now() - started,
+    });
+    throw error;
   } finally {
     store.abandonRun(token);
   }
