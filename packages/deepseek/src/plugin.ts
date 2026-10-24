@@ -4,7 +4,7 @@ import { SidecarStores, redactSecrets, type LcmStore } from "lossless-core";
 
 import { registerLcmCommand } from "./command.ts";
 import { LosslessSummarizerEngine, checkpointMemory } from "./engine.ts";
-import { MessageIndex, mirrorEvent } from "./ingest.ts";
+import { MessageIndex, backfillSession, historySourceFrom, mirrorEvent } from "./ingest.ts";
 import { createRecord } from "./metrics.ts";
 import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 
@@ -107,6 +107,25 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   // One recorder per composition: recall, ladder-run, and bracket rows all
   // land in the same sidecar directory as the stores they describe.
   const record = createRecord(dir);
+  // Pre-mount backfill: sessions already live when the plugin mounts mirror
+  // their earlier history through the same mirrorEvent path as the live feed
+  // above, paged and capped so a huge log cannot stall mount. The query
+  // backend is optional: without it only new events are mirrored. Contained
+  // per session and never rejecting, so mount cannot fail over history.
+  const history = historySourceFrom(ctx);
+  if (history !== undefined) {
+    const pending = ctx.sessions.list().map((session) => {
+      const entry = sidecars.entryFor(String(session.id));
+      return backfillSession(session, entry.store, history, entry.index, { record }).catch(
+        (error: unknown) => {
+          ctx.logger.warn(
+            `lossless backfill skipped session "${String(session.id)}": ${error instanceof Error ? error.message : String(error)}`,
+          );
+        },
+      );
+    });
+    void Promise.all(pending);
+  }
   const stopTools = registerRecallTools(ctx, {
     store: (sessionId) =>
       sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,

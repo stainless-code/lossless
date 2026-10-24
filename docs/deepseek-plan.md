@@ -460,6 +460,14 @@ Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
   8 x target clamped 3000..24000 inside core `runHeal`; `reasoning` stays
   false per the harness sources. Suite: 72 tests green (`vp check`, `tsc`,
   `bun run test packages/deepseek`, `bun run pack`).
+- Parity slice 6: pre-mount history backfills through the async observation
+  seam (the same `observeSession` call the host history controller pages
+  from in `packages/api/session-controller/src/history.ts`), paged at 50
+  events with a 500-event per-session cap and mirrored through the live
+  `mirrorEvent` path, so re-mirroring inserts nothing; each backfill writes
+  one `backfill` metrics row with its ingested count and span. Suite: 79
+  tests green (`vp check`, `tsc`, `bun run test packages/deepseek`,
+  `bun run pack`).
 
 ## Open questions for the owner
 
