@@ -20,7 +20,7 @@
     "opencode:check": "bun scripts/opencode-live.ts",
     "opencode:smoke": "bun scripts/opencode-smoke.ts",
     "opencode:compact": "bun scripts/opencode-compact.ts",
-    "pack": "vp run --filter ./packages/core prepack && vp run --filter ./packages/pi prepack && vp run --filter ./packages/opencode prepack",
+    "pack": "vp run --filter ./packages/core prepack && vp run --filter ./packages/pi prepack && vp run --filter ./packages/deepseek prepack && vp run --filter ./packages/opencode prepack",
     "changeset": "changeset",
     "version": "changeset version && bun scripts/sync-skill-versions.ts && vp fmt packages/*/CHANGELOG.md",
     "release": "changeset publish",
