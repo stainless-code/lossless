@@ -38,8 +38,8 @@
     "prepublishOnly": "vp check && vp test"
   },
   "devDependencies": {
-    "@opencode/ai": "2.1.3",
-    "@opencode/plugin": "2.1.3",
+    "@opencode/ai": "2.1.4",
+    "@opencode/plugin": "2.1.4",
     "lossless-core": "workspace:*"
   },
   "engines": {
