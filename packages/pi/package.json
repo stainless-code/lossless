@@ -8,7 +8,8 @@
     "lcm",
     "memory",
     "pi",
-    "pi-package"
+    "pi-package",
+    "tanstack-intent"
   ],
   "homepage": "https://github.com/stainless-code/lossless#readme",
   "bugs": "https://github.com/stainless-code/lossless/issues",
@@ -21,7 +22,8 @@
   },
   "files": [
     "dist",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "skills"
   ],
   "type": "module",
   "main": "./dist/index.mjs",
@@ -34,7 +36,7 @@
   "scripts": {
     "pack:watch": "vp pack --watch",
     "prepack": "vp pack",
-    "prepublishOnly": "vp check && vp test"
+    "prepublishOnly": "vp check && vp test && intent validate"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "1.4.0",

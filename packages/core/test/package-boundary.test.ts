@@ -75,7 +75,7 @@ test("package: the engine is publishable, and ships dist plus the docs it owns",
   // npm always includes README and LICENSE from the package directory, so the
   // file list names only what it has to be told about. changesets writes the
   // changelog in place, as it does for the adapter.
-  assert.deepEqual(manifest.files, ["dist", "CHANGELOG.md"]);
+  assert.deepEqual(manifest.files, ["dist", "CHANGELOG.md", "skills"]);
   for (const name of ["README.md", "LICENSE", "CHANGELOG.md"]) {
     assert.ok(existsSync(join(PACKAGE_DIR, name)), `${name} is not in the package`);
   }

@@ -28,7 +28,7 @@ test("publish surface: the manifest names the built entry and its own docs", () 
   assert.equal(manifest.exports?.["."]?.default, manifest.main);
   assert.equal(manifest.exports?.["."]?.types, "./dist/index.d.mts");
   assert.equal(manifest.repository?.directory, "packages/opencode");
-  assert.deepEqual((manifest.files ?? []).toSorted(), ["CHANGELOG.md", "dist"]);
+  assert.deepEqual((manifest.files ?? []).toSorted(), ["CHANGELOG.md", "dist", "skills"]);
   assert.deepEqual(manifest.dependencies ?? {}, {});
   assert.deepEqual(manifest.peerDependencies ?? {}, {});
   for (const name of ["README.md", "LICENSE", "CHANGELOG.md"]) {

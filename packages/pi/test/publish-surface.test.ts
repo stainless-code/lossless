@@ -35,7 +35,7 @@ test("publish surface: the manifest keeps every field Pi discovers the extension
   assert.equal(manifest.exports?.["."]?.types, manifest.main?.replace(/\.mjs$/, ".d.mts"));
   assert.ok(existsSync(join(PACKAGE_DIR, "src", "index.ts")));
   assert.equal(manifest.repository?.directory, "packages/pi");
-  assert.deepEqual((manifest.files ?? []).toSorted(), ["CHANGELOG.md", "dist"]);
+  assert.deepEqual((manifest.files ?? []).toSorted(), ["CHANGELOG.md", "dist", "skills"]);
   for (const name of ["README.md", "LICENSE", "CHANGELOG.md"]) {
     assert.ok(existsSync(join(PACKAGE_DIR, name)), `${name} is not in the package`);
   }
