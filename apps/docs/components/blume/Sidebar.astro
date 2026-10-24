@@ -82,7 +82,7 @@ const hrefFor = (host: HostId): string => {
 };
 
 const currentHref = (host: HostId): string =>
-  host === active ? currentRoute : hrefFor(host);
+  withBase(host === active ? currentRoute : hrefFor(host));
 ---
 
 {
