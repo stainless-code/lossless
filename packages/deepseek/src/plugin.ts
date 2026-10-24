@@ -4,7 +4,7 @@ import { SidecarStores, redactSecrets, type LcmStore } from "lossless-core";
 import { registerLcmCommand } from "./command.ts";
 import { LosslessSummarizerEngine, checkpointMemory } from "./engine.ts";
 import { MessageIndex, mirrorEvent } from "./ingest.ts";
-import { registerRecallTools } from "./tools.ts";
+import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 
 export interface LosslessPluginConfig {
   /** Master flag. Nothing registers, mirrors, or mounts until true. */
@@ -77,6 +77,13 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
     store: (sessionId) =>
       sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
     redact: redactSecrets,
+    // No recorder yet: the metrics sink file is a later slice, so the
+    // expand-query seam records nothing for now.
+  });
+  const stopExpandQuery = registerExpandQueryTool(ctx, {
+    store: (sessionId) =>
+      sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
+    redact: redactSecrets,
   });
   // Hydration fallback: a resumed session rebuilds its last checkpoint
   // from its sidecar until it compacts again. Reads only; a lookup miss
@@ -109,6 +116,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   return () => {
     stopMirror();
     stopTools();
+    stopExpandQuery();
     stopCommand();
   };
 }

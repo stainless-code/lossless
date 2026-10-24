@@ -416,6 +416,10 @@ Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
 - Finding for a future pin move: the package root omits the `summarize()`
   contract members, so the override repeats their shape (drift rule in
   `packages/deepseek/src/engine.ts`).
+- Parity slice 1: `lcm_expand_query` answers from aged history through the
+  in-process reader and cites the entry or summary id, with one
+  retrieval-kind row per run and no cross-session search yet. Suite: 41
+  tests green (`vp check`, `tsc`, `bun run test`).
 
 ## Open questions for the owner
 
