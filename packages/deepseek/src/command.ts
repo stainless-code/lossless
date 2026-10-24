@@ -7,6 +7,10 @@ import {
   handleBackup,
   handleDiagnose,
   handleExport,
+  handleGc,
+  handleHeal,
+  handleImport,
+  handleMigrate,
   handleReport,
   handleStatus,
   type LcmCommandDeps,
@@ -14,7 +18,8 @@ import {
 
 export type { LcmCommandDeps } from "./lifecycle.ts";
 
-const USAGE = "Usage: /lcm [status|report|backup|export|diagnose|compact] [--save <file>]";
+const USAGE =
+  "Usage: /lcm [status|report|backup|export|import|gc|migrate|heal|diagnose|compact] [--apply] [--max-nodes N] [--save <file>]";
 
 /** Fail loudly if a locally closed union gains an unhandled member. */
 function assertNever(value: never): never {
@@ -76,15 +81,16 @@ async function handleCompact(ctx: Context, invocation: CommandInvocation): Promi
   }
 }
 
-/** The `/lcm` command: read-only operator verbs plus one manual compaction.
- * Subcommand routing is manual dispatch inside this one handler: the command
- * registry rejects a second registration under the same name, so `/lcm report`
- * and friends arrive here as raw input. */
+/** The `/lcm` command: read-only operator verbs, mutating verbs with dry-run
+ * defaults, plus one manual compaction. Subcommand routing is manual dispatch
+ * inside this one handler: the command registry rejects a second registration
+ * under the same name, so `/lcm report` and friends arrive here as raw input. */
 export function lcmCommandDefinition(ctx: Context, deps: LcmCommandDeps) {
   return {
     definitionId: CommandDefinitionId("deepseek-lossless"),
     name: "lcm",
-    description: "Lossless session memory: status, report, backup, export, diagnose, compact",
+    description:
+      "Lossless session memory: status, report, backup, export, import, gc, migrate, heal, diagnose, compact",
     handler: (invocation: CommandInvocation): Promise<CommandResult> => {
       const tokens = invocation.rawInput.trim().split(/\s+/).filter(Boolean);
       const verb = tokens[0] ?? "";
@@ -93,6 +99,10 @@ export function lcmCommandDefinition(ctx: Context, deps: LcmCommandDeps) {
       if (verb === "report") return Promise.resolve(handleReport(deps, invocation));
       if (verb === "backup") return Promise.resolve(handleBackup(deps, invocation, args));
       if (verb === "export") return Promise.resolve(handleExport(deps, invocation, args));
+      if (verb === "import") return Promise.resolve(handleImport(deps, invocation, args));
+      if (verb === "gc") return Promise.resolve(handleGc(deps, invocation, args));
+      if (verb === "migrate") return Promise.resolve(handleMigrate(deps, invocation, args));
+      if (verb === "heal") return handleHeal(ctx, deps, invocation, args);
       if (verb === "diagnose") return handleDiagnose(ctx, deps, invocation, args);
       if (verb === "compact") return handleCompact(ctx, invocation);
       return Promise.resolve({ kind: "error", text: USAGE });

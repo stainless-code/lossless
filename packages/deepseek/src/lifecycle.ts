@@ -1,4 +1,4 @@
-import { chmodSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,22 +7,39 @@ import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { CommandInvocation, CommandResult } from "@deepseek-ai/dsh-commands";
 import {
+  appendMetric,
   buildDiagnoseBundle,
   checkIntegrity,
   depthStats,
+  dropSidecarFiles,
   effectiveThresholds,
   exportTranscript,
   fmtTokens,
+  importTranscript,
+  listSidecarRefs,
+  makeLlm,
   mergeZone,
   modelKey,
   packageVersionNear,
+  parseExport,
   readMetricRows,
   redactSecrets,
-  type LcmStore,
+  runHeal,
+  sanitizeSidecarId,
+  SCHEMA_VERSION,
+  storeGeneration,
+  type HealOutcome,
+  LcmStore,
+  type LlmComplete,
 } from "lossless-core";
+
+import { dshModelHost } from "./model-host.ts";
 
 export interface LcmCommandDeps {
   readonly stores: () => ReadonlyMap<string, LcmStore>;
+  /** Open-or-create the calling session sidecar. Import uses it so a fresh
+   * session can restore history it has never mirrored. */
+  readonly storeFor?: (sessionId: string) => LcmStore;
   /** Sidecar directory: the metrics log lives here and default export paths land here. */
   readonly sidecarDir: string;
   /** File path of one session's sidecar, for backup targets. */
@@ -358,4 +375,348 @@ export async function handleDiagnose(
     };
   }
   return { kind: "success", text: bundle };
+}
+
+/** Restore rows from a file written by export. Dedup is the importer's own:
+ * re-importing the same file inserts nothing and reports the skips. */
+export function handleImport(
+  deps: LcmCommandDeps,
+  invocation: CommandInvocation,
+  args: readonly string[],
+): CommandResult {
+  const sessionId = String(invocation.agent.session.id);
+  const arg = args[0];
+  if (arg === undefined || arg.length === 0) {
+    return {
+      kind: "error",
+      text: "LCM import: name a file written by /lcm export, e.g. `/lcm import lcm-export.jsonl`.",
+    };
+  }
+  let text: string;
+  try {
+    text = readFileSync(resolve(arg), "utf8");
+  } catch (error) {
+    return {
+      kind: "error",
+      text: `LCM import failed: cannot read ${arg} (${error instanceof Error ? error.message : String(error)}).`,
+    };
+  }
+  const parsed = parseExport(text);
+  if ("error" in parsed) {
+    return { kind: "error", text: `LCM import refused: ${parsed.error}.` };
+  }
+  const store = deps.storeFor?.(sessionId) ?? deps.stores().get(sessionId);
+  if (!store) {
+    return { kind: "error", text: "LCM import: no stored history for this session yet." };
+  }
+  const result = importTranscript(store, parsed.rows);
+  if (result.refused !== undefined) {
+    return { kind: "error", text: `LCM import refused: ${result.refused}.` };
+  }
+  const restored = result.messagesInserted + result.summariesInserted;
+  const skipped = result.messagesSkipped + result.summariesSkipped;
+  return {
+    kind: "success",
+    text: `LCM import: ${restored} row(s) restored (${result.messagesInserted} messages, ${result.summariesInserted} summaries); ${skipped} row(s) already present.`,
+  };
+}
+
+/** Live stems guard gc: disk stems are sanitized session ids, so the check
+ * compares those, not raw ids, and fails closed by also covering the calling
+ * session even when its store is not in the map yet. */
+function liveStems(deps: LcmCommandDeps, sessionId: string): Set<string> {
+  const stems = new Set<string>();
+  for (const id of deps.stores().keys()) stems.add(sanitizeSidecarId(id));
+  stems.add(sanitizeSidecarId(sessionId));
+  return stems;
+}
+
+const GC_DEFAULT_DAYS = 30;
+
+function gcCandidates(
+  deps: LcmCommandDeps,
+  sessionId: string,
+): Array<{ id: string; path: string; sizeBytes: number; ageDays: number }> {
+  const live = liveStems(deps, sessionId);
+  const cutoff = Date.now() - GC_DEFAULT_DAYS * 86_400_000;
+  const out: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }> = [];
+  for (const ref of listSidecarRefs(deps.sidecarDir)) {
+    if (live.has(ref.id)) continue;
+    try {
+      const stat = statSync(ref.path);
+      if (!stat.isFile()) continue;
+      let mtimeMs = stat.mtimeMs;
+      for (const suffix of ["-wal", "-shm"]) {
+        try {
+          mtimeMs = Math.max(mtimeMs, statSync(`${ref.path}${suffix}`).mtimeMs);
+        } catch {}
+      }
+      if (mtimeMs > cutoff) continue;
+      out.push({
+        id: ref.id,
+        path: ref.path,
+        sizeBytes: stat.size,
+        ageDays: Math.max(0, (Date.now() - mtimeMs) / 86_400_000),
+      });
+    } catch {
+      continue;
+    }
+  }
+  return out;
+}
+
+/** Age-based sidecar collection. Dry-run default; only --apply deletes, and
+ * it never touches a live sidecar. A no-op apply writes no export file. */
+export function handleGc(
+  deps: LcmCommandDeps,
+  invocation: CommandInvocation,
+  args: readonly string[],
+): CommandResult {
+  const sessionId = String(invocation.agent.session.id);
+  const apply = args.includes("--apply");
+  let candidates: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }>;
+  try {
+    candidates = gcCandidates(deps, sessionId);
+  } catch (error) {
+    return {
+      kind: "error",
+      text: `LCM gc failed: cannot list ${deps.sidecarDir} (${error instanceof Error ? error.message : String(error)}).`,
+    };
+  }
+  if (candidates.length === 0) {
+    return {
+      kind: "success",
+      text: `LCM gc: nothing eligible (no sidecar older than ${GC_DEFAULT_DAYS} day(s); live sidecars are never candidates).`,
+    };
+  }
+  const lines = candidates.map(
+    (c) => `  ${c.id}: ${(c.sizeBytes / 1024).toFixed(0)} KB, ${c.ageDays.toFixed(1)} day(s) old`,
+  );
+  if (!apply) {
+    return {
+      kind: "success",
+      text: `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lcm gc --apply\` to export then delete them. Backups are never touched.`,
+    };
+  }
+  const exportTarget = join(deps.sidecarDir, `lcm-export-gc-${STAMP()}.jsonl`);
+  let removed = 0;
+  let exported = 0;
+  let failed = 0;
+  for (const candidate of candidates) {
+    try {
+      const probe = new LcmStore(candidate.path, { queryOnly: true });
+      let rows = "";
+      try {
+        rows = exportTranscript(probe).toJSONL();
+      } finally {
+        probe.close();
+      }
+      if (rows.length > 0) {
+        appendFileSync(exportTarget, `${rows}\n`, { encoding: "utf8", mode: 0o600 });
+        exported++;
+      }
+      dropSidecarFiles(candidate.path);
+      removed++;
+    } catch {
+      failed++;
+    }
+  }
+  if (exported > 0) {
+    try {
+      chmodSync(exportTarget, 0o600);
+    } catch {}
+  }
+  return {
+    kind: "success",
+    text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
+  };
+}
+
+/** Generation-gated migration. A store this process holds open is already
+ * current, so live stems are excluded: opening a second writer would only
+ * race the live session. Dry-run default; only --apply opens writers. */
+export function handleMigrate(
+  deps: LcmCommandDeps,
+  invocation: CommandInvocation,
+  args: readonly string[],
+): CommandResult {
+  const sessionId = String(invocation.agent.session.id);
+  const apply = args.includes("--apply");
+  const live = liveStems(deps, sessionId);
+  const refs = listSidecarRefs(deps.sidecarDir).filter((ref) => !live.has(ref.id));
+  const stale: Array<{ id: string; path: string; generation: number }> = [];
+  let current = deps.stores().size;
+  let broken = 0;
+  for (const ref of refs) {
+    const generation = storeGeneration(ref.path);
+    if (generation === undefined) broken++;
+    else if (generation < SCHEMA_VERSION) stale.push({ ...ref, generation });
+    else current++;
+  }
+  if (stale.length === 0) {
+    return {
+      kind: "success",
+      text: `LCM migrate: nothing to do (${current} sidecar(s) at generation ${SCHEMA_VERSION}${broken === 0 ? "" : `, ${broken} unreadable`}).`,
+    };
+  }
+  const summary = stale
+    .map((s) => `  ${s.id}: generation ${s.generation} -> ${SCHEMA_VERSION}`)
+    .join("\n");
+  if (!apply) {
+    return {
+      kind: "success",
+      text: `LCM migrate dry-run: ${stale.length} sidecar(s) older than generation ${SCHEMA_VERSION} (${current} current${broken === 0 ? "" : `, ${broken} unreadable`}):\n${summary}\nRun \`/lcm migrate --apply\` to upgrade them in place.`,
+    };
+  }
+  let migrated = 0;
+  let failed = 0;
+  for (const s of stale) {
+    try {
+      const candidate = new LcmStore(s.path);
+      candidate.close();
+      migrated++;
+    } catch {
+      failed++;
+    }
+  }
+  return {
+    kind: "success",
+    text: `LCM migrate: upgraded ${migrated} of ${stale.length} sidecar(s) to generation ${SCHEMA_VERSION}${failed === 0 ? "" : `, ${failed} failed`}.`,
+  };
+}
+
+type MaxNodesFlag = { kind: "absent" } | { kind: "value"; value: number } | { kind: "invalid" };
+
+function parseMaxNodesFlag(flags: readonly string[]): MaxNodesFlag {
+  for (let i = 0; i < flags.length; i++) {
+    const flag = flags[i];
+    if (flag === "--max-nodes") {
+      const next = flags[i + 1];
+      if (next === undefined || next.startsWith("--")) return { kind: "invalid" };
+      return maxNodesValue(next);
+    }
+    if (flag?.startsWith("--max-nodes=")) {
+      return maxNodesValue(flag.slice("--max-nodes=".length));
+    }
+  }
+  return { kind: "absent" };
+}
+
+function maxNodesValue(raw: string): MaxNodesFlag {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? { kind: "value", value } : { kind: "invalid" };
+}
+
+/** A dry run reads the plan and makes no provider call. */
+const healDryRunLlm: LlmComplete = Object.assign(
+  async (): Promise<string> => {
+    throw new Error("lcm: a heal dry run never calls the model");
+  },
+  { metrics: appendMetric },
+);
+
+function healReport(outcome: HealOutcome): string {
+  if (outcome.dryRun) {
+    return outcome.counts.candidates === 0
+      ? "LCM heal dry-run: no truncated summaries or stale ancestors; nothing to repair."
+      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} tainted, ${outcome.sourceTokens} source tokens; run \`/lcm heal --apply\` to repair.`;
+  }
+  const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
+  const changed = outcome.counts.changed === 0 ? "" : `, changed ${outcome.counts.changed}`;
+  const blockedSource =
+    outcome.counts.blockedSource === 0 ? "" : ` (${outcome.counts.blockedSource} source)`;
+  return `LCM heal: repaired ${outcome.counts.repaired} clean, improved ${outcome.counts.improved}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}${blockedSource}${changed}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
+}
+
+const healInFlight = new Set<string>();
+
+/** Repair mechanically truncated nodes from their stored sources. Dry-run
+ * default; only --apply calls the model. Budgets are the core heal defaults:
+ * this adapter has no calibrated summarizer budgets yet (slice 5 owns them),
+ * so the forward dependency is to thread them through here when they land. */
+export async function handleHeal(
+  ctx: Context,
+  deps: LcmCommandDeps,
+  invocation: CommandInvocation,
+  args: readonly string[],
+): Promise<CommandResult> {
+  const sessionId = String(invocation.agent.session.id);
+  const apply = args.includes("--apply");
+  const maxNodes = parseMaxNodesFlag(args);
+  if (maxNodes.kind === "invalid") {
+    return {
+      kind: "error",
+      text: "LCM heal: --max-nodes takes a positive whole number, e.g. `/lcm heal --apply --max-nodes 8`.",
+    };
+  }
+  const store = deps.stores().get(sessionId);
+  if (!store) {
+    return { kind: "error", text: "LCM heal: no stored history for this session yet." };
+  }
+  const span = store.entrySpan();
+  if (!span) {
+    return { kind: "error", text: "LCM heal: this session has no stored entries yet." };
+  }
+  if (store.hasLiveRun()) {
+    return {
+      kind: "error",
+      text: "LCM heal: a compaction pass is in flight; retry when it finishes.",
+    };
+  }
+  if (healInFlight.has(sessionId)) {
+    return { kind: "error", text: "LCM heal: a repair is already running for this session." };
+  }
+  healInFlight.add(sessionId);
+  try {
+    const maxNodeInput = maxNodes.kind === "value" ? { maxNodes: maxNodes.value } : {};
+    if (!apply) {
+      const outcome = await runHeal(
+        store,
+        { session: sessionId, redact: redactSecrets, dryRun: true, ...maxNodeInput },
+        healDryRunLlm,
+      );
+      return { kind: "success", text: healReport(outcome) };
+    }
+    const route = agentRoute(invocation.agent);
+    const host = dshModelHost(ctx, {
+      ...(route === undefined ? {} : { defaultRoute: route }),
+      signal: invocation.signal,
+    });
+    const llm = makeLlm(
+      host,
+      {},
+      {
+        session: sessionId,
+        stage: "heal",
+        span: { firstEntryId: span.first, lastEntryId: span.last },
+      },
+    );
+    if (!llm) {
+      return {
+        kind: "error",
+        text: "LCM heal: no summarizer model resolves for this session; nothing was repaired.",
+      };
+    }
+    const outcome = await runHeal(
+      store,
+      { session: sessionId, redact: redactSecrets, ...maxNodeInput },
+      llm,
+    );
+    return { kind: "success", text: healReport(outcome) };
+  } catch (error) {
+    return {
+      kind: "error",
+      text: `LCM heal failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  } finally {
+    healInFlight.delete(sessionId);
+  }
+}
+
+export function gcDryRunDefaultDays(): number {
+  return GC_DEFAULT_DAYS;
+}
+
+export function healInFlightSessions(): readonly string[] {
+  return [...healInFlight];
 }

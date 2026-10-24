@@ -436,6 +436,15 @@ Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
   diagnose builds the redacted core bundle with `--save` support. Suite: 50
   tests green (`vp check`, `tsc`, `bun run test packages/deepseek`,
   `bun run pack`).
+- Parity slice 3b: `/lcm` grows `import|gc|migrate|heal`, each dry-run by
+  default with `--apply` the only destructive path (new verbs in
+  `packages/deepseek/src/lifecycle.ts`, dispatched in `command.ts`, `storeFor`
+  wired in `plugin.ts`). Import dedups through `importTranscript`; gc collects
+  age-based sidecar candidates and never touches live stems; migrate gates on
+  `storeGeneration` against `SCHEMA_VERSION`; heal runs core `runHeal` with
+  core default budgets until slice 5 calibrates this adapter. Suite: 54
+  tests green (`vp check`, `tsc`, `bun run test packages/deepseek`,
+  `bun run pack`).
 
 ## Open questions for the owner
 

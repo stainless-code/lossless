@@ -117,6 +117,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   );
   const stopCommand = registerLcmCommand(ctx, {
     stores: () => sidecars.storesMap(),
+    storeFor: (sessionId) => sidecars.for(sessionId),
     sidecarDir: dir,
     storePathFor: (sessionId) => sidecars.pathFor(sessionId),
   });
