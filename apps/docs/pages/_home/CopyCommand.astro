@@ -3,10 +3,13 @@ import Icon from "blume/components/Icon.astro";
 
 interface Props {
 	command: string;
+	hostCommand?: boolean;
+	size?: "default" | "compact";
 	tone?: "surface" | "muted" | "violet";
 }
 
-const { command, tone = "surface" } = Astro.props;
+const { command, hostCommand = false, size = "default", tone = "surface" } = Astro.props;
+const compact = size === "compact";
 
 const frame =
 	tone === "violet"
@@ -14,30 +17,38 @@ const frame =
 		: tone === "muted"
 			? "border-transparent bg-muted"
 			: "border-border bg-[var(--landing-surface)]";
-const codeClass =
-	tone === "violet" ? "text-[#18181b]" : "text-foreground";
-const promptClass =
-	tone === "violet" ? "text-[#6b6b75]" : "text-[var(--landing-faint)]";
-const buttonClass =
-	tone === "violet"
+const codeClass = compact
+	? "text-[11px]"
+	: tone === "violet"
+		? "text-base text-[#18181b]"
+		: "text-base text-foreground";
+const promptClass = compact
+	? "text-[12px]"
+	: tone === "violet"
+		? "text-base text-[#6b6b75]"
+		: "text-base text-[var(--landing-faint)]";
+const buttonClass = compact
+	? "bg-transparent text-[var(--landing-faint)] hover:bg-muted hover:text-foreground"
+	: tone === "violet"
 		? "bg-[#f4f4f5] text-[#52525b] hover:text-[#18181b]"
 		: "bg-muted text-muted-foreground hover:text-foreground";
 ---
 
 <div
-  class={`flex w-fit max-w-full items-center border ${tone === "violet" ? "gap-[14px] rounded-[10px] py-3 pr-3 pl-5" : "gap-4 rounded-xl py-2.5 pr-2.5 pl-5"} ${frame}`}
+  class={`flex w-fit max-w-full items-center border ${compact ? "gap-[8px] rounded-lg py-[10px] pr-[8px] pl-3" : tone === "violet" ? "gap-[14px] rounded-[10px] py-3 pr-3 pl-5" : "gap-4 rounded-xl py-2.5 pr-2.5 pl-5"} ${frame}`}
+  data-host-command={hostCommand ? "true" : undefined}
   data-landing-command
 >
-  <span aria-hidden="true" class={`select-none font-mono text-base ${promptClass}`}>$</span>
-  <code class={`min-w-0 flex-1 truncate text-left font-mono text-base ${codeClass}`}>{command}</code>
+  <span aria-hidden="true" class={`select-none font-mono ${promptClass}`}>$</span>
+  <code class={`min-w-0 flex-1 truncate text-left font-mono ${codeClass}`} data-landing-command-text>{command}</code>
   <button
     aria-label={`Copy ${command}`}
-    class={`inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors ${buttonClass}`}
+    class={`inline-flex ${compact ? "size-6" : "size-8"} shrink-0 cursor-pointer items-center justify-center rounded-lg transition-colors ${buttonClass}`}
     data-landing-copy
     data-command={command}
     type="button"
   >
-    <Icon name="copy" size={tone === "violet" ? 14 : 15} />
+    <Icon name="copy" size={compact ? 13 : tone === "violet" ? 14 : 15} />
   </button>
 </div>
 

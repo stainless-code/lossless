@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, mkdirSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
@@ -6,6 +6,30 @@ import { estimateTokens } from "./estimate-tokens.ts";
 import { isFileKind, type FileDescriptor } from "./files.ts";
 
 export type LcmRole = "user" | "assistant" | "toolResult" | "custom";
+
+/** What a stored summary's text is worth: `clean` came from an unclipped source
+ * of clean children, `clipped` lost source before the model saw it, `mechanical`
+ * is the deterministic truncate, and `derived` was built from a non-clean source.
+ * The value is durable so a failed ancestor stays discoverable after the child
+ * that made it stale has been repaired. */
+export type SummaryQuality = "clean" | "clipped" | "mechanical" | "derived";
+
+export function isSummaryQuality(value: unknown): value is SummaryQuality {
+  switch (value) {
+    case "clean":
+    case "clipped":
+    case "mechanical":
+    case "derived":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/** The level-3 ladder stores this prefix ahead of the mechanical truncate. It is
+ * a storage marker, so a store migration can recognise predated rows without
+ * running the summarizer. */
+export const TRUNCATED_SUMMARY_PREFIX = "[lcm:truncated]";
 
 /** Any role string Pi may emit (custom, branchSummary, bashExecution...) folds to the four stored roles. */
 export function normalizeRole(r: string): LcmRole {
@@ -49,6 +73,7 @@ export interface SummaryNode {
   firstEntryId: string;
   lastEntryId: string;
   createdAt: number;
+  quality: SummaryQuality;
   /** A richer sibling text the ladder produced and did not store as primary,
    * so the projection can serve more detail when the budget has room. */
   thoroughText?: string;
@@ -109,6 +134,9 @@ export type InsertSummaryInput = {
   depth: number;
   firstEntryId: string;
   lastEntryId: string;
+  /** Defaults to `clean`: a caller that does not know the provenance quality
+   * must not invent a loss the store would then try to repair. */
+  quality?: SummaryQuality;
   messageIds?: number[];
   childSummaryIds?: number[];
   fileIds?: string[];
@@ -132,9 +160,48 @@ export interface PassStore extends IngestStore {
   getSummary(id: number): SummaryNode | undefined;
   parentSummaryIds(summaryId: number): number[];
   fileIdsForSummaries(ids: readonly number[]): string[];
+  /** Stored messages in row order, so a pass can re-read the exact source a
+   * leaf's provenance names. */
+  messagesByIds(ids: readonly number[]): StoredMessage[];
   insertSummary(s: InsertSummaryInput): InsertSummaryResult;
-  updateSummaryText(id: number, text: string, tokens: number): void;
+  /** `quality` is optional so a caller rewriting text it did not derive keeps
+   * the stored verdict; a replacement that knows its source passes it. */
+  updateSummaryText(id: number, text: string, tokens: number, quality?: SummaryQuality): void;
   setThoroughText(id: number, thoroughText: string): void;
+}
+
+/** A node's provenance split into the two child types, each in the order the
+ * source ran: messages by row, child summaries by the row their span starts at. */
+export interface SummarySources {
+  messages: number[];
+  summaries: number[];
+}
+
+/** Replace a node's text only if it still holds the text the caller read. The
+ * rich tier is cleared in the same statement: it described the old source. */
+export interface SummaryTextCas {
+  id: number;
+  expectedText: string;
+  expectedTokens: number;
+  text: string;
+  tokens: number;
+  /** The verdict for the new text. A repair always writes `clean`. */
+  quality: SummaryQuality;
+}
+
+/** The store surface a heal run needs. It is a `PassStore` plus the committed
+ * scan and compare-and-swap write that a repair uses, so a heal cannot write
+ * through a run view whose pending rows the projection does not serve. */
+export interface HealStore extends PassStore {
+  /** Committed nodes whose quality is not clean, or whose text carries the
+   * mechanical prefix as a fallback for imported and predated rows. */
+  taintedSummaries(prefix: string): SummaryNode[];
+  summarySources(summaryId: number): SummarySources;
+  casUpdateSummaryText(update: SummaryTextCas): boolean;
+  /** Mark a clean node stale because a child changed under it. A node already
+   * non-clean keeps its verdict: mechanical and clipped are facts about its own
+   * text, and derived is already the retry marker. */
+  markSummaryDerived(id: number): boolean;
 }
 
 export interface IngestStore {
@@ -156,8 +223,12 @@ export interface IngestStore {
 export const FTS_PREFIX_CHARS = 100_000;
 
 /** First published schema: pre-publish development stores were wiped, so every
- * store in the wild starts here and later generations count from this one. */
-export const SCHEMA_VERSION = 1;
+ * store in the wild starts here and later generations count from this one.
+ * Generation 2 adds the summary quality verdict. */
+export const SCHEMA_VERSION = 2;
+
+const QUALITY_COLUMN =
+  "quality TEXT NOT NULL DEFAULT 'clean' CHECK (quality IN ('clean','clipped','mechanical','derived'))";
 
 /** A store left behind by an older build. A read-only open refuses it rather than
  * migrating it: a search must not rewrite a file it is only reading, and a store
@@ -206,6 +277,7 @@ CREATE TABLE IF NOT EXISTS summaries (
   created_at     INTEGER NOT NULL,
   thorough_text       TEXT,
   thorough_tokens     INTEGER,
+  ${QUALITY_COLUMN},
   status         TEXT NOT NULL DEFAULT 'committed' CHECK (status IN ('pending','committed')),
   run            TEXT
 );
@@ -267,10 +339,12 @@ END;
  * before it writes, so running the set on an already-migrated store is a no-op
  * and a store written before any version was recorded still upgrades. */
 function migrate(db: DatabaseSync): void {
+  const startedVersion = readVersion(db);
   addColumnIfMissing(db, "messages", "payload", "payload TEXT");
   addColumnIfMissing(db, "messages", "removed_at", "removed_at INTEGER");
   addColumnIfMissing(db, "summaries", "thorough_text", "thorough_text TEXT");
   addColumnIfMissing(db, "summaries", "thorough_tokens", "thorough_tokens INTEGER");
+  const addedQuality = addColumnIfMissing(db, "summaries", "quality", QUALITY_COLUMN);
   addColumnIfMissing(
     db,
     "summaries",
@@ -282,12 +356,34 @@ function migrate(db: DatabaseSync): void {
   addColumnIfMissing(db, "model_state", "window_source", "window_source TEXT");
   // Only a store from before versions were recorded can hold a pending row from
   // before crash recovery existed: it is dropped rather than recovered.
-  if (readVersion(db) < 1) db.exec("DELETE FROM summaries WHERE status = 'pending'");
+  if (startedVersion < 1) db.exec("DELETE FROM summaries WHERE status = 'pending'");
+  // The quality verdict is derived from text and provenance. A partial migration
+  // can add the column and die before the backfill, so version is the durable
+  // signal, not `addedQuality`.
+  if (addedQuality || startedVersion < 2) backfillSummaryQuality(db);
   if (tableColumns(db, "runs").has("owner")) {
     db.exec("DROP TABLE runs");
     db.exec(RUNS_TABLE);
   }
   db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+
+/** A predated store has no verdicts. The mechanical prefix is the only direct
+ * evidence a row carries, and a clean ancestor of a non-clean row is derived
+ * even when its own prose looks clean. */
+function backfillSummaryQuality(db: DatabaseSync): void {
+  db.prepare("UPDATE summaries SET quality = 'mechanical' WHERE substr(text, 1, ?) = ?").run(
+    TRUNCATED_SUMMARY_PREFIX.length,
+    TRUNCATED_SUMMARY_PREFIX,
+  );
+  db.exec(`WITH RECURSIVE tainted(id) AS (
+    SELECT id FROM summaries WHERE quality <> 'clean'
+    UNION
+    SELECT p.summary_id FROM provenance p
+      JOIN tainted t ON p.child_type = 'summary' AND p.child_id = t.id
+  )
+  UPDATE summaries SET quality = 'derived'
+   WHERE quality = 'clean' AND id IN (SELECT id FROM tainted)`);
 }
 
 /** The recorded schema generation, or 0 for a store written before one was. */
@@ -402,7 +498,13 @@ export class LcmStore {
     countRemoved: StatementSync;
     parentSummaryIds: StatementSync;
     childSummaryIds: StatementSync;
+    taintedSummaries: StatementSync;
+    summarySourceMessages: StatementSync;
+    summarySourceChildren: StatementSync;
+    casUpdateSummaryText: StatementSync;
+    markSummaryDerived: StatementSync;
     countMessages: StatementSync;
+    countEntryPrefix: StatementSync;
     countSummaries: StatementSync;
     pageBytes: StatementSync;
     entrySpan: StatementSync;
@@ -432,7 +534,15 @@ export class LcmStore {
     // database whose shared memory file is gone, which is what a clean exit
     // leaves, so the fallback opens normally and bans writes with `query_only`.
     this.readOnly = opts?.readOnly === true || opts?.queryOnly === true;
-    if (!this.readOnly) mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
+    if (!this.readOnly && dbPath !== ":memory:") {
+      mkdirSync(dirname(dbPath), { recursive: true, mode: 0o700 });
+      // Create the database file owner-only before SQLite opens it. SQLite
+      // copies the database's mode onto the WAL and shared-memory files, so a
+      // 0644 file here would leave plaintext message text readable by others.
+      closeSync(openSync(dbPath, "a", 0o600));
+      // `open` leaves the mode of an existing file alone, so repair it.
+      chmodSync(dbPath, 0o600);
+    }
     this.dbPath = dbPath;
     this.db = new DatabaseSync(dbPath, opts?.readOnly === true ? { readOnly: true } : {});
     if (opts?.queryOnly === true) this.db.exec("PRAGMA query_only = ON;");
@@ -483,7 +593,7 @@ export class LcmStore {
       ),
       insertedId: prep("SELECT id FROM messages WHERE entry_id = ?"),
       insertSummary: prep(
-        "INSERT INTO summaries (kind, text, tokens, depth, first_entry_id, last_entry_id, created_at, thorough_text, thorough_tokens, status, run) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO summaries (kind, text, tokens, depth, first_entry_id, last_entry_id, created_at, thorough_text, thorough_tokens, quality, status, run) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ),
       insertProvenance: prep(
         "INSERT OR IGNORE INTO provenance (summary_id, child_type, child_id) VALUES (?, ?, ?)",
@@ -607,7 +717,7 @@ export class LcmStore {
          ORDER BY m.rowid ASC`,
       ),
       frontier: prep(
-        `SELECT s.id, s.kind, s.text, s.tokens, s.depth, s.first_entry_id, s.last_entry_id, s.created_at, s.thorough_text, s.thorough_tokens,
+        `SELECT s.id, s.kind, s.text, s.tokens, s.depth, s.first_entry_id, s.last_entry_id, s.created_at, s.thorough_text, s.thorough_tokens, s.quality,
                 (SELECT rowid FROM messages WHERE entry_id = s.first_entry_id) AS first_rowid,
                 (SELECT rowid FROM messages WHERE entry_id = s.last_entry_id)  AS last_rowid
            FROM summaries s
@@ -623,15 +733,17 @@ export class LcmStore {
         "SELECT id, entry_id, role, text, tokens, timestamp, payload, removed_at FROM messages ORDER BY rowid ASC",
       ),
       allSummaries: prep(
-        "SELECT s.id, s.kind, s.text, s.tokens, s.depth, s.first_entry_id, s.last_entry_id, s.created_at, s.thorough_text, s.thorough_tokens FROM summaries s WHERE (s.status = 'committed' OR s.run = ?) ORDER BY s.id ASC",
+        "SELECT s.id, s.kind, s.text, s.tokens, s.depth, s.first_entry_id, s.last_entry_id, s.created_at, s.thorough_text, s.thorough_tokens, s.quality FROM summaries s WHERE (s.status = 'committed' OR s.run = ?) ORDER BY s.id ASC",
       ),
       getSummary: prep(
-        "SELECT s.id, s.kind, s.text, s.tokens, s.depth, s.first_entry_id, s.last_entry_id, s.created_at, s.thorough_text, s.thorough_tokens FROM summaries s WHERE s.id = ? AND (s.status = 'committed' OR s.run = ?)",
+        "SELECT s.id, s.kind, s.text, s.tokens, s.depth, s.first_entry_id, s.last_entry_id, s.created_at, s.thorough_text, s.thorough_tokens, s.quality FROM summaries s WHERE s.id = ? AND (s.status = 'committed' OR s.run = ?)",
       ),
       summarySpanId: prep(
         "SELECT id, text, tokens, status, run FROM summaries WHERE first_entry_id = ? AND last_entry_id = ? AND kind = ?",
       ),
-      updateSummaryText: prep("UPDATE summaries SET text = ?, tokens = ? WHERE id = ?"),
+      updateSummaryText: prep(
+        "UPDATE summaries SET text = ?, tokens = ?, quality = COALESCE(?, quality) WHERE id = ?",
+      ),
       deleteSummary: prep("DELETE FROM summaries WHERE id = ?"),
       setSummaryThorough: prep(
         "UPDATE summaries SET thorough_text = ?, thorough_tokens = ? WHERE id = ?",
@@ -661,7 +773,40 @@ export class LcmStore {
       childSummaryIds: prep(
         "SELECT child_id AS id FROM provenance WHERE child_type = 'summary' AND summary_id = ? ORDER BY child_id ASC",
       ),
+      taintedSummaries: prep(
+        `SELECT s.id, s.kind, s.text, s.tokens, s.depth, s.first_entry_id, s.last_entry_id, s.created_at, s.thorough_text, s.thorough_tokens, s.quality
+           FROM summaries s
+          WHERE s.status = 'committed'
+            AND (s.quality <> 'clean' OR substr(s.text, 1, ?) = ?)
+          ORDER BY s.id ASC`,
+      ),
+      summarySourceMessages: prep(
+        `SELECT p.child_id AS id
+           FROM provenance p
+           LEFT JOIN messages m ON m.id = p.child_id
+          WHERE p.summary_id = ? AND p.child_type = 'message'
+          ORDER BY (m.rowid IS NULL) ASC, m.rowid ASC, p.child_id ASC`,
+      ),
+      summarySourceChildren: prep(
+        `SELECT p.child_id AS id
+           FROM provenance p
+           LEFT JOIN summaries c ON c.id = p.child_id
+           LEFT JOIN messages m ON m.entry_id = c.first_entry_id
+          WHERE p.summary_id = ? AND p.child_type = 'summary'
+          ORDER BY (m.rowid IS NULL) ASC, m.rowid ASC, p.child_id ASC`,
+      ),
+      casUpdateSummaryText: prep(
+        `UPDATE summaries
+            SET text = ?, tokens = ?, quality = ?, thorough_text = NULL, thorough_tokens = NULL
+          WHERE id = ? AND text = ? AND tokens = ? AND status = 'committed'`,
+      ),
+      markSummaryDerived: prep(
+        "UPDATE summaries SET quality = 'derived' WHERE id = ? AND quality = 'clean' AND status = 'committed'",
+      ),
       countMessages: prep("SELECT COUNT(*) c FROM messages"),
+      countEntryPrefix: prep(
+        "SELECT COUNT(*) c FROM messages WHERE entry_id >= ? AND entry_id < ?",
+      ),
       payloadMessages: prep("SELECT COUNT(*) c FROM messages WHERE payload IS NOT NULL"),
       payloadBytes: prep("SELECT COALESCE(SUM(length(payload)), 0) b FROM messages"),
       countSummaries: prep(
@@ -684,9 +829,11 @@ export class LcmStore {
              FROM cover c JOIN messages m ON c.child_type = 'message' AND m.id = c.child_id`,
       ),
     };
-    try {
-      chmodSync(dbPath, 0o600);
-    } catch {}
+    if (!this.readOnly && dbPath !== ":memory:") {
+      for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+        if (existsSync(path)) chmodSync(path, 0o600);
+      }
+    }
   }
 
   /** Close the handle: no run of this handle survives it, and the connection is
@@ -871,6 +1018,7 @@ export class LcmStore {
             Date.now(),
             s.thoroughText ?? null,
             s.thoroughText === undefined ? null : estimateTokens(s.thoroughText),
+            s.quality ?? "clean",
             status,
             s.run ?? null,
           ).lastInsertRowid,
@@ -979,9 +1127,11 @@ export class LcmStore {
     }));
   }
 
-  /** Replace a node's text in place: the span, provenance, and created_at stay. */
-  updateSummaryText(id: number, text: string, tokens: number): void {
-    this.stmts.updateSummaryText.run(text, tokens, id);
+  /** Replace a node's text in place: the span, provenance, and created_at stay.
+   * A caller that knows the new text's verdict passes it; a caller that does not
+   * leaves the stored verdict alone. */
+  updateSummaryText(id: number, text: string, tokens: number, quality?: SummaryQuality): void {
+    this.stmts.updateSummaryText.run(text, tokens, quality ?? null, id);
   }
 
   setThoroughText(id: number, thoroughText: string): void {
@@ -1158,6 +1308,46 @@ export class LcmStore {
     );
   }
 
+  taintedSummaries(prefix: string): SummaryNode[] {
+    const rows = this.stmts.taintedSummaries.all(prefix.length, prefix) as Array<
+      Record<string, unknown>
+    >;
+    return rows.map(rToSummary);
+  }
+
+  summarySources(summaryId: number): SummarySources {
+    return {
+      messages: (this.stmts.summarySourceMessages.all(summaryId) as Array<{ id: number }>).map(
+        (r) => Number(r.id),
+      ),
+      summaries: (this.stmts.summarySourceChildren.all(summaryId) as Array<{ id: number }>).map(
+        (r) => Number(r.id),
+      ),
+    };
+  }
+
+  /** One statement, so the text and its token count move together and a row
+   * another writer changed is reported as not updated rather than overwritten. */
+  casUpdateSummaryText(update: SummaryTextCas): boolean {
+    const changes = Number(
+      this.stmts.casUpdateSummaryText.run(
+        update.text,
+        update.tokens,
+        update.quality,
+        update.id,
+        update.expectedText,
+        update.expectedTokens,
+      ).changes,
+    );
+    return changes > 0;
+  }
+
+  /** A clean node whose child changed becomes `derived`; a node that already
+   * carries a stronger verdict keeps it. Returns true when this call wrote. */
+  markSummaryDerived(id: number): boolean {
+    return Number(this.stmts.markSummaryDerived.run(id).changes) > 0;
+  }
+
   getSummary(id: number, run?: string): SummaryNode | undefined {
     const row = this.stmts.getSummary.get(id, run ?? null);
     return row ? rToSummary(row) : undefined;
@@ -1313,7 +1503,7 @@ export class LcmStore {
     return Number((this.stmts.countRemoved.get() as { c: number }).c);
   }
 
-  messagesByIds(ids: number[]): StoredMessage[] {
+  messagesByIds(ids: readonly number[]): StoredMessage[] {
     if (ids.length === 0) return [];
     const placeholders = ids.map(() => "?").join(",");
     const rows = this.db
@@ -1348,6 +1538,13 @@ export class LcmStore {
 
   messageCount(): number {
     return Number((this.stmts.countMessages.get() as { c: number }).c);
+  }
+
+  /** Number of stored messages whose entry id starts with `prefix`. Used by
+   * status reporting to count a family of rows (for example compaction marks
+   * and summaries) without scanning the table. */
+  entryCountWithPrefix(prefix: string): number {
+    return Number((this.stmts.countEntryPrefix.get(prefix, `${prefix}\uffff`) as { c: number }).c);
   }
 
   backup(backupPath: string): void {
@@ -1469,6 +1666,10 @@ class RunView implements PassStore {
     return this.store.parentSummaryIds(summaryId, this.token);
   }
 
+  messagesByIds(ids: readonly number[]): StoredMessage[] {
+    return this.store.messagesByIds(ids);
+  }
+
   fileIdsForSummaries(ids: readonly number[]): string[] {
     return this.store.fileIdsForSummaries(ids);
   }
@@ -1477,8 +1678,8 @@ class RunView implements PassStore {
     return this.store.insertSummary({ ...s, run: this.token });
   }
 
-  updateSummaryText(id: number, text: string, tokens: number): void {
-    this.store.updateSummaryText(id, text, tokens);
+  updateSummaryText(id: number, text: string, tokens: number, quality?: SummaryQuality): void {
+    this.store.updateSummaryText(id, text, tokens, quality);
   }
 
   setThoroughText(id: number, thoroughText: string): void {
@@ -1520,6 +1721,7 @@ function rToSummary(r: Record<string, unknown>): SummaryNode {
     firstEntryId: String(r.first_entry_id),
     lastEntryId: String(r.last_entry_id),
     createdAt: Number(r.created_at),
+    quality: isSummaryQuality(r.quality) ? r.quality : "clean",
     ...(typeof r.thorough_text === "string"
       ? { thoroughText: r.thorough_text, thoroughTokens: Number(r.thorough_tokens) }
       : {}),

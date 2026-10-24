@@ -35,11 +35,20 @@ export const RECUT_CEILING = 0.95;
 
 export const REZONE_MARGIN = 1.18;
 
+/** One model's thresholds. A token field takes precedence over its ratio
+ * counterpart when both are set. */
 export interface ThresholdConfig {
+  /** Swap when the request reaches this share of the model window. */
   swapAtRatio?: number;
+  /** Swap when the request reaches this many tokens; takes precedence over
+   * `swapAtRatio`. */
   swapAtTokens?: number;
+  /** Re-cut when the request reaches this share of the model window. */
   recutAtRatio?: number;
+  /** Re-cut when the request reaches this many tokens; takes precedence over
+   * `recutAtRatio`. */
   recutAtTokens?: number;
+  /** Swap at this absolute token count, deriving the recut from it. */
   smartZone?: number;
 }
 

@@ -481,7 +481,7 @@ const ZERO_USAGE: Usage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-function piCall(id: string, name: string, args: Record<string, unknown>): ToolCall {
+function piCall(id: string, name: string, args: ToolCall["arguments"]): ToolCall {
   return { type: "toolCall", id, name, arguments: args };
 }
 

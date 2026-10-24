@@ -99,7 +99,7 @@ const ctaClass = [
 
 const transparentScript = `(()=>{const sync=()=>{const h=document.querySelector("[data-blume-header-transparent]");if(h){h.toggleAttribute("data-blume-header-scrolled",scrollY>8);}};sync();if(window.__blumeTransparentHeader){return;}window.__blumeTransparentHeader=true;addEventListener("scroll",sync,{passive:true});document.addEventListener("astro:after-swap",sync);})();`;
 
-const clickScript = `(()=>{const dr=()=>{const h=document.querySelector("[data-blume-header]");if(h){document.documentElement.style.setProperty("--blume-drawer-top",h.getBoundingClientRect().bottom+"px");}};const save=(k,v)=>{try{localStorage.setItem(k,v);}catch{}};document.addEventListener("click",(e)=>{const t=e.target.closest("[data-blume-theme-toggle]");if(t){const d=document.documentElement;const next=d.dataset.theme==="dark"?"light":"dark";const s=document.createElement("style");s.appendChild(document.createTextNode("*,*::before,*::after{transition:none!important}"));document.head.appendChild(s);d.dataset.theme=next;window.getComputedStyle(d).opacity;setTimeout(()=>document.head.removeChild(s),1);save("blume-theme",next);}const n=e.target.closest("[data-blume-nav-toggle]");if(n){const d=document.documentElement;const open=d.toggleAttribute("data-blume-nav-open");if(open){dr();}}const b=e.target.closest("[data-blume-banner-dismiss]");if(b){document.documentElement.setAttribute("data-blume-banner-hidden","");requestAnimationFrame(dr);const bar=b.closest("[data-blume-banner]");const k=bar&&bar.getAttribute("data-banner-key");if(k){save("blume-banner:"+k,"1");}}});addEventListener("resize",()=>{const d=document.documentElement;if(!d.hasAttribute("data-blume-nav-open")){return;}if(matchMedia("(min-width:64rem)").matches){d.removeAttribute("data-blume-nav-open");}else{dr();}});})();`;
+const clickScript = `(()=>{const dr=()=>{const h=document.querySelector("[data-blume-header]");if(h){document.documentElement.style.setProperty("--blume-drawer-top",h.getBoundingClientRect().bottom+"px");}};const save=(k,v)=>{try{localStorage.setItem(k,v);}catch{}};document.addEventListener("click",(e)=>{const n=e.target.closest("[data-blume-nav-toggle]");if(n){const d=document.documentElement;const open=d.toggleAttribute("data-blume-nav-open");if(open){dr();}}const b=e.target.closest("[data-blume-banner-dismiss]");if(b){document.documentElement.setAttribute("data-blume-banner-hidden","");requestAnimationFrame(dr);const bar=b.closest("[data-blume-banner]");const k=bar&&bar.getAttribute("data-banner-key");if(k){save("blume-banner:"+k,"1");}}});addEventListener("resize",()=>{const d=document.documentElement;if(!d.hasAttribute("data-blume-nav-open")){return;}if(matchMedia("(min-width:64rem)").matches){d.removeAttribute("data-blume-nav-open");}else{dr();}});})();`;
 ---
 
 <header
@@ -234,21 +234,155 @@ const clickScript = `(()=>{const dr=()=>{const h=document.querySelector("[data-b
         ></path>
       </svg>
     </a>
-    <button
-      aria-label={n.toggleTheme}
-      class={iconButton}
-      data-blume-theme-toggle
-      data-blume-tooltip={n.toggleTheme}
-      type="button"
-    >
-      <span class="inline-flex dark:hidden"><Icon name="sun" size={18} /></span>
-      <span class="hidden dark:inline-flex"><Icon name="moon" size={18} /></span>
-    </button>
+    <details class="relative" data-theme-switcher>
+      <summary
+        aria-label="Theme"
+        class={`${iconButton} list-none [&::-webkit-details-marker]:hidden`}
+      >
+        <span data-theme-icon="light"><Icon name="sun" size={18} /></span>
+        <span data-theme-icon="dark"><Icon name="moon" size={18} /></span>
+        <span data-theme-icon="system"><Icon name="monitor" size={18} /></span>
+      </summary>
+      <div class="absolute end-0 top-full z-50 mt-2 flex w-40 flex-col gap-0.5 rounded-xl border border-border bg-background p-1.5 shadow-xl">
+        <button
+          class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-start text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground"
+          aria-pressed="false"
+          data-theme-option="light"
+          type="button"
+        >
+          <Icon name="sun" size={16} />
+          <span class="flex-1">Light</span>
+          <span data-theme-check="light"><Icon class="text-accent" name="check" size={14} /></span>
+        </button>
+        <button
+          class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-start text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground"
+          aria-pressed="false"
+          data-theme-option="dark"
+          type="button"
+        >
+          <Icon name="moon" size={16} />
+          <span class="flex-1">Dark</span>
+          <span data-theme-check="dark"><Icon class="text-accent" name="check" size={14} /></span>
+        </button>
+        <button
+          class="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-start text-muted-foreground text-sm transition-colors hover:bg-muted hover:text-foreground"
+          aria-pressed="false"
+          data-theme-option="system"
+          type="button"
+        >
+          <Icon name="monitor" size={16} />
+          <span class="flex-1">System</span>
+          <span data-theme-check="system"><Icon class="text-accent" name="check" size={14} /></span>
+        </button>
+      </div>
+    </details>
     {assistantEnabled && <Ask strings={assistantStrings} />}
   </div>
 </header>
 <script is:inline set:html={clickScript} />
 {transparent && <script is:inline set:html={transparentScript} />}
+<script is:inline>
+  (() => {
+    const root = document.documentElement;
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const fallbackMode = () => {
+      const mode = document.querySelector("script[data-mode]")?.getAttribute("data-mode");
+      return mode === "light" || mode === "dark" ? mode : "system";
+    };
+    const modeOf = () => {
+      try {
+        const stored = localStorage.getItem("blume-theme");
+        if (stored === "light" || stored === "dark") return stored;
+      } catch {}
+      return fallbackMode();
+    };
+    let current = modeOf();
+    const paint = (next) => {
+      const theme = next === "system" ? (media.matches ? "dark" : "light") : next;
+      const style = document.createElement("style");
+      style.appendChild(document.createTextNode("*,*::before,*::after{transition:none!important}"));
+      document.head.appendChild(style);
+      root.dataset.theme = theme;
+      root.dataset.themeMode = next;
+      void window.getComputedStyle(root).opacity;
+      setTimeout(() => style.remove(), 1);
+      for (const button of document.querySelectorAll("[data-theme-option]")) {
+        button.setAttribute("aria-pressed", button.dataset.themeOption === next ? "true" : "false");
+      }
+    };
+    const select = (next, persist) => {
+      if (persist) {
+        try {
+          if (next === "system") localStorage.removeItem("blume-theme");
+          else localStorage.setItem("blume-theme", next);
+        } catch {}
+      }
+      current = next;
+      paint(next);
+      if (persist) {
+        for (const open of document.querySelectorAll("details[data-theme-switcher][open]")) open.open = false;
+      }
+    };
+    const sync = () => {
+      current = modeOf();
+      root.dataset.themeMode = current;
+      for (const button of document.querySelectorAll("[data-theme-option]")) {
+        button.setAttribute("aria-pressed", button.dataset.themeOption === current ? "true" : "false");
+      }
+    };
+    if (!window.__blumeThemeMenu) {
+      window.__blumeThemeMenu = true;
+      document.addEventListener("click", (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const option = target?.closest("[data-theme-option]");
+        if (option instanceof HTMLElement) {
+          const mode = option.dataset.themeOption;
+          if (mode === "light" || mode === "dark" || mode === "system") {
+            event.preventDefault();
+            select(mode, true);
+          }
+          return;
+        }
+        for (const open of document.querySelectorAll("details[data-theme-switcher][open]")) {
+          if (target && !open.contains(target)) open.open = false;
+        }
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        for (const open of document.querySelectorAll("details[data-theme-switcher][open]")) open.open = false;
+      });
+      media.addEventListener("change", () => {
+        if (current === "system") select("system", false);
+      });
+      document.addEventListener("astro:after-swap", sync);
+    }
+    sync();
+  })();
+</script>
+
+<style is:global>
+  [data-theme-icon],
+  [data-theme-check] {
+    display: none;
+  }
+  html[data-theme-mode="light"] [data-theme-icon="light"],
+  html[data-theme-mode="dark"] [data-theme-icon="dark"],
+  html[data-theme-mode="system"] [data-theme-icon="system"],
+  html:not([data-theme-mode]) [data-theme-icon="system"] {
+    display: inline-flex;
+  }
+  html[data-theme-mode="light"] [data-theme-check="light"],
+  html[data-theme-mode="dark"] [data-theme-check="dark"],
+  html[data-theme-mode="system"] [data-theme-check="system"],
+  html:not([data-theme-mode]) [data-theme-check="system"] {
+    display: inline-flex;
+  }
+  [data-theme-option][aria-pressed="true"] {
+    background-color: var(--blume-muted);
+    color: var(--blume-foreground);
+  }
+</style>
+
 
 <style is:global>
   [data-blume-tooltip] {

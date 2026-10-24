@@ -1,0 +1,57 @@
+## Pick a scope: this session, this project, the machine
+
+`lcm_grep` takes a `scope`:
+
+| Scope            | Reaches                                                     |
+| ---------------- | ----------------------------------------------------------- |
+| `"session"`      | This session only. The default.                             |
+| `"sessions"`     | This project's past sessions, matched by working directory. |
+| `"all_sessions"` | Every past session on the machine.                          |
+
+```text
+lcm_grep({ query: "why we dropped the WAL checkpoint", scope: "sessions" })
+```
+
+Both cross-session scopes scan the 20 most recent stores, newest first, and stop at 20 stores, 40 hits, or 1.5 seconds.
+
+## The scan reads headers, never messages
+
+Only the one-line header is read: working directory, session id, and timestamp. Messages are not. Committed session files stay untouched.
+
+A matching store opens read-only with writes forbidden at the connection, so a search cannot migrate, repair, or write. A store from an older schema counts as `older-generation`; the search does not upgrade it on the fly.
+
+## Nothing is injected
+
+A hit from another session is a pointer, not text:
+
+```text
+[lcm:session 3f9c1ab2c7d4e5f6 2026-09-16 /Users/you/project] [e412] (assistant) #12 … the checkpoint was dropped because the reader never used it …
+  e412  … the checkpoint was dropped because the reader never used it …
+```
+
+Reading it takes a second call:
+
+```text
+lcm_expand_query({
+  query: "why we dropped the WAL checkpoint",
+  session: "3f9c1ab2c7d4e5f6",
+  entry_id: "e412",
+})
+```
+
+The findings come back labelled as a past session's history. No text from a past session enters this session's context or store unless the model calls the tool.
+
+## Migrate a store this build cannot read
+
+`/lcm migrate` upgrades stores left at an older schema:
+
+```bash
+/lcm migrate            # dry-run list
+/lcm migrate --apply    # upgrade in place
+```
+
+This is the only path that writes to a past session's store. It lists first, then upgrades in place. A store also becomes searchable when its own session next runs, because that run rewrites it.
+
+## Deleting a past session's store
+
+`/lcm gc --apply` deletes stores whose session file is gone. The transcript export keeps the bytes, but nothing re-indexes it. Exports land beside the stores, not in the directory Pi started in, because they hold stored bytes and secrets.

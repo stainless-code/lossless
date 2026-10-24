@@ -7,7 +7,13 @@ import {
 } from "./export.ts";
 import { FILE_KINDS, isFileKind, type FileDescriptor } from "./files.ts";
 import { ingestEntries } from "./ingest.ts";
-import { normalizeRole, type LcmStore } from "./store.ts";
+import {
+  isSummaryQuality,
+  normalizeRole,
+  TRUNCATED_SUMMARY_PREFIX,
+  type LcmStore,
+  type SummaryQuality,
+} from "./store.ts";
 
 export interface ImportResult {
   messagesInserted: number;
@@ -96,6 +102,7 @@ export function parseExport(text: string): ParsedExport {
         depth,
         firstEntryId,
         lastEntryId,
+        quality: rawQuality,
         messageEntryIds,
         childOrdinals,
       } = raw;
@@ -111,6 +118,13 @@ export function parseExport(text: string): ParsedExport {
         !str(lastEntryId)
       ) {
         return { error: `${where} is a summary row missing a field` };
+      }
+      let quality: SummaryQuality | undefined;
+      if (rawQuality !== undefined) {
+        if (!isSummaryQuality(rawQuality)) {
+          return { error: `${where} has an unknown summary quality` };
+        }
+        quality = rawQuality;
       }
       const messageIds = rowsOf(messageEntryIds);
       const childIds = ordinalsOf(childOrdinals);
@@ -129,6 +143,7 @@ export function parseExport(text: string): ParsedExport {
         depth,
         firstEntryId,
         lastEntryId,
+        ...(quality === undefined ? {} : { quality }),
         messageEntryIds: messageIds,
         childOrdinals: childIds,
       });
@@ -261,6 +276,8 @@ export function importTranscript(store: LcmStore, rows: readonly ExportRow[]): I
   let summariesInserted = 0;
   let summariesSkipped = 0;
   for (const s of summaries) {
+    const quality =
+      s.quality ?? (s.text.startsWith(TRUNCATED_SUMMARY_PREFIX) ? "mechanical" : "clean");
     const inserted = store.insertSummary({
       kind: s.kind,
       text: s.text,
@@ -268,6 +285,7 @@ export function importTranscript(store: LcmStore, rows: readonly ExportRow[]): I
       depth: s.depth,
       firstEntryId: s.firstEntryId,
       lastEntryId: s.lastEntryId,
+      quality,
       messageIds: s.messageEntryIds.flatMap((e) => {
         const id = idByEntry.get(e);
         return id === undefined ? [] : [id];

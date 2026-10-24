@@ -248,26 +248,11 @@ export function applyContextPolicy(
   // The projection is the frontier itself. A node that does not fit loses
   // text, never its id: evicting the oldest node dropped every pointer it
   // carried, and the model cannot name what it cannot see.
-  const applied: AppliedSummary[] = frontier.map(
-    ({ id, depth, text, thoroughText, firstEntryId, lastEntryId }) => ({
-      id,
-      depth,
-      text: deps.redact(text),
-      ...(thoroughText === undefined ? {} : { thoroughText: deps.redact(thoroughText) }),
-      firstEntryId,
-      lastEntryId,
-      tier: "rich",
-    }),
+  const { applied, renderedTokens } = renderableFrontier(
+    frontier,
+    input.summaryTokens,
+    deps.redact,
   );
-  let renderedTokens = estimateTokens(renderSummaries(applied));
-  for (const node of applied) {
-    if (renderedTokens <= input.summaryTokens) break;
-    for (const tier of degradationLadder(node)) {
-      node.tier = tier;
-      renderedTokens = estimateTokens(renderSummaries(applied));
-      if (renderedTokens <= input.summaryTokens) break;
-    }
-  }
   if (renderedTokens > input.summaryTokens) {
     base.metrics.push({
       event: "lcm",
@@ -311,6 +296,38 @@ export function applyContextPolicy(
 
 function pinnedProjection(state: CommitState, rawMessages: readonly AssemblyMsg[]): AssemblyMsg[] {
   return [state.synthetic, ...rawMessages.slice(state.cutCount)];
+}
+
+/** The frontier as the projection renders it: every node redacted on its way to
+ * a model, and the degradation ladder walked only until the render fits the
+ * summary budget. The blocking compaction hook calls this too, so the text it
+ * hands the host is the text the projection would have sent. */
+export function renderableFrontier(
+  frontier: readonly SummaryNode[],
+  summaryTokens: number,
+  redact: (text: string) => string,
+): { applied: AppliedSummary[]; renderedTokens: number } {
+  const applied: AppliedSummary[] = frontier.map(
+    ({ id, depth, text, thoroughText, firstEntryId, lastEntryId }) => ({
+      id,
+      depth,
+      text: redact(text),
+      ...(thoroughText === undefined ? {} : { thoroughText: redact(thoroughText) }),
+      firstEntryId,
+      lastEntryId,
+      tier: "rich",
+    }),
+  );
+  let renderedTokens = estimateTokens(renderSummaries(applied));
+  for (const node of applied) {
+    if (renderedTokens <= summaryTokens) break;
+    for (const tier of degradationLadder(node)) {
+      node.tier = tier;
+      renderedTokens = estimateTokens(renderSummaries(applied));
+      if (renderedTokens <= summaryTokens) break;
+    }
+  }
+  return { applied, renderedTokens };
 }
 
 function degradationLadder(node: AppliedSummary): Array<"terse" | "stub"> {

@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
-import { lcmHomePath } from "lossless-core";
+import { HEAL_SOURCE_MAX_TOKENS, lcmHomePath } from "lossless-core";
 import type { ZoneThresholds } from "lossless-core";
 
 export interface LcmConfig {
@@ -22,6 +22,9 @@ export interface LcmConfig {
   zones?: Record<string, ZoneThresholds>;
   summaryTokens?: number;
   leafChunkTokens?: number;
+  /** Estimated tokens one heal node may read as source. Unset derives it from
+   * summaryTokens; this is the explicit override for unusually large sources. */
+  healSourceTokens?: number;
   keepRecentTokens?: number;
   maxAsyncChunks?: number;
   redactSecrets?: boolean;
@@ -30,7 +33,12 @@ export interface LcmConfig {
   externalizeFiles?: boolean;
   summarizerTokensPerCall?: number;
   summarizerTokensPerPass?: number;
+  summarizerTokensPerHeal?: number;
 }
+
+/** Tokens one bounded repair run may spend across all of its calls. It is a
+ * separate budget because a heal re-derives nodes a pass already paid for. */
+export const DEFAULT_SUMMARIZER_TOKENS_PER_HEAL = 120_000;
 
 export const DEFAULT_CONFIG: LcmConfig = {
   summarizer: "auto",
@@ -46,6 +54,7 @@ export const DEFAULT_CONFIG: LcmConfig = {
   externalizeFiles: true,
   summarizerTokensPerCall: 60_000,
   summarizerTokensPerPass: 250_000,
+  summarizerTokensPerHeal: DEFAULT_SUMMARIZER_TOKENS_PER_HEAL,
 };
 
 export interface PassConditions {
@@ -114,11 +123,13 @@ const NUMBER_KEYS = [
   "recutAtRatio",
   "summaryTokens",
   "leafChunkTokens",
+  "healSourceTokens",
   "keepRecentTokens",
   "maxAsyncChunks",
   "largeFileChars",
   "summarizerTokensPerCall",
   "summarizerTokensPerPass",
+  "summarizerTokensPerHeal",
 ] as const satisfies readonly (keyof LcmConfig)[];
 const BOOLEAN_KEYS = [
   "redactSecrets",
@@ -141,6 +152,7 @@ const NUMBER_RANGES = {
   recutAtRatio: (v: number) => v > 0 && v <= 1,
   summaryTokens: (v: number) => v >= 1,
   leafChunkTokens: (v: number) => v >= 1,
+  healSourceTokens: (v: number) => Number.isInteger(v) && v >= 1 && v <= HEAL_SOURCE_MAX_TOKENS,
   keepRecentTokens: (v: number) => v >= 0,
   maxAsyncChunks: (v: number) => v >= 1,
   // Below this a described body is smaller than most reads, and the handle
@@ -148,6 +160,7 @@ const NUMBER_RANGES = {
   largeFileChars: (v: number) => v >= 1000,
   summarizerTokensPerCall: (v: number) => v >= 1,
   summarizerTokensPerPass: (v: number) => v >= 1,
+  summarizerTokensPerHeal: (v: number) => Number.isInteger(v) && v >= 1,
 } satisfies Record<(typeof NUMBER_KEYS)[number], (v: number) => boolean>;
 const KNOWN_KEYS: ReadonlySet<string> = new Set<keyof LcmConfig>([
   ...NUMBER_KEYS,

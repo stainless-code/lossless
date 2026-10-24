@@ -1,0 +1,65 @@
+The adapter writes under `sidecarDir`. The exception is an export you name yourself.
+
+## Store
+
+<FileTree>
+
+- sidecarDir/
+  - ses_0123456789abcdef.sqlite
+  - ses_0123456789abcdef.sqlite-wal
+  - ses_0123456789abcdef.sqlite-shm
+  - ses_0123456789abcdef.sqlite.backup-2026-10-22T12-00-00
+  - metrics.jsonl
+  - metrics.jsonl.2026-10-22T12-00-00
+  - lossless-export-2026-10-22T12-00-00.jsonl
+  - lossless-export-gc-2026-10-22T12-00-00.jsonl
+
+</FileTree>
+
+The sidecar holds the verbatim mirror, the DAG, and the checkpoint marker. The `.sqlite-wal` and `.sqlite-shm` files belong to it. The directory is created 0700; the database, WAL, and shared-memory files are 0600.
+
+The host's session record remains the source of truth for the conversation. The adapter does not backfill a deleted sidecar, so deleting one forgets that session's recall. `/lossless-export` keeps a portable copy; `/lossless-backup` keeps a byte copy.
+
+## Metrics
+
+`metrics.jsonl` holds one row per event, tagged with the session. Groups:
+
+| Group       | Kinds                                    |
+| ----------- | ---------------------------------------- |
+| Projection  | `projection`                             |
+| Checkpoint  | `compaction-checkpoint`                  |
+| Pass        | `pass`, `summary-*`, `compaction-complete`, `compaction-abandoned`, `summarizer-*` |
+| Heal        | `heal-start`, `heal-node`, `heal-complete` |
+| Recall      | `recall`                                 |
+| Reader      | `reader`                                 |
+| Ingest      | `ingest`                                 |
+| Lifecycle   | `migrate`, `gc`                          |
+
+A pass sends its engine and summarizer rows through the same sidecar sink, so `summary-stored`, `summarizer-usage`, and cap rows appear beside the adapter's own pass row. `/lossless-report` is a view over these rows. The log rotates at 5 MB, keeps three generations, and is created 0600.
+
+## Exports, backups, and gc
+
+| Path                                                | Written by            | Contents                                              |
+| --------------------------------------------------- | --------------------- | ----------------------------------------------------- |
+| `<sidecar>.backup-<timestamp>` beside the sidecar   | `/lossless-backup`    | A byte copy of the sidecar. Never deleted by LCM.     |
+| `lossless-export-<timestamp>.jsonl`                 | `/lossless-export`    | Every message and summary, verbatim, mode 0600.       |
+| `lossless-export-gc-<timestamp>.jsonl`              | `/lossless-gc --apply`| The transcripts of every sidecar it is about to delete. |
+
+`/lossless-import <path>` restores missing rows and skips present ones. It is refused while a pass is running, or into a store that already holds foreign messages.
+
+## Diagnostics
+
+```text
+/lossless-diagnose                     # rendered, not written
+/lossless-diagnose --save <path>       # exact bytes, mode 0600
+```
+
+The block carries versions, store facts, the effective options, and this session's metrics. [Commands](/reference/opencode/command#diagnose) lists the flags.
+
+## Footprint
+
+One sidecar per session, so the directory grows with use. `/lossless-gc` removes the ones older than its cutoff or named by `--session`; a deleted sidecar is not rebuilt from the host record.
+
+## Config
+
+The plugin options live in `opencode.json`, not under `sidecarDir`. [Config](/reference/opencode/config) lists every key.

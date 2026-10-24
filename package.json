@@ -15,7 +15,10 @@
     "test": "vp test",
     "test:coverage": "vp test --coverage --coverage.reporter=lcov",
     "coverage:codemap": "codemap ingest-coverage coverage/lcov.info && node -e \"fs.rmSync('coverage',{recursive:true,force:true})\"",
-    "pack": "vp run --filter ./packages/core prepack && vp run --filter ./packages/pi prepack",
+    "opencode:check": "bun scripts/opencode-live.ts",
+    "opencode:smoke": "bun scripts/opencode-smoke.ts",
+    "opencode:compact": "bun scripts/opencode-compact.ts",
+    "pack": "vp run --filter ./packages/core prepack && vp run --filter ./packages/pi prepack && vp run --filter ./packages/opencode prepack",
     "changeset": "changeset",
     "version": "changeset version && vp fmt packages/*/CHANGELOG.md",
     "release": "changeset publish",
@@ -23,26 +26,32 @@
     "eval": "bun scripts/eval-long-context.ts"
   },
   "devDependencies": {
-    "@changesets/cli": "^3.0.2",
-    "@types/node": "^22",
+    "@changesets/cli": "^3.0.3",
+    "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "catalog:",
-    "typescript": "^5.7.0",
+    "typescript": "^7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"
   },
   "overrides": {
+    "@earendil-works/pi-coding-agent": {
+      "undici": "^8.12.2"
+    },
+    "@vercel/cli-config": {
+      "zod": "^4.6.6"
+    },
     "vite": "catalog:",
     "vitest": "catalog:"
   },
   "engines": {
     "node": ">=22.19.0"
   },
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.4",
   "catalog": {
-    "@vitest/coverage-v8": "5.0.1",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0-rc.0",
-    "vitest": "5.0.1",
-    "vite-plus": "1.0.0-rc.0"
+    "@vitest/coverage-v8": "5.0.5",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
+    "vitest": "5.0.5",
+    "vite-plus": "1.4.0"
   }
 }

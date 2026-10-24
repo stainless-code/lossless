@@ -28,13 +28,20 @@ import { effectiveThresholds, mergeZone, type CommitState } from "lossless-core"
 import { describeSummarizerChain, resolveModels } from "lossless-core";
 import { fmtTokens } from "lossless-core";
 import { buildDiagnoseBundle, readSessionFormat } from "lossless-core";
+import { makeLlm, runHeal } from "lossless-core";
 import { makeRedact } from "lossless-core";
 import { storeGeneration } from "lossless-core";
 import { sessionFactLines } from "lossless-core";
+import type { HealOutcome, LlmComplete } from "lossless-core";
 
 import { piHostLabel, piModelHost, piModelKey, pluginLabel } from "../host.ts";
 import { LcmCockpit, type CockpitDeps } from "./cockpit.ts";
-import { DEFAULT_CONFIG, type LcmConfig, lcmConfigPath } from "./config-io.ts";
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_SUMMARIZER_TOKENS_PER_HEAL,
+  type LcmConfig,
+  lcmConfigPath,
+} from "./config-io.ts";
 
 export interface LcmCommandDeps {
   getStore(): LcmStore | undefined;
@@ -46,6 +53,9 @@ export interface LcmCommandDeps {
   getCommitState: () => CommitState | null;
   getDbPath(sessionFile: string | undefined): string;
   keepRecentTokens(): number;
+  /** The calibrated heal target and source window. The command itself has no
+   * session calibration, so Pi resolves both from the same sample. */
+  healBudgets?: () => { targetTokens: number; sourceTokens?: number; callBudgetTokens: number };
 }
 
 export const LCM_SUBCOMMANDS = [
@@ -59,6 +69,7 @@ export const LCM_SUBCOMMANDS = [
   "diagnose",
   "gc",
   "migrate",
+  "heal",
 ] as const;
 
 type SaveFlag = { kind: "path"; path: string } | { kind: "absent" } | { kind: "missing-path" };
@@ -78,10 +89,55 @@ function parseSaveFlag(flags: readonly string[]): SaveFlag {
   return { kind: "absent" };
 }
 
+type MaxNodesFlag = { kind: "absent" } | { kind: "value"; value: number } | { kind: "invalid" };
+
+function parseMaxNodesFlag(flags: readonly string[]): MaxNodesFlag {
+  for (let i = 0; i < flags.length; i++) {
+    const flag = flags[i];
+    if (flag === "--max-nodes") {
+      const next = flags[i + 1];
+      if (next === undefined || next.startsWith("--")) return { kind: "invalid" };
+      return maxNodesValue(next);
+    }
+    if (flag?.startsWith("--max-nodes=")) {
+      return maxNodesValue(flag.slice("--max-nodes=".length));
+    }
+  }
+  return { kind: "absent" };
+}
+
+function maxNodesValue(raw: string): MaxNodesFlag {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? { kind: "value", value } : { kind: "invalid" };
+}
+
+/** A dry run reads the plan and makes no provider call. The type still carries
+ * the sink, so `runHeal` records its start and complete rows. */
+const healDryRunLlm: LlmComplete = Object.assign(
+  async (): Promise<string> => {
+    throw new Error("lcm: a heal dry run never calls the model");
+  },
+  { metrics: appendMetric },
+);
+
+function healNotice(outcome: HealOutcome): string {
+  if (outcome.dryRun) {
+    return outcome.counts.candidates === 0
+      ? "LCM heal dry-run: no truncated summaries or stale ancestors; nothing to repair."
+      : `LCM heal dry-run: ${outcome.counts.candidates} candidate(s), ${outcome.counts.tainted} tainted, ${outcome.sourceTokens} source tokens; run \`/lcm heal --apply\` to repair.`;
+  }
+  const stop = outcome.stop === "done" ? "" : ` (stopped: ${outcome.stop})`;
+  const changed = outcome.counts.changed === 0 ? "" : `, changed ${outcome.counts.changed}`;
+  const blockedSource =
+    outcome.counts.blockedSource === 0 ? "" : ` (${outcome.counts.blockedSource} source)`;
+  return `LCM heal: repaired ${outcome.counts.repaired} clean, improved ${outcome.counts.improved}, failed ${outcome.counts.failed}, blocked ${outcome.counts.blocked}${blockedSource}${changed}, remaining ${outcome.counts.notAttempted}; ${outcome.calls} model call(s)${stop}.`;
+}
+
 export function registerLcmCommand(
   pi: Pick<ExtensionAPI, "registerCommand">,
   deps: LcmCommandDeps,
 ): void {
+  const healInFlight = new Set<string>();
   pi.registerCommand("lcm", {
     description: `LCM ${LCM_SUBCOMMANDS.join(" | ")}`,
     handler: async (args, ctx) => {
@@ -134,8 +190,10 @@ export function registerLcmCommand(
       const store = deps.getStore();
       if (!store) {
         ctx.ui.notify(
-          "LCM: no store for this session yet: nothing has been ingested, and an ephemeral session never writes one.",
-          "info",
+          sub === "heal"
+            ? "LCM heal: no store for this session yet: nothing has been ingested, and an ephemeral session never writes one."
+            : "LCM: no store for this session yet: nothing has been ingested, and an ephemeral session never writes one.",
+          sub === "heal" ? "warning" : "info",
         );
         return;
       }
@@ -438,6 +496,97 @@ export function registerLcmCommand(
           `LCM migrate: upgraded ${migrated} of ${stale.length} store(s) to generation ${SCHEMA_VERSION}${failed === 0 ? "" : `, ${failed} failed`}. Cross-session search now reads them.`,
           "info",
         );
+        return;
+      }
+
+      if (sub === "heal") {
+        const flags = (args ?? "").trim().split(/\s+/).slice(1);
+        const apply = flags.includes("--apply");
+        const maxNodes = parseMaxNodesFlag(flags);
+        if (maxNodes.kind === "invalid") {
+          ctx.ui.notify(
+            "LCM heal: --max-nodes takes a positive whole number, e.g. `/lcm heal --apply --max-nodes 8`.",
+            "warning",
+          );
+          return;
+        }
+        const span = store.entrySpan();
+        if (!span) {
+          ctx.ui.notify("LCM heal: this session has no stored entries yet.", "info");
+          return;
+        }
+        const session = basename(db);
+        if (store.hasLiveRun()) {
+          ctx.ui.notify(
+            "LCM heal: a compaction pass is in flight; retry when it finishes.",
+            "warning",
+          );
+          return;
+        }
+        if (healInFlight.has(session)) {
+          ctx.ui.notify("LCM heal: a repair is already running for this session.", "warning");
+          return;
+        }
+        const healTokens = config.summarizerTokensPerHeal ?? DEFAULT_SUMMARIZER_TOKENS_PER_HEAL;
+        healInFlight.add(session);
+        const budgets = deps.healBudgets?.() ?? {
+          targetTokens: config.summaryTokens ?? 1500,
+          callBudgetTokens: config.summarizerTokensPerCall ?? 60_000,
+        };
+        const configuredSource = budgets.sourceTokens ?? config.healSourceTokens;
+        const redact = makeRedact(deps.getConfig);
+        const maxNodeInput = maxNodes.kind === "value" ? { maxNodes: maxNodes.value } : {};
+        const budgetInput = {
+          maxTokens: healTokens,
+          targetTokens: budgets.targetTokens,
+          callBudgetTokens: budgets.callBudgetTokens,
+          ...(configuredSource === undefined ? {} : { sourceTokens: configuredSource }),
+        };
+        try {
+          if (apply) {
+            const llm = makeLlm(
+              piModelHost(ctx),
+              {
+                ...config,
+                summarizerTokensPerPass:
+                  config.summarizerTokensPerHeal ?? DEFAULT_SUMMARIZER_TOKENS_PER_HEAL,
+              },
+              {
+                session,
+                stage: "heal",
+                span: { firstEntryId: span.first, lastEntryId: span.last },
+                sink: appendMetric,
+              },
+            );
+            if (!llm) {
+              ctx.ui.notify(
+                "LCM heal: no summarizer model resolves for this session; nothing was repaired.",
+                "warning",
+              );
+              return;
+            }
+            const outcome = await runHeal(
+              store,
+              { session, redact, ...budgetInput, ...maxNodeInput },
+              llm,
+            );
+            ctx.ui.notify(healNotice(outcome), outcome.failed.length > 0 ? "warning" : "info");
+            return;
+          }
+          const outcome = await runHeal(
+            store,
+            { session, redact, dryRun: true, ...budgetInput, ...maxNodeInput },
+            healDryRunLlm,
+          );
+          ctx.ui.notify(healNotice(outcome), "info");
+        } catch (error) {
+          ctx.ui.notify(
+            `LCM heal failed: ${error instanceof Error ? error.message : String(error)}`,
+            "warning",
+          );
+        } finally {
+          healInFlight.delete(session);
+        }
         return;
       }
 

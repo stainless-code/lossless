@@ -3,29 +3,22 @@ import { contentHref } from "blume/components/content/base-href.ts";
 import Icon from "blume/components/Icon.astro";
 import CopyCommand from "./CopyCommand.astro";
 import SectionHeader from "./SectionHeader.astro";
+import { OPENCODE_ICON } from "../../harness-icons.ts";
 
-const packages = [
+const shells = [
 	{
 		name: "pi-lossless",
+		icon: "/logos/pi-color.svg",
 		title: "The Pi extension",
 		body: "The recall tools, the cockpit and the commands, with the engine inlined so the installed package stays a single artifact.",
-		bullets: [
-			"lcm_grep · lcm_describe · lcm_expand_query",
-			"Cockpit and slash commands",
-			"Escalated compaction at the limit",
-		],
 		command: "pi install npm:pi-lossless",
 	},
 	{
-		name: "lossless-core",
-		title: "The engine",
-		body: "Ingest, compaction and retrieval behind a two-port host contract. A harness implements ModelHost and Reader, and names no agent SDK.",
-		bullets: [
-			"Verbatim ingest with FTS5",
-			"Summary pointers and a DAG frontier",
-			"Escalated summaries that converge",
-		],
-		command: "npm install lossless-core",
+		name: "opencode-lossless",
+		icon: OPENCODE_ICON,
+		title: "The OpenCode plugin",
+		body: "The same engine as a plugin: recall tools, the swap point, and a per-session sidecar beside the session file.",
+		command: "opencode plugin add opencode-lossless",
 	},
 ];
 ---
@@ -34,42 +27,90 @@ const packages = [
   <div class="mx-auto max-w-[1160px]">
     <SectionHeader
       eyebrow="INSTALL"
-      title="One extension, or one engine."
-      sub="The extension is what a Pi user installs. The engine is what another harness drives, behind two ports and no agent SDK."
+      title="One engine, a shell for every host."
+      sub="lossless-core is the engine. A shell puts it inside one host: same engine, same two ports, a different installer."
     />
 
-    <div class="mt-12 grid gap-5 md:grid-cols-2">
-      {
-        packages.map((pkg) => (
-          <div class="flex flex-col rounded-2xl border border-border bg-[var(--landing-surface)] p-6">
-            <p class="font-mono text-accent text-sm">{pkg.name}</p>
-            <h3 class="mt-3 font-display font-semibold text-foreground text-2xl tracking-tight">
-              {pkg.title}
+    <div class="mt-12 flex flex-col gap-5">
+      <div class="flex flex-col gap-[18px] rounded-[14px] border border-border bg-[var(--landing-surface)] p-6">
+        <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div class="flex flex-col gap-1.5">
+            <p class="font-mono text-accent text-sm">lossless-core</p>
+            <h3 class="font-display font-semibold text-2xl text-foreground tracking-tight">
+              The engine
             </h3>
-            <p class="mt-4 text-muted-foreground text-sm leading-relaxed">
-              {pkg.body}
-            </p>
-            <ul class="mt-4 flex flex-col gap-2">
-              {pkg.bullets.map((bullet) => (
-                <li class="flex items-center gap-2.5 text-muted-foreground text-sm">
-                  <Icon class="shrink-0 text-accent" name="check" size={14} />
-                  {bullet}
-                </li>
-              ))}
-            </ul>
-            <div class="flex-1"></div>
-            <div class="mt-6 [&>[data-landing-command]]:w-full">
-              <CopyCommand command={pkg.command} tone="muted" />
-            </div>
           </div>
-        ))
-      }
+          <div class="w-full md:w-[340px] [&>[data-landing-command]]:w-full">
+            <CopyCommand command="npm install lossless-core" size="compact" tone="muted" />
+          </div>
+        </div>
+
+        <p class="text-muted-foreground text-sm leading-relaxed">
+          Ingest, compaction and retrieval behind a two-port host contract. One
+          engine runs in Pi, OpenCode v2, or the next host. Each install is one
+          package.
+        </p>
+
+        <ul class="flex flex-wrap gap-x-5 gap-y-2">
+          {
+            [
+              "Verbatim ingest with FTS5",
+              "Summary pointers and a DAG frontier",
+              "No runtime dependencies",
+            ].map((bullet) => (
+              <li class="flex items-center gap-2 text-[13px] text-muted-foreground">
+                <Icon class="shrink-0 text-accent" name="check" size={13} />
+                {bullet}
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+
+      <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        {
+          shells.map((shell) => (
+            <div class="flex min-h-[240px] flex-col gap-3 rounded-[14px] border border-border bg-[var(--landing-surface)] p-5">
+              <div class="flex items-center gap-2">
+                <Icon name={shell.icon} size={13} />
+                <p class="font-mono text-[13.5px] text-accent">{shell.name}</p>
+              </div>
+              <h3 class="font-display font-semibold text-[17px] text-foreground tracking-tight">
+                {shell.title}
+              </h3>
+              <p class="text-[13px] text-muted-foreground leading-relaxed">{shell.body}</p>
+              <div class="mt-auto [&>[data-landing-command]]:w-full">
+                <CopyCommand command={shell.command} size="compact" tone="muted" />
+              </div>
+            </div>
+          ))
+        }
+
+        <div class="relative flex h-[240px] flex-col justify-center gap-2.5 overflow-hidden rounded-[14px] border border-border bg-background p-5 md:col-span-2 xl:col-span-1">
+          <div aria-hidden="true" class="landing-hatch absolute -inset-5"></div>
+          <p class="relative font-mono text-[13.5px] text-[var(--landing-faint)]">
+            your-host-lossless
+          </p>
+          <h3 class="relative font-display font-semibold text-[17px] text-muted-foreground tracking-tight">
+            The next shell
+          </h3>
+          <p class="relative text-[13px] text-[var(--landing-faint)] leading-[20px]">
+            One shell per host. Same engine, same two ports.
+          </p>
+          <div class="relative flex items-center gap-2">
+            <span class="font-mono text-[9px] text-[var(--landing-faint)] tracking-[0.08em]">
+              NEXT
+            </span>
+            <span class="text-[12px] text-[var(--landing-faint)]">no installer yet</span>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="mt-8 text-center">
       <a
         class="inline-flex items-center gap-1.5 font-medium text-accent transition-opacity hover:opacity-80"
-        href={contentHref("/guides/getting-started")}
+        href={contentHref("/guides/pi/getting-started")}
       >
         Getting started
         <Icon name="arrow-right" size={16} />

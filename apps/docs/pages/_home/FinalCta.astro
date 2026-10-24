@@ -49,13 +49,13 @@ import CopyCommand from "./CopyCommand.astro";
       >
         Install it, then leave it alone.
       </h2>
-      <p class="mx-auto max-w-[580px] text-center text-lg text-white/85 sm:text-xl sm:leading-[31px]">
-        Every session after that one is logged, searchable, and rebuildable from
-        the session file.
+      <p class="mx-auto max-w-[640px] text-center text-lg text-white/85 sm:text-xl sm:leading-[31px]">
+        Every new session is logged, searchable, and readable in full.
       </p>
       <div class="flex flex-col items-center gap-4 pt-2">
         <CopyCommand
           command="pi install npm:pi-lossless"
+          hostCommand
           tone="violet"
         />
         <div class="flex flex-col items-center gap-4 sm:flex-row">
@@ -67,7 +67,8 @@ import CopyCommand from "./CopyCommand.astro";
           </a>
           <a
             class="inline-flex h-11 items-center gap-2 rounded-[10px] border border-white bg-white px-5 font-medium text-[#6d28d9] text-base transition-opacity hover:opacity-90"
-            href={contentHref("/guides/getting-started")}
+            data-host-start
+            href={contentHref("/guides/pi/getting-started")}
           >
             Get started
             <Icon name="arrow-right" size={16} />

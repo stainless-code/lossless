@@ -838,8 +838,8 @@ test("adapter: session_before_compact summarizes only the new span and returns t
   )) as { compaction?: { summary?: string } } | undefined;
 
   assert.equal(summarized.length, 1);
-  assert.ok(summarized[0]!.includes("second question"), summarized[0]);
-  assert.ok(!summarized[0]!.includes("long ago"), summarized[0]);
+  assert.ok(summarized[0]!.includes("second question"), summarized[0]!);
+  assert.ok(!summarized[0]!.includes("long ago"), summarized[0]!);
   const reader = new LcmStore(lcmDbPath(sessionFile));
   const nodes = reader.allSummaries();
   assert.deepEqual(

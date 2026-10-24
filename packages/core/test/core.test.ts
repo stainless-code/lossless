@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -539,6 +547,30 @@ test("store: db file is created with owner-only permissions", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("store: db, wal, and shm files are owner-only while the store is open", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lcm-perms-"));
+  const dbPath = join(dir, "x.db");
+  const s = new LcmStore(dbPath);
+  s.insertMessage({ entryId: "a", role: "user", text: "hi", tokens: 1, timestamp: 0 });
+  for (const path of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+    assert.ok(existsSync(path), `${path} exists`);
+    assert.equal(statSync(path).mode & 0o777, 0o600, `${path} is owner-only`);
+  }
+  s.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("store: an existing world-readable db is repaired to owner-only", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lcm-perms-"));
+  const dbPath = join(dir, "x.db");
+  writeFileSync(dbPath, "");
+  chmodSync(dbPath, 0o644);
+  const s = new LcmStore(dbPath);
+  assert.equal(statSync(dbPath).mode & 0o777, 0o600);
+  s.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("store: duplicate span insert returns the existing id (no duplicate rows)", () => {
   const s = new LcmStore(":memory:");
   const first = s.insertSummary({
@@ -569,6 +601,35 @@ test("store: duplicate span insert returns the existing id (no duplicate rows)",
   });
   assert.equal(s.stats().summaries, 1);
   assert.equal(s.getSummary(first.id)?.text, "one");
+  s.close();
+});
+
+test("store: entry counts by prefix separate adapter row families", () => {
+  const s = new LcmStore(":memory:");
+  s.insertMessage({
+    entryId: "ses_1:summary:evt_1",
+    role: "custom",
+    text: "one",
+    tokens: 1,
+    timestamp: 0,
+  });
+  s.insertMessage({
+    entryId: "ses_1:summary:evt_2",
+    role: "custom",
+    text: "two",
+    tokens: 1,
+    timestamp: 0,
+  });
+  s.insertMessage({
+    entryId: "ses_1:prompt:msg_1",
+    role: "user",
+    text: "hi",
+    tokens: 1,
+    timestamp: 0,
+  });
+  assert.equal(s.entryCountWithPrefix("ses_1:summary:"), 2);
+  assert.equal(s.entryCountWithPrefix("ses_1:prompt:"), 1);
+  assert.equal(s.entryCountWithPrefix("ses_2:summary:"), 0);
   s.close();
 });
 

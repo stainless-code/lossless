@@ -7,15 +7,15 @@ search:
   keywords: [DAG, projection, summary, regimes]
 related:
   - /concepts/compaction-zones
-  - /guides/configuration
+  - /guides/pi/configuration
   - /concepts/limits
 ---
 
-A session's context is a projection over a store. LCM changes the projection, never the store, and never Pi's session file.
+A session's context is a projection over a store. LCM changes the projection, never the store, and never the host's session file.
 
 The [Lossless Context Management paper](https://papers.voltropy.com/LCM), by Clint Ehrlich and Theodore Blackman, specifies the mechanisms below, and the section numbers beside them point into it.
 
-`lossless-core` is the engine that does this, and it names no agent SDK. [The engine and its harness](/concepts/engine-and-harness) says where the Pi-specific code lives.
+`lossless-core` is the engine that does this, and it imports no agent SDK. [The engine and its adapters](/concepts/engine-and-harness) says where the harness-specific code lives.
 
 ## Three regimes, chosen by occupancy
 

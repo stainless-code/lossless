@@ -12,6 +12,9 @@ export interface Usage {
   cacheWrite1h?: number;
   /** A subset of `output`, reported by hosts that expose the breakdown. */
   reasoning?: number;
+  /** The host derived the counters from characters because the provider
+   * reported none. A cost beside it is a bounded estimate, not a bill. */
+  estimated?: true;
   totalTokens: number;
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
 }

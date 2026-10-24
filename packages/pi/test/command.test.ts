@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { LcmStore } from "lossless-core";
+import { LcmStore, ingestEntries } from "lossless-core";
 import { openSessionStore } from "lossless-core";
 import { EXPORT_VERSION } from "lossless-core";
 import { appendMetric } from "lossless-core";
@@ -75,6 +75,21 @@ function makeStoreWithMessage(path: string, entryId: string, text: string): LcmS
   return s;
 }
 
+function seedTruncatedSummary(store: LcmStore, entryId: string, text: string): void {
+  ingestEntries(store, [{ entryId, role: "user", text, timestamp: 1 }]);
+  const message = store.messageByEntryId(entryId);
+  assert.ok(message, `missing seeded message ${entryId}`);
+  store.insertSummary({
+    kind: "leaf",
+    text: "[lcm:truncated]\nmechanical",
+    tokens: 5,
+    depth: 0,
+    firstEntryId: entryId,
+    lastEntryId: entryId,
+    messageIds: [message.id],
+  });
+}
+
 function makeDeps(liveStore: LcmStore, lcmDir: string, config: LcmConfig = {}): LcmCommandDeps {
   return {
     getStore: () => liveStore,
@@ -93,6 +108,7 @@ interface CtxOptions {
   model?: unknown;
   usage?: { tokens: number; contextWindow: number };
   find?: (provider: string, id: string) => unknown;
+  complete?: (model: unknown, request: unknown, options?: unknown) => Promise<unknown>;
   levels?: string[];
   capture?: { component?: { handleInput(data: string): void } };
 }
@@ -100,12 +116,20 @@ interface CtxOptions {
 function makeCtx(sessionFile: string, notifications: string[], opts?: CtxOptions) {
   return {
     mode: "tui",
-    sessionManager: { getSessionFile: () => sessionFile },
+    sessionManager: {
+      getSessionFile: () => sessionFile,
+      getSessionId: () => "pi-command-test",
+    },
     getContextUsage: () => opts?.usage,
     model: opts?.model,
     modelRegistry: {
       find: opts?.find ?? (() => undefined),
       getAvailable: () => [],
+      complete:
+        opts?.complete ??
+        (async () => {
+          throw new Error("unexpected model call");
+        }),
     },
     ui: {
       notify: (msg: string, level?: string) => {
@@ -718,6 +742,69 @@ test("command: diagnose --save names what it needs, and a path it cannot write i
     assert.ok(!notifications[0]!.startsWith("LCM diagnose bundle"));
     liveStore.close();
   } finally {
+    env.restore();
+  }
+});
+
+test("command: heal dry-runs the truncated candidates and makes no model call", async () => {
+  let modelCalls = 0;
+  const { env, liveStore, handler, notifications } = bootstrap({
+    model: { provider: "test", id: "test-model" },
+    complete: async () => {
+      modelCalls++;
+      throw new Error("a dry run must not call the model");
+    },
+  });
+  try {
+    seedTruncatedSummary(liveStore, "e0", `SOURCE-0 ${"z".repeat(700)}`);
+
+    await handler("heal");
+
+    assert.equal(modelCalls, 0);
+    assert.equal(
+      notifications.at(-1),
+      "LCM heal dry-run: 1 candidate(s), 1 tainted, 12000 source tokens; run `/lcm heal --apply` to repair.",
+    );
+    assert.equal(liveStore.allSummaries()[0]?.text, "[lcm:truncated]\nmechanical");
+  } finally {
+    liveStore.close();
+    env.restore();
+  }
+});
+
+test("command: heal --apply repairs a truncated node with the heal budget", async () => {
+  const calls: string[] = [];
+  const { env, liveStore, handler, notifications } = bootstrap({
+    config: { summarizerTokensPerPass: 1, summarizerTokensPerHeal: 50_000 },
+    model: { provider: "test", id: "test-model" },
+    complete: async () => {
+      calls.push("call");
+      return {
+        content: [{ type: "text", text: "healed leaf" }],
+        stopReason: "stop",
+        usage: {
+          input: 100,
+          output: 10,
+          cacheRead: 0,
+          cacheWrite: 0,
+          cost: { input: 0, output: 0, total: 0 },
+        },
+      };
+    },
+  });
+  try {
+    seedTruncatedSummary(liveStore, "e0", `SOURCE-0 ${"z".repeat(700)}`);
+
+    await handler("heal --apply --max-nodes 1");
+
+    assert.equal(calls.length, 1, notifications.join(" | "));
+    assert.equal(liveStore.allSummaries()[0]?.text, "healed leaf");
+    assert.equal(
+      notifications.at(-1),
+      "LCM heal: repaired 1 clean, improved 0, failed 0, blocked 0, remaining 0; 1 model call(s).",
+    );
+  } finally {
+    liveStore.close();
     env.restore();
   }
 });

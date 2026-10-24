@@ -31,7 +31,9 @@ type DiffState = { loading: boolean; diff?: GitDiff; error?: string };
 
 // Do. Only valid states exist.
 type DiffState =
-  { kind: "loading" } | { kind: "ready"; diff: GitDiff } | { kind: "error"; error: string };
+  | { kind: "loading" }
+  | { kind: "ready"; diff: GitDiff }
+  | { kind: "error"; error: string };
 ```
 
 Pick one discriminant name (`kind`, `type`, `tag`) and stick to it.

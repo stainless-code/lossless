@@ -53,9 +53,15 @@ test("package: the engine depends on its schema library and nothing else", () =>
   for (const field of DEPENDENCY_FIELDS) {
     const named = Object.keys(manifest[field] ?? {});
     assert.deepEqual(
-      named.filter((name) => name.startsWith("@earendil-works/") || name === "pi-lossless"),
+      named.filter(
+        (name) =>
+          name.startsWith("@earendil-works/") ||
+          name === "pi-lossless" ||
+          name.startsWith("@opencode/") ||
+          name === "opencode-lossless",
+      ),
       [],
-      `${field} names the adapter or the Pi SDK`,
+      `${field} names an adapter or a host SDK`,
     );
   }
   assert.deepEqual(Object.keys(manifest.exports ?? {}), ["."]);
@@ -111,9 +117,17 @@ test("package: a shipped doc links only to what its tarball carries", () => {
 
 test("package: the entry re-exports every module, and only modules that exist", () => {
   const modules = entryModules();
-  const onDisk = readdirSync(SRC_DIR)
-    .filter((name) => name.endsWith(".ts") && name !== "index.ts")
-    .map((name) => name.slice(0, -".ts".length));
+  const onDisk: string[] = [];
+  const collect = (dir: string, base: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) collect(path, `${base}${entry.name}/`);
+      else if (entry.name.endsWith(".ts") && path !== join(SRC_DIR, "index.ts")) {
+        onDisk.push(`${base}${entry.name.slice(0, -".ts".length)}`);
+      }
+    }
+  };
+  collect(SRC_DIR, "");
   assert.deepEqual([...modules].sort(), [...onDisk].sort());
   assert.ok(modules.includes("host"), modules.join(", "));
 });
@@ -129,9 +143,16 @@ test("package: every name the engine's README promises is exported", () => {
   const types = imports
     .filter(([, kind]) => kind !== undefined)
     .flatMap(([, , names]) => namedIn(names!));
-  const source = readdirSync(SRC_DIR)
-    .map((name) => readFileSync(join(SRC_DIR, name), "utf8"))
-    .join("\n");
+  const sources: string[] = [];
+  const readAll = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) readAll(path);
+      else if (entry.name.endsWith(".ts")) sources.push(readFileSync(path, "utf8"));
+    }
+  };
+  readAll(SRC_DIR);
+  const source = sources.join("\n");
   for (const name of values) {
     assert.ok(name in engine, `the README imports ${name}, which the entry does not export`);
   }
