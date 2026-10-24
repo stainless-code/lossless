@@ -206,8 +206,7 @@ Ten commands by default; `/lossless-pass` is absent with `assembly: false`:
 to 30 days, never touches the current session, and exports each transcript
 before deleting it.
 
-There is no cockpit: the promise plugin API has no interactive TUI surface. A
-separate TUI plugin could add one.
+There is no cockpit in V2 scope: the host exposes a TUI extension point with slot mounts (including `session.panel`), so a separate TUI plugin could reuse the same command core later.
 
 ## How it works
 

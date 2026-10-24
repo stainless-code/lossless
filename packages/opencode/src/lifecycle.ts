@@ -1,8 +1,8 @@
 /** Store lifecycle commands for the OpenCode adapter: backup, export, import,
  * diagnose, migrate, heal, and a manual gc. They all read the same per-session
  * sidecars the recall tools use, so they are registered with or without
- * `assembly`. The cockpit is not here: the promise plugin API has no
- * interactive TUI surface. */
+ * `assembly`. The cockpit is not here in V2 scope: the host exposes a
+ * TUI extension point, so a separate TUI plugin could reuse the same command core later. */
 
 import {
   appendFileSync,
