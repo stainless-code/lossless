@@ -1,7 +1,3 @@
-// Stamp `library_version` in every packages/*/skills/**/SKILL.md frontmatter to
-// that package's own version. Wired into the `version` script so the changesets
-// "Version packages" PR carries the skill bump alongside the package bump —
-// keeps `intent stale` quiet without a manual review PR per release.
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 

@@ -1,6 +1,6 @@
 ---
 name: lossless-core
-description: Lossless Context Management engine (LcmStore, runCompaction, runRetrieval, runHeal) with ModelHost and Reader ports. Verbatim SQLite store with searchable pointers; the host supplies the model calls.
+description: "Use when wiring a host to lossless-core or working on the engine itself: implement ModelHost or Reader, run a compaction, retrieval, or heal pass, or read the store directly with LcmStore."
 license: MIT
 metadata:
   type: core
@@ -14,6 +14,10 @@ sources:
 
 # Lossless core
 
+Use it when implementing a host adapter or touching the engine. Do not use it
+for adapter commands: Pi subcommands live in the pi-lossless skill,
+`lossless-*` commands in the opencode-lossless skill.
+
 The engine behind `pi-lossless` and `opencode-lossless`: Lossless Context
 Management for a long-running agent. Every message is stored verbatim,
 aged context is replaced with searchable pointers, and the original text
@@ -22,8 +26,17 @@ stays readable by id, entry, or search.
 ## Minimal wiring
 
 ```ts
-import { LcmStore, runCompaction, runRetrieval } from "lossless-core";
+import { LcmStore, runCompaction, runHeal, runRetrieval } from "lossless-core";
 import type { ModelHost, Reader } from "lossless-core";
+```
+
+Call shapes (full signatures in `src/index.ts`, port contracts in `src/host.ts`):
+
+```ts
+const store = new LcmStore(dbPath);
+await runCompaction(store, input, llm); // input: CompactionInput (span, budgets)
+await runRetrieval(store, request, reader); // request: RetrievalRequest (scope, query)
+await runHeal(store, { dryRun: true }, llm); // HealInput: maxNodes, maxCalls, dryRun plan mode
 ```
 
 The engine has no agent SDK dependency. A host supplies two ports and the
@@ -64,14 +77,15 @@ fails any violation. Import the package root only.
 ## Common mistakes
 
 - **Importing engine source deep paths** (`lossless-core/dist/...` or
-  relative `src/...` files) instead of the package root.
+  relative `src/...` files) instead of the package root — the boundary test
+  fails deep imports; `import { LcmStore } from "lossless-core"` is the only entry.
 - **Expecting a host SDK in the bundle** - the host always supplies
-  `ModelHost` (and `Reader`, unless the host runs retrieval itself).
+  `ModelHost` (and `Reader`, unless the host runs retrieval itself, as the OpenCode adapter does); implement the port, never `npm install` an SDK.
 - **Assuming compaction deletes** - pointers replace text in context,
-  the verbatim rows stay queryable.
-- **Redacting at write time** - masking happens on the model path only.
+  the verbatim rows stay queryable via the recall views.
+- **Redacting at write time** - masking happens on the model path only; a stored row is never rewritten.
 
 ## API surface
 
-- `LcmStore`, `runCompaction`, `runRetrieval`, `runHeal`
-- `ModelHost`, `Reader`, `Reading` (types, `src/host.ts`)
+- `LcmStore`, `runCompaction`, `runRetrieval`, `runHeal` — exported from `src/index.ts`; pass and heal options live next to their runners.
+- `ModelHost`, `Reader`, `Reading` (types, `src/host.ts`) — the two port contracts; implement these, never a host SDK.

@@ -40,7 +40,6 @@ test("publish surface: the manifest names the built entry and its own docs", () 
   );
 });
 
-/** The specifiers one file names, in the three forms this repo writes them. */
 const SPECIFIER_PATTERNS = [
   /(?:^|\n)[}\s]*(?:import\s+(?:[^\n]*?\b)?from\s+|from\s+)["']([^"']+)["']/g,
   /(?:^|\n)[}\s]*import\s+["']([^"']+)["']/g,

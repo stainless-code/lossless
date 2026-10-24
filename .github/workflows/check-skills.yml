@@ -1,6 +1,3 @@
-# Validate skills on PR; post-release/manual: open Intent stale-coverage review PR.
-# intent-workflow-version: 3
-
 name: Check Skills
 
 on:

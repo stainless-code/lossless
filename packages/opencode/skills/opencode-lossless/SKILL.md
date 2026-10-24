@@ -1,6 +1,6 @@
 ---
 name: opencode-lossless
-description: Lossless Context Management for OpenCode v2 (opencode-lossless). Per-session SQLite sidecar mirrors every prompt, reply, and tool exchange; recall with lcm_* tools; DAG projection replaces aged history past the swap point.
+description: "Use when an OpenCode v2 session has opencode-lossless installed: read compacted history with lcm_grep, lcm_describe, lcm_expand, or lcm_expand_query; run /lossless-status, /lossless-report, /lossless-pass, /lossless-heal, /lossless-backup, /lossless-export, /lossless-import, /lossless-diagnose, /lossless-migrate, or /lossless-gc; or tune the swap point."
 license: MIT
 metadata:
   type: composition
@@ -56,9 +56,11 @@ Equivalent `opencode.json` entry:
 
 - `sidecarDir` holds one SQLite file per session (0700 dir, 0600 files; delete one to forget that session).
 - `assembly: true` (default) owns the context boundary: projection swaps aged history and compaction stores the DAG frontier.
-- Every other key (swap thresholds, summarizer chain and budgets, heal window, reader timeout) lives on the config reference with its default.
+- Every other key (swap thresholds, summarizer chain and budgets, heal window, reader timeout) lives on the config reference with its default: https://stainless-code.com/lossless/reference/opencode/config
 
 ## Verify
+
+From a checkout of this repo (these scripts only exist there, not in a consumer project):
 
 ```sh
 bun run opencode:check   # read-only: host version, config, bundle hash, sidecar counts
@@ -68,8 +70,8 @@ bun run opencode:compact # compaction gate, makes real model calls
 
 ## Common mistakes
 
-- **`assembly: false` drops `/lossless-pass` and `lcm_expand_query`** — compaction falls back to the host.
-- **`scope` equivalence** — `scope: "session"` (default) reads this session only; past sessions need explicit scope.
-- **Reader is session-scoped** — `lcm_expand_query` answers through a child session and returns findings only, never the raw transcript.
+- **`assembly: false` drops `/lossless-pass` and `lcm_expand_query`** — keep the default `true` unless the host must own compaction; with `false`, compaction falls back to the host.
+- **`scope` equivalence** — `scope: "session"` (default) reads this session only; pass `scope: "sessions"` or `"all_sessions"` to reach past sessions.
+- **Reader is session-scoped** — `lcm_expand_query` returns findings only through its child session, never the raw transcript; ask a question it can answer from the sources, not for a dump.
 - **Forgetting is file deletion** — remove that session's sidecar file; there is no delete tool.
-- **Expecting host compaction to summarize** — with assembly on, the checkpoint is the DAG frontier, not a prose summary.
+- **Expecting host compaction to summarize** — with assembly on, the checkpoint is the DAG frontier, not a prose summary; read it with `lcm_describe`, not by asking the host.
