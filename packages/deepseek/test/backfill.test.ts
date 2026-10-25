@@ -310,6 +310,19 @@ describe("pre-mount backfill", () => {
     expect(store.allMessages()).toHaveLength(session.deriveMessages().length);
   });
 
+  it("reaches newer events past a stored prefix larger than the visited ceiling", async () => {
+    const session = buildLongSession(600);
+    const events = session.snapshotEvents();
+    expect(events.length).toBeGreaterThan(BACKFILL_MAX_VISITED);
+    const store = new LcmStore(":memory:");
+    for (const event of events.slice(0, 2100)) mirrorEvent(session, event, store);
+    const before = store.allMessages().length;
+    expect(before).toBeGreaterThan(0);
+    const result = await backfillSession(session, store, fakeSource(events));
+    expect(store.allMessages()).toHaveLength(session.deriveMessages().length);
+    expect(result.capped).toBe(false);
+  });
+
   it("mirrors an attachment-less image block as a marker row", async () => {
     const session = Session.create(SessionId("backfill-missing-attachment"));
     session.append("turn/start", { turn: 1 });

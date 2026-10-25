@@ -549,7 +549,7 @@ describe("lcm mutating verbs", () => {
     const bothDry = await invoke(ctx, deps, liveId, "gc --session stale-hint-a --older-than 1d");
     expect(bothDry.kind).toBe("success");
     expect(bothDry.text).toContain("--session stale-hint-a");
-    expect(bothDry.text).toContain("--older-than 1d");
+    expect(bothDry.text).not.toContain("--older-than");
   });
 
   it("gc apply after a session hint deletes only the previewed session", async () => {

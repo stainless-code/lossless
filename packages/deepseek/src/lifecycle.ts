@@ -704,9 +704,12 @@ export function handleGc(
     (c) => `  ${c.id}: ${(c.sizeBytes / 1024).toFixed(0)} KB, ${c.ageDays.toFixed(1)} day(s) old`,
   );
   if (!apply) {
+    // A named session bypasses the age window, so the hint omits an --older-than that would have no effect.
     const selectors =
       (onlySession !== undefined ? ` --session ${onlySession}` : "") +
-      (olderThanRaw !== undefined ? ` --older-than ${olderThanRaw}` : "");
+      (onlySession === undefined && olderThanRaw !== undefined
+        ? ` --older-than ${olderThanRaw}`
+        : "");
     return {
       kind: "success",
       text: `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lcm gc --apply${selectors}\` to export then delete them. Backups are never touched.`,

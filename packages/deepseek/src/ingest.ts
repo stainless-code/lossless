@@ -142,7 +142,8 @@ export interface BackfillOptions {
   pageSize?: number;
   /** Per-session inserted-row ceiling. Default BACKFILL_MAX_EVENTS. */
   maxEvents?: number;
-  /** Per-session visited-event ceiling. Default 4x the effective maxEvents. */
+  /** Per-session visited-event ceiling. Already-mirrored rows do not count.
+   * Default 4x the effective maxEvents. */
   maxVisited?: number;
   /** Metrics recorder; receives one `backfill` row per session. */
   record?: (row: Record<string, unknown>) => void;
@@ -187,7 +188,9 @@ export async function backfillSession(
   ) {
     for (const event of events.slice(start, start + pageSize)) {
       if (ingested >= maxEvents || visited >= maxVisited) break;
-      visited += 1;
+      // Already-mirrored rows cost no visited budget, so a warm store still reaches new events.
+      const entryId = entryFor(session, event)?.entryId;
+      if (entryId === undefined || store.messageByEntryId(entryId) === undefined) visited += 1;
       const seq = Number(event.seq);
       if (fromSeq === -1) fromSeq = seq;
       throughSeq = seq;
