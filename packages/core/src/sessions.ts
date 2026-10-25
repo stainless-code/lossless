@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Compile } from "typebox/compile";
 
+import { toolScopeMessageIds } from "./recall-view.ts";
 import { hashSessionPath } from "./retention.ts";
 import { LcmStore, StaleStoreError, type GrepHit } from "./store.ts";
 
@@ -351,26 +352,30 @@ function searchStore(
     toolName?: string;
   },
 ): GrepHit[] {
-  const scoped =
-    filters?.toolName === undefined
-      ? query
-      : `(${query}) AND ${JSON.stringify(`[tool:${filters.toolName}]`)}`;
   const grepFilters = {
     ...(filters?.role === undefined ? {} : { role: filters.role }),
     ...(filters?.dateStart === undefined ? {} : { dateStart: filters.dateStart }),
     ...(filters?.dateEnd === undefined ? {} : { dateEnd: filters.dateEnd }),
   };
-  try {
-    return store.grep(scoped, { limit, ...grepFilters });
-  } catch {
+  if (filters?.toolName === undefined) {
     try {
-      const fallback =
-        filters?.toolName === undefined
-          ? JSON.stringify(query)
-          : `(${JSON.stringify(query)}) AND ${JSON.stringify(`[tool:${filters.toolName}]`)}`;
-      return store.grep(fallback, { limit, ...grepFilters });
+      return store.grep(query, { limit, ...grepFilters });
     } catch {
-      return [];
+      try {
+        return store.grep(JSON.stringify(query), { limit, ...grepFilters });
+      } catch {
+        return [];
+      }
     }
   }
+  const scopedIds = toolScopeMessageIds(store, filters.toolName, {});
+  const searchIn = (ids: ReadonlySet<number>, text: string) => {
+    try {
+      return store.grep(text, { limit, ...grepFilters, withinMessageIds: ids });
+    } catch {
+      return undefined;
+    }
+  };
+  const hits = searchIn(scopedIds, query) ?? searchIn(scopedIds, JSON.stringify(query));
+  return hits ?? [];
 }

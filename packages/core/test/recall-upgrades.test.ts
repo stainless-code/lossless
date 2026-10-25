@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { test } from "vite-plus/test";
 
@@ -6,12 +9,16 @@ import { ingestEntries } from "../src/ingest.ts";
 import {
   expandView,
   filesView,
+  ftsPhrase,
   grepView,
   historyManifest,
   LARGE_INLINE_CHARS,
   orderSummariesByOverlap,
+  toolMarker,
+  withToolScope,
 } from "../src/recall-view.ts";
 import { redactSecrets } from "../src/redact.ts";
+import { searchSessions } from "../src/sessions.ts";
 import { LcmStore } from "../src/store.ts";
 
 function seedRoleTime(): LcmStore {
@@ -383,5 +390,239 @@ test("expandView: an unknown anchor returns a typed empty", () => {
     assert.match(view.text, /No stored message with entry id e99/);
   } finally {
     store.close();
+  }
+});
+
+test("grepView: a tool name with a quote builds a valid FTS5 phrase", () => {
+  assert.equal(ftsPhrase('[tool:a"b]'), '"[tool:a""b]"');
+  assert.equal(withToolScope("cache", 'a"b'), '(cache) AND "[tool:a""b]"');
+  assert.equal(withToolScope("q", "t"), `(q) AND ${ftsPhrase(toolMarker("t"))}`);
+  const store = seedTools();
+  try {
+    const view = grepView(store, redactSecrets, { query: "cache", toolName: 'a"b' });
+    assert.equal(view.ok, true);
+    assert.match(view.text, /No matches/);
+  } finally {
+    store.close();
+  }
+});
+
+test("searchSessions: a quoted tool name shares the helper and stays valid", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lcm-session-quote-"));
+  const storePath = join(dir, "store.db");
+  const setup = new LcmStore(storePath);
+  try {
+    ingestEntries(setup, [
+      {
+        entryId: "t00",
+        role: "toolResult",
+        text: '[tool:read] {"path": "/a"} cache key',
+        timestamp: 1,
+      },
+    ]);
+  } finally {
+    setup.close();
+  }
+  try {
+    const result = searchSessions(
+      [
+        {
+          hash: "h",
+          sessionFile: join(dir, "s.jsonl"),
+          storePath,
+          cwd: "/x",
+          sessionId: "s",
+          when: 1,
+        },
+      ],
+      "cache",
+      { toolName: 'a"b' },
+    );
+    assert.deepEqual(result.hits, []);
+    assert.equal(result.scanned, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("expandView: an anchor with a nonzero offset pages as an absolute index", () => {
+  const { store, leaf } = seedSpan();
+  try {
+    const first = expandView(store, redactSecrets, {
+      mode: "list",
+      id: leaf,
+      offset: 0,
+      limit: 5,
+      maxChars: 4000,
+      anchor: "e05",
+    });
+    assert.deepEqual(listedIds(first), ["e03", "e04", "e05", "e06", "e07"]);
+    assert.equal(first.ok === true && first.details.offset, 3);
+    const second = expandView(store, redactSecrets, {
+      mode: "list",
+      id: leaf,
+      offset: 8,
+      limit: 5,
+      maxChars: 4000,
+      anchor: "e05",
+    });
+    assert.deepEqual(listedIds(second), ["e08", "e09"]);
+    assert.equal(second.ok === true && second.details.offset, 8);
+    assert.deepEqual(
+      listedIds(second).filter((id) => listedIds(first).includes(id)),
+      [],
+    );
+  } finally {
+    store.close();
+  }
+});
+
+function seedTiedManifest(): LcmStore {
+  const store = new LcmStore(":memory:");
+  ingestEntries(store, [
+    { entryId: "m00", role: "user", text: "weather report", timestamp: 1 },
+    { entryId: "m01", role: "user", text: "weather report", timestamp: 2 },
+    { entryId: "m02", role: "user", text: "weather report", timestamp: 3 },
+    { entryId: "m03", role: "user", text: "weather report", timestamp: 4 },
+  ]);
+  for (const span of ["m00", "m01", "m02", "m03"]) {
+    const ids = store.messagesInSpan(span, span).map((m) => m.id);
+    store.insertSummary({
+      kind: "leaf",
+      text: "weather report",
+      tokens: 2,
+      depth: 0,
+      firstEntryId: span,
+      lastEntryId: span,
+      messageIds: ids,
+    });
+  }
+  return store;
+}
+
+test("historyManifest: ties and wordless queries keep the newest summaries", () => {
+  const store = seedTiedManifest();
+  try {
+    const tied = historyManifest(store, 2, "weather");
+    assert.ok(tied.includes("m03 .. m03") && tied.includes("m02 .. m02"), tied);
+    assert.ok(!tied.includes("m00 .. m00"), tied);
+    const wordless = historyManifest(store, 2, "the and of");
+    assert.ok(wordless.includes("m03 .. m03") && wordless.includes("m02 .. m02"), wordless);
+    assert.ok(!wordless.includes("m00 .. m00"), wordless);
+  } finally {
+    store.close();
+  }
+});
+
+test("historyManifest: the omitted label names overlap order or age", () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      { entryId: "m00", role: "user", text: "compaction engine keeps history", timestamp: 1 },
+      { entryId: "m01", role: "user", text: "weather report", timestamp: 2 },
+      { entryId: "m02", role: "user", text: "weather report", timestamp: 3 },
+    ]);
+    for (const span of ["m00", "m01", "m02"]) {
+      const ids = store.messagesInSpan(span, span).map((m) => m.id);
+      store.insertSummary({
+        kind: "leaf",
+        text: span === "m00" ? "compaction engine keeps history" : "weather report",
+        tokens: 2,
+        depth: 0,
+        firstEntryId: span,
+        lastEntryId: span,
+        messageIds: ids,
+      });
+    }
+    const plain = historyManifest(store, 1);
+    assert.match(plain, /\(2 older not listed\)/);
+    const seeded = historyManifest(store, 1, "compaction engine");
+    assert.match(seeded, /\(2 lower-overlap not listed\)/);
+    assert.ok(!seeded.includes("older not listed"), seeded);
+  } finally {
+    store.close();
+  }
+});
+
+function seedPiCallResult(): LcmStore {
+  const store = new LcmStore(":memory:");
+  ingestEntries(store, [
+    { entryId: "p00", role: "assistant", text: '[tool:read] {"path": "/a"}', timestamp: 1 },
+    {
+      entryId: "p01",
+      role: "toolResult",
+      text: "file body holds uniqueword123 nowhere else",
+      timestamp: 2,
+    },
+    { entryId: "p02", role: "user", text: "unrelated chatter", timestamp: 3 },
+  ]);
+  return store;
+}
+
+test("grepView: a tool scope finds a Pi result row after its call row", () => {
+  const store = seedPiCallResult();
+  try {
+    const scoped = hitIds(
+      grepView(store, redactSecrets, { query: "uniqueword123", toolName: "read" }),
+    );
+    assert.deepEqual(scoped, ["p01"]);
+    const wrongTool = grepView(store, redactSecrets, {
+      query: "uniqueword123",
+      toolName: "write",
+    });
+    assert.equal(wrongTool.ok, true);
+    assert.match(wrongTool.text, /No matches/);
+    const asResult = hitIds(
+      grepView(store, redactSecrets, {
+        query: "uniqueword123",
+        toolName: "read",
+        role: "toolResult",
+      }),
+    );
+    assert.deepEqual(asResult, ["p01"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("searchSessions: a tool scope finds a Pi result row after its call row", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lcm-session-pi-"));
+  const storePath = join(dir, "store.db");
+  const setup = new LcmStore(storePath);
+  try {
+    ingestEntries(setup, [
+      { entryId: "p00", role: "assistant", text: '[tool:read] {"path": "/a"}', timestamp: 1 },
+      {
+        entryId: "p01",
+        role: "toolResult",
+        text: "file body holds uniqueword123 nowhere else",
+        timestamp: 2,
+      },
+    ]);
+  } finally {
+    setup.close();
+  }
+  try {
+    const result = searchSessions(
+      [
+        {
+          hash: "h",
+          sessionFile: join(dir, "s.jsonl"),
+          storePath,
+          cwd: "/x",
+          sessionId: "s",
+          when: 1,
+        },
+      ],
+      "uniqueword123",
+      { toolName: "read" },
+    );
+    assert.equal(result.scanned, 1);
+    assert.deepEqual(
+      result.hits.map((h) => h.entryId),
+      ["p01"],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

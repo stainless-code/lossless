@@ -9,6 +9,7 @@ import {
   type PatternScanOutcome,
 } from "./pattern-scan.ts";
 import type { LcmStore, StoredMessage, SummaryNode } from "./store.ts";
+import { mechanicalToolNameOf } from "./util/summarizer-config.ts";
 
 /**
  * Every view masks stored text with the injected `redact` before it is cut down
@@ -57,10 +58,68 @@ export function toolMarker(toolName: string): string {
   return `[tool:${toolName}]`;
 }
 
+/** Quote a string as one FTS5 phrase. Embedded quotes double; JSON.stringify
+ * emits backslash escapes which FTS5 rejects. */
+export function ftsPhrase(text: string): string {
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
 /** Rewrite an FTS5 query to its tool-scoped form. The marker passes as a quoted
- * phrase, which the FTS5 tokenizer splits the same way as the stored text. */
-function withToolScope(query: string, toolName: string): string {
-  return `(${query}) AND ${JSON.stringify(toolMarker(toolName))}`;
+ * phrase, which the FTS5 tokenizer splits the same way as the stored text, so
+ * prose with the same adjacent words (for example "which tool read the file")
+ * can also match. Anchoring to the row start would miss mixed blocks because
+ * entryToText appends blocks in order, so the scoped search keeps this broader
+ * match and callers read the hit to confirm the tool. */
+export function withToolScope(query: string, toolName: string): string {
+  return `(${query}) AND ${ftsPhrase(toolMarker(toolName))}`;
+}
+
+/** Row ids a tool scope covers: the call rows that name the tool plus the
+ * toolResult rows that follow them. Pi stores a call and its result in
+ * separate rows, so a same-row `query AND marker` FTS misses a word found
+ * only in the result. A trailing run of toolResult rows after a marker row
+ * belongs to that call batch; any other role ends the run, as does a
+ * toolResult row that names a different tool. Bracket text is checked
+ * directly so one row naming two tools anchors both, and
+ * mechanicalToolNameOf covers the `tool <name>` and payload forms. */
+export function toolScopeMessageIds(
+  store: LcmStore,
+  toolName: string,
+  opts?: { includeRemoved?: boolean; withinMessageIds?: ReadonlySet<number> },
+): Set<number> {
+  const want = toolName.trim().toLowerCase();
+  const out = new Set<number>();
+  if (want.length === 0) return out;
+  const scope = opts?.withinMessageIds;
+  const includeRemoved = opts?.includeRemoved === true;
+  const visible = store
+    .allMessages()
+    .filter(
+      (m) =>
+        (includeRemoved || m.removedAt === undefined) && (scope === undefined || scope.has(m.id)),
+    );
+  let open = false;
+  for (const row of visible) {
+    const namesTool =
+      row.text.toLowerCase().includes(`[tool:${want}]`) ||
+      mechanicalToolNameOf({ text: row.text, payload: row.payload }) === want;
+    if (namesTool) {
+      out.add(row.id);
+      open = true;
+      continue;
+    }
+    if (row.role === "toolResult" && open) {
+      const other = mechanicalToolNameOf({ text: row.text, payload: row.payload }) ?? "";
+      if ((other.length > 0 && other !== want) || /\[tool:/i.test(row.text)) {
+        open = false;
+        continue;
+      }
+      out.add(row.id);
+      continue;
+    }
+    if (row.role !== "toolResult") open = false;
+  }
+  return out;
 }
 
 export function grepView(
@@ -142,8 +201,21 @@ export function grepView(
   if (params.query === undefined) {
     return { ok: false, text: "Pass a query (FTS5) or a pattern (regular expression)." };
   }
-  const scoped =
-    params.toolName === undefined ? params.query : withToolScope(params.query, params.toolName);
+  if (params.toolName !== undefined) {
+    return toolScopedView(store, redact, {
+      query: params.query,
+      toolName: params.toolName,
+      limit,
+      offset,
+      includeRemoved,
+      expandTool,
+      withinMessageIds,
+      ...(params.role === undefined ? {} : { role: params.role }),
+      ...(params.dateStart === undefined ? {} : { dateStart: params.dateStart }),
+      ...(params.dateEnd === undefined ? {} : { dateEnd: params.dateEnd }),
+    });
+  }
+  const scoped = params.query;
   let pattern = scoped;
   let hits: ReturnType<LcmStore["grep"]> | undefined;
   // FTS5 rejects some syntax (unbalanced quotes, stray operators) with an
@@ -157,10 +229,7 @@ export function grepView(
   };
   hits = search(pattern, includeRemoved, offset);
   if (hits === undefined) {
-    pattern =
-      params.toolName === undefined
-        ? JSON.stringify(params.query)
-        : withToolScope(JSON.stringify(params.query), params.toolName);
+    pattern = JSON.stringify(params.query);
     hits = search(pattern, includeRemoved, offset);
   }
   if (hits === undefined) {
@@ -189,6 +258,121 @@ export function grepView(
   }
   let budget = RESULT_BUDGET_CHARS;
   const total = store.grepCount(pattern, { includeRemoved, ...grepOpts });
+  const lines: string[] = [
+    total === undefined || total <= limit
+      ? `Found ${hits.length} match(es):`
+      : `Match(es) ${offset + 1}..${offset + hits.length} of ${total}:`,
+  ];
+  for (const h of hits) {
+    if (budget <= 0) {
+      lines.push(`… ${hits.length - lines.length + 1} more (narrow your query)`);
+      break;
+    }
+    const pointer = h.coveringSummaryId === undefined ? "" : ` #${h.coveringSummaryId}`;
+    const removed = h.removed === true ? " [removed]" : "";
+    const flat = redact(h.text.replace(/\s+/g, " "));
+    const dropped = flat.length - MAX_LINE_CHARS;
+    const shown =
+      dropped > 0
+        ? `${flat.slice(0, MAX_LINE_CHARS)} [lcm:more ${dropped} chars; read them with ${expandTool}({entry_id:"${h.entryId}"})]`
+        : flat;
+    const line = `[${h.entryId}] (${h.role})${pointer}${removed} ${shown}`;
+    budget -= line.length;
+    lines.push(line);
+  }
+  const seen = offset + hits.length;
+  if (total !== undefined && seen < total) {
+    lines.push(`… ${total - seen} more; pass offset ${seen} for the next page.`);
+  }
+  return {
+    ok: true,
+    text: lines.join("\n"),
+    details: { hits: hits.length, offset, ...(total === undefined ? {} : { total }) },
+  };
+}
+
+/** A tool-scoped query search: the FTS query runs inside the rows the tool
+ * owns (its call rows plus the toolResult rows after them), so a word found
+ * only in a Pi result still matches. Paging and totals come from that row
+ * set, and the removed-branch probe reads the same set with removed rows. */
+function toolScopedView(
+  store: LcmStore,
+  redact: (text: string) => string,
+  params: {
+    query: string;
+    toolName: string;
+    limit: number;
+    offset: number;
+    includeRemoved: boolean;
+    expandTool: string;
+    withinMessageIds?: ReadonlySet<number>;
+    role?: GrepFilter["role"];
+    dateStart?: number;
+    dateEnd?: number;
+  },
+): ViewResult {
+  const { query, toolName, limit, offset, includeRemoved, expandTool } = params;
+  const roleOpts = {
+    ...(params.role === undefined ? {} : { role: params.role }),
+    ...(params.dateStart === undefined ? {} : { dateStart: params.dateStart }),
+    ...(params.dateEnd === undefined ? {} : { dateEnd: params.dateEnd }),
+  };
+  const visibleIds = toolScopeMessageIds(store, toolName, {
+    includeRemoved,
+    withinMessageIds: params.withinMessageIds,
+  });
+  let pattern = query;
+  const searchIn = (scoped: ReadonlySet<number>, text: string, removed: boolean, off: number) => {
+    try {
+      return store.grep(text, {
+        limit,
+        offset: off,
+        includeRemoved: removed,
+        ...roleOpts,
+        withinMessageIds: scoped,
+      });
+    } catch {
+      return undefined;
+    }
+  };
+  let hits = searchIn(visibleIds, pattern, includeRemoved, offset);
+  if (hits === undefined) {
+    pattern = JSON.stringify(query);
+    hits = searchIn(visibleIds, pattern, includeRemoved, offset);
+  }
+  if (hits === undefined) {
+    return {
+      ok: false,
+      text: `Invalid search query ${JSON.stringify(query)}; try simpler keywords.`,
+    };
+  }
+  if (hits.length === 0) {
+    if (!includeRemoved) {
+      const allIds = toolScopeMessageIds(store, toolName, {
+        includeRemoved: true,
+        withinMessageIds: params.withinMessageIds,
+      });
+      const hidden = searchIn(allIds, pattern, true, offset) ?? [];
+      if (hidden.length > 0) {
+        return {
+          ok: true,
+          text: `Match(es) for ${JSON.stringify(query)} exist on a branch that left the active path; pass include_removed to read them.`,
+          details: { hits: 0, removed: hidden.length },
+        };
+      }
+    }
+    return {
+      ok: true,
+      text: `No matches for ${JSON.stringify(query)} in session history.`,
+      details: { hits: 0 },
+    };
+  }
+  let budget = RESULT_BUDGET_CHARS;
+  const total = store.grepCount(pattern, {
+    includeRemoved,
+    ...roleOpts,
+    withinMessageIds: visibleIds,
+  });
   const lines: string[] = [
     total === undefined || total <= limit
       ? `Found ${hits.length} match(es):`
@@ -468,8 +652,9 @@ function readWindow(
 }
 
 /** List a summary's messages, or read one as a window. Without a summary an
- * entry id reads directly; with `anchor` the window centers on that entry,
- * clamped at the span edges. */
+ * entry id reads directly; with `anchor` and offset 0 the window centers on
+ * that entry, clamped at the span edges. A nonzero offset with `anchor` is an
+ * absolute message index, so the next page starts from the reported offset. */
 export type ExpandParams =
   | {
       mode: "list";
@@ -509,14 +694,17 @@ export function expandView(
       };
     }
     anchorIndex = coveredAt;
-    // `offset` pages relative to that centered start.
-    offset = Math.max(
-      0,
-      Math.min(
-        coveredAt - Math.floor(limit / 2) + Math.max(0, params.offset),
-        Math.max(0, messages.length - limit),
-      ),
-    );
+    // With offset 0 the window centers on the anchor; a nonzero offset is an
+    // absolute message index so a caller paging from the reported offset moves
+    // forward without overlap.
+    if (Math.max(0, params.offset) === 0) {
+      offset = Math.max(
+        0,
+        Math.min(coveredAt - Math.floor(limit / 2), Math.max(0, messages.length - limit)),
+      );
+    } else {
+      offset = Math.max(0, params.offset);
+    }
   }
   const slice = messages.slice(offset, offset + limit);
   const parts: string[] = [];
@@ -646,13 +834,21 @@ export function historyManifest(store: LcmStore, limit: number, query?: string):
   if (frontier.length === 0) {
     return `${store.messageCount()} messages, ${span.first} .. ${span.last}; no summaries yet, so lcm_grep searches the raw messages.`;
   }
-  const ordered =
-    query === undefined || query.trim().length === 0
-      ? frontier.slice(-limit).reverse()
-      : orderSummariesByOverlap(query, frontier).slice(0, limit);
+  const queryOrdered = query !== undefined && query.trim().length > 0;
+  // Frontier reads oldest first; score a newest-first copy so ties and
+  // wordless queries keep the newest summaries in a limited manifest.
+  const ordered = queryOrdered
+    ? orderSummariesByOverlap(query ?? "", [...frontier].reverse()).slice(0, limit)
+    : frontier.slice(-limit).reverse();
   const omitted = frontier.length - ordered.length;
+  const omittedNote =
+    omitted <= 0
+      ? ""
+      : queryOrdered
+        ? ` (${omitted} lower-overlap not listed)`
+        : ` (${omitted} older not listed)`;
   return [
-    `${frontier.length} top-level summaries cover messages ${span.first} .. ${span.last}${omitted > 0 ? ` (${omitted} older not listed)` : ""}:`,
+    `${frontier.length} top-level summaries cover messages ${span.first} .. ${span.last}${omittedNote}:`,
     ...ordered.map((n) => costLine(store, n)),
   ].join("\n");
 }
