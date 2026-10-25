@@ -142,7 +142,8 @@ export interface BackfillOptions {
   pageSize?: number;
   /** Per-session inserted-row ceiling. Default BACKFILL_MAX_EVENTS. */
   maxEvents?: number;
-  /** Per-session visited-event ceiling. Already-mirrored rows do not count.
+  /** Per-session visited-event ceiling. Only unmirrored messages count:
+   * stored rows and non-message events never touch the store on re-read.
    * Default 4x the effective maxEvents. */
   maxVisited?: number;
   /** Metrics recorder; receives one `backfill` row per session. */
@@ -179,6 +180,7 @@ export async function backfillSession(
   let ingested = 0;
   let skipped = 0;
   let visited = 0;
+  let consumed = 0;
   let fromSeq = -1;
   let throughSeq = -1;
   for (
@@ -188,9 +190,12 @@ export async function backfillSession(
   ) {
     for (const event of events.slice(start, start + pageSize)) {
       if (ingested >= maxEvents || visited >= maxVisited) break;
-      // Already-mirrored rows cost no visited budget, so a warm store still reaches new events.
+      consumed += 1;
+      // Only unmirrored messages cost visited budget: stored rows need one
+      // indexed probe and markers never touch the store, so a warm history
+      // still reaches new events instead of stalling on its own prefix.
       const entryId = entryFor(session, event)?.entryId;
-      if (entryId === undefined || store.messageByEntryId(entryId) === undefined) visited += 1;
+      if (entryId !== undefined && store.messageByEntryId(entryId) === undefined) visited += 1;
       const seq = Number(event.seq);
       if (fromSeq === -1) fromSeq = seq;
       throughSeq = seq;
@@ -202,7 +207,7 @@ export async function backfillSession(
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
   }
-  const capped = (ingested >= maxEvents || visited >= maxVisited) && visited < events.length;
+  const capped = (ingested >= maxEvents || visited >= maxVisited) && consumed < events.length;
   options.record?.({
     ts: Date.now(),
     event: "lcm",

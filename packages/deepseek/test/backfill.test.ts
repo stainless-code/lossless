@@ -264,7 +264,7 @@ describe("pre-mount backfill", () => {
     expect(store.allMessages()).toHaveLength(20);
   });
 
-  it("ceiling stops the scan when visits outrun inserts", async () => {
+  it("ceiling counts unmirrored messages, not markers or stored rows", async () => {
     const session = buildLongSession(30);
     const events = session.snapshotEvents();
     const store = new LcmStore(":memory:");
@@ -274,10 +274,10 @@ describe("pre-mount backfill", () => {
       maxVisited: 20,
     });
     expect(result.capped).toBe(true);
-    expect(result.ingested).toBe(10);
-    expect(result.skipped).toBe(10);
-    expect(result.ingested + result.skipped).toBe(20);
-    expect(result.throughSeq).toBe(Number(events[19]?.seq));
+    expect(result.ingested).toBe(20);
+    expect(result.skipped).toBe(19);
+    expect(result.ingested + result.skipped).toBe(39);
+    expect(result.throughSeq).toBe(Number(events[38]?.seq));
   });
 
   it("honors the default cap on a log larger than BACKFILL_MAX_EVENTS", async () => {
@@ -319,6 +319,29 @@ describe("pre-mount backfill", () => {
     const before = store.allMessages().length;
     expect(before).toBeGreaterThan(0);
     const result = await backfillSession(session, store, fakeSource(events));
+    expect(store.allMessages()).toHaveLength(session.deriveMessages().length);
+    expect(result.capped).toBe(false);
+  });
+
+  it("reports uncapped when inserts hit the cap exactly on the final event", async () => {
+    const session = buildLongSession(600);
+    session.append(
+      "user/message",
+      createUserMessage({
+        content: [{ type: "text", text: "trailing request" }],
+        source: { kind: "user" },
+      }),
+      { surfaceOp: "append" },
+    );
+    const events = session.snapshotEvents();
+    const store = new LcmStore(":memory:");
+    for (const event of events.slice(0, 1901)) mirrorEvent(session, event, store);
+    const stored = store.allMessages().length;
+    const remaining = session.deriveMessages().length - stored;
+    expect(remaining).toBeGreaterThan(0);
+    const result = await backfillSession(session, store, fakeSource(events), undefined, {
+      maxEvents: remaining,
+    });
     expect(store.allMessages()).toHaveLength(session.deriveMessages().length);
     expect(result.capped).toBe(false);
   });
