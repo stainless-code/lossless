@@ -219,6 +219,63 @@ test("dump: caps per-summary text so metrics and footer survive", () => {
   }
 });
 
+test("dump: caps CJK summaries by bytes so the tail survives", () => {
+  // 1000 CJK chars fit the old char count but exceed 1200 bytes.
+  // Uncapped, ten such summaries pass DUMP_MAX_BYTES and clip the tail.
+  const dir = tempDir();
+  try {
+    const path = join(dir, "cjk.sqlite");
+    const store = new LcmStore(path);
+    try {
+      ingestEntries(
+        store,
+        Array.from({ length: 10 }, (_, i) => ({
+          entryId: `k${i}`,
+          role: "user" as const,
+          text: `note ${i}`,
+          timestamp: i,
+        })),
+      );
+      const ids = Array.from({ length: 10 }, (_, i) => store.messageByEntryId(`k${i}`)?.id).filter(
+        (v): v is number => v !== undefined,
+      );
+      for (let s = 0; s < 10; s++) {
+        store.insertSummary({
+          kind: "leaf",
+          text: `summary ${s}`,
+          tokens: 5,
+          depth: 0,
+          firstEntryId: `k${s}`,
+          lastEntryId: `k${s}`,
+          messageIds: [ids[s]!],
+          thoroughText: "字".repeat(1000),
+        });
+      }
+    } finally {
+      store.close();
+    }
+    const marker = "cjk-cap-marker";
+    const result = dumpSidecar({
+      path,
+      sessionId: SESSION,
+      redact: redactSecrets,
+      metricRows: [{ session: SESSION, kind: "usage", note: marker }],
+    });
+    assert.equal(result.status, "dumped");
+    if (result.status !== "dumped") return;
+    assert.ok(result.text.includes("[lcm:more"));
+    assert.ok(result.text.includes("bytes]"));
+    assert.ok(result.text.includes(marker));
+    assert.ok(result.text.includes("metrics:"));
+    assert.ok(result.text.includes("omitted:"));
+    assert.ok(result.text.includes("bytes each"));
+    assert.ok(!result.text.includes("truncated at the"));
+    assert.ok(Buffer.byteLength(result.text, "utf8") <= DUMP_MAX_BYTES);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("dump: masks linked file previews and the echoed query, keeps paths", () => {
   const dir = tempDir();
   try {

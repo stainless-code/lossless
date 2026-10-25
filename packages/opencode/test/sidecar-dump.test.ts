@@ -225,6 +225,64 @@ describe("sidecar dump", () => {
     }
   });
 
+  it("caps CJK summaries by bytes so the tail survives", () => {
+    // 1000 CJK chars fit the old char count but exceed 1200 bytes.
+    // Uncapped, ten such summaries pass DUMP_MAX_BYTES and clip the tail.
+    const dir = tempDir();
+    try {
+      const path = join(dir, "cjk.sqlite");
+      const store = new LcmStore(path);
+      try {
+        ingestEntries(
+          store,
+          Array.from({ length: 10 }, (_, i) => ({
+            entryId: `k${i}`,
+            role: "user" as const,
+            text: `note ${i}`,
+            timestamp: i,
+          })),
+        );
+        const ids = Array.from(
+          { length: 10 },
+          (_, i) => store.messageByEntryId(`k${i}`)?.id,
+        ).filter((v): v is number => v !== undefined);
+        for (let s = 0; s < 10; s++) {
+          store.insertSummary({
+            kind: "leaf",
+            text: `summary ${s}`,
+            tokens: 5,
+            depth: 0,
+            firstEntryId: `k${s}`,
+            lastEntryId: `k${s}`,
+            messageIds: [ids[s]!],
+            thoroughText: "字".repeat(1000),
+          });
+        }
+      } finally {
+        store.close();
+      }
+      const marker = "cjk-cap-marker";
+      const result = dumpSidecar({
+        path,
+        sessionId: SESSION,
+        redact: redactSecrets,
+        metricRows: [{ session: SESSION, kind: "usage", note: marker }],
+      });
+      expect(result.status).toBe("dumped");
+      if (result.status !== "dumped") return;
+      expect(result.text).toContain("[lcm:more");
+      expect(result.text).toContain("bytes]");
+      expect(result.text).toContain(marker);
+      expect(result.text).toContain("metrics:");
+      expect(result.text).toContain("omitted:");
+      expect(result.text).toContain("bytes each");
+      expect(result.text).not.toContain("truncated at the");
+      expect(Buffer.byteLength(result.text, "utf8")).toBeLessThanOrEqual(DUMP_MAX_BYTES);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("masks linked file previews and the echoed query, keeps paths", () => {
     const dir = tempDir();
     try {

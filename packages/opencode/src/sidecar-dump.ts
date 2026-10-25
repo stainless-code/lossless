@@ -22,8 +22,8 @@ export const DUMP_MAX_HISTORY = 20;
 export const DUMP_MAX_SAMPLE_MESSAGES = 3;
 /** Chars one sampled message window holds. */
 export const DUMP_SAMPLE_CHARS = 400;
-/** Chars kept from each described summary; the tail names the cut. */
-export const DUMP_MAX_SUMMARY_CHARS = 1_200;
+/** Bytes kept from each described summary; the tail names the cut. */
+export const DUMP_MAX_SUMMARY_BYTES = 1_200;
 
 /** Why a sidecar could not be dumped. Each reason is a count the caller
  * reports, never an error it raises. */
@@ -172,7 +172,7 @@ function buildDump(store: LcmStore, options: SidecarDumpOptions): string {
   sections.push(`metrics: ${rows.length} row(s) for this session, ${shown.length} shown`);
   for (const row of shown) sections.push(`  ${JSON.stringify(sanitizeRow(row, options.redact))}`);
   sections.push(
-    `omitted: summary text past ${DUMP_MAX_SUMMARY_CHARS} chars each, message bodies past ${DUMP_SAMPLE_CHARS} chars per sample, ` +
+    `omitted: summary text past ${DUMP_MAX_SUMMARY_BYTES} bytes each, message bodies past ${DUMP_SAMPLE_CHARS} chars per sample, ` +
       `summaries past ${DUMP_MAX_SUMMARIES}, metric rows past ${DUMP_MAX_METRIC_ROWS}. ` +
       `Removed rows carry [removed]. Read them with include_removed.`,
   );
@@ -228,9 +228,17 @@ function labelRemoved(chunk: string): string {
 
 /** Keep one described summary bounded so large summaries cannot clip the tail. */
 function capSummaryText(text: string): string {
-  if (text.length <= DUMP_MAX_SUMMARY_CHARS) return text;
-  const more = text.length - DUMP_MAX_SUMMARY_CHARS;
-  return `${text.slice(0, DUMP_MAX_SUMMARY_CHARS)}\n[lcm:more ${more} chars]`;
+  if (Buffer.byteLength(text, "utf8") <= DUMP_MAX_SUMMARY_BYTES) return text;
+  let used = 0;
+  let end = 0;
+  for (const chunk of text) {
+    const cost = Buffer.byteLength(chunk, "utf8");
+    if (used + cost > DUMP_MAX_SUMMARY_BYTES) break;
+    used += cost;
+    end += chunk.length;
+  }
+  const more = Buffer.byteLength(text, "utf8") - used;
+  return `${text.slice(0, end)}\n[lcm:more ${more} bytes]`;
 }
 
 /** Redact string seams in one metric row; keys and stub pointers stay intact. */
