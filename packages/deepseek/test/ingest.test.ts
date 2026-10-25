@@ -5,11 +5,12 @@ import {
   createToolResultMessage,
   createUserMessage,
 } from "@deepseek-ai/dsh-llm";
+import type { FileBlock, ImageBlock } from "@deepseek-ai/dsh-llm";
 import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import { LcmStore } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
-import { entryFor, mirrorEvent } from "../src/ingest.ts";
+import { MessageIndex, entryFor, mirrorEvent } from "../src/ingest.ts";
 
 const MODEL = "test-model";
 
@@ -168,5 +169,130 @@ describe("ingest mirror", () => {
     expect(texts.some((text) => text.includes("start the compaction engine work"))).toBe(true);
     expect(texts.some((text) => text.includes("engine work started"))).toBe(true);
     expect(texts.some((text) => text.includes("checkpoint: engine work started"))).toBe(true);
+  });
+
+  it("mirrors an image-only message as one descriptor row", () => {
+    const session = Session.create(SessionId("mirror-image"));
+    session.append("turn/start", { turn: 1 });
+    const imageEvent = session.append(
+      "user/message",
+      createUserMessage({
+        content: [
+          {
+            type: "image",
+            attachment: {
+              attachmentId:
+                "sha256:test-image-1" as unknown as ImageBlock["attachment"]["attachmentId"],
+              mediaType: "image/png",
+              bytes: 1234,
+              width: 800,
+              height: 600,
+              name: "photo.png",
+            },
+          },
+        ],
+        source: { kind: "user" },
+      }),
+      { surfaceOp: "append" },
+    );
+    session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
+    const store = new LcmStore(":memory:");
+    let inserted = 0;
+    for (const event of session.snapshotEvents())
+      inserted += mirrorEvent(session, event, store).inserted;
+    expect(inserted).toBe(1);
+    const rows = store.allMessages();
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row).toBeDefined();
+    if (!row) throw new Error("expected one descriptor row");
+    expect(row.entryId).toBe(`${session.id}:${imageEvent.seq}`);
+    expect(row.role).toBe("user");
+    expect(row.timestamp).toBe(imageEvent.time);
+    expect(row.text).toContain("image");
+    expect(row.text).toContain("photo.png");
+    expect(row.text).toContain("descriptor only");
+  });
+
+  it("mirrors a file-only message as one descriptor row", () => {
+    const session = Session.create(SessionId("mirror-file"));
+    session.append(
+      "user/message",
+      createUserMessage({
+        content: [
+          {
+            type: "file",
+            attachment: {
+              attachmentId:
+                "sha256:test-file-1" as unknown as FileBlock["attachment"]["attachmentId"],
+              name: "notes.pdf",
+              bytes: 5678,
+            },
+          },
+        ],
+        source: { kind: "user" },
+      }),
+      { surfaceOp: "append" },
+    );
+    const store = new LcmStore(":memory:");
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store);
+    const rows = store.allMessages();
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row).toBeDefined();
+    if (!row) throw new Error("expected one descriptor row");
+    expect(row.text).toContain("file");
+    expect(row.text).toContain("notes.pdf");
+  });
+
+  it("maps a span containing a non-text message instead of throwing", () => {
+    const session = buildSession();
+    session.append("turn/start", { turn: 3 });
+    session.append(
+      "user/message",
+      createUserMessage({
+        content: [
+          {
+            type: "image",
+            attachment: {
+              attachmentId:
+                "sha256:test-image-1" as unknown as ImageBlock["attachment"]["attachmentId"],
+              mediaType: "image/png",
+              bytes: 1234,
+              width: 800,
+              height: 600,
+              name: "photo.png",
+            },
+          },
+        ],
+        source: { kind: "user" },
+      }),
+      { surfaceOp: "append" },
+    );
+    session.append("turn/end", { turn: 3, reason: { kind: "completed" } });
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const derived = session.deriveMessages();
+    expect(derived.length).toBe(7);
+    for (const message of derived) {
+      const entryId = index.entryId(message.id);
+      expect(entryId).toBeDefined();
+      if (entryId === undefined) throw new Error(`no sidecar entry for ${message.id}`);
+      expect(store.messageByEntryId(entryId)).toBeDefined();
+    }
+  });
+
+  it("keeps no row for a message with no content at all", () => {
+    const session = Session.create(SessionId("mirror-empty"));
+    const event = session.append(
+      "user/message",
+      createUserMessage({ content: [], source: { kind: "user" } }),
+      { surfaceOp: "append" },
+    );
+    expect(entryFor(session, event)).toBeUndefined();
+    const store = new LcmStore(":memory:");
+    expect(mirrorEvent(session, event, store).inserted).toBe(0);
+    expect(store.allMessages()).toHaveLength(0);
   });
 });

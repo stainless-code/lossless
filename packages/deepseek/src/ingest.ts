@@ -1,5 +1,5 @@
 import type { Context } from "@deepseek-ai/cordis";
-import type { Message } from "@deepseek-ai/dsh-llm";
+import type { ContentBlock, Message } from "@deepseek-ai/dsh-llm";
 import type { Session, SessionEvent, SessionId } from "@deepseek-ai/dsh-session";
 import { ingestEntries } from "lossless-core";
 import type { IngestStats, IngestibleEntry, LcmRole, LcmStore } from "lossless-core";
@@ -239,9 +239,9 @@ function dshRole(role: Message["role"]): LcmRole {
   }
 }
 
-/** Verbatim text plus the calls the transcript needs to stay replayable.
- * Reasoning, image, file, and tool-change blocks stay out: the mirror keeps
- * what the model saw as text, not every modality the log can carry. */
+/** Verbatim text plus the calls the transcript needs to stay replayable. A
+ * message with blocks but no text keeps a descriptor row instead, so every
+ * span message holds a sidecar address for compaction to map. */
 function renderText(message: Message): string | undefined {
   const parts: string[] = [];
   for (const block of message.content) {
@@ -249,5 +249,45 @@ function renderText(message: Message): string | undefined {
     else if (block.type === "tool-call") parts.push(`tool-call: ${block.name} ${block.arguments}`);
   }
   const text = parts.join("\n").trim();
-  return text.length > 0 ? text : undefined;
+  if (text.length > 0) return text;
+  if (message.content.length === 0) return undefined;
+  return describeNonText(message);
+}
+
+/** Bracketed stand-in mirroring the core file-handle shape: block kinds plus
+ * stable identifiers, never bytes, marked so no reader takes it for seen text. */
+function describeNonText(message: Message): string {
+  const kinds = message.content.map(describeBlock).join(", ");
+  return `[lcm:non-text ${kinds}; content not seen, descriptor only]`;
+}
+
+function describeBlock(block: ContentBlock): string {
+  switch (block.type) {
+    case "image": {
+      const ref = block.attachment;
+      const details = [
+        ref.mediaType,
+        `${ref.bytes} bytes`,
+        `${ref.width}x${ref.height}px`,
+        String(ref.attachmentId),
+      ];
+      if (block.offloaded === true) details.push("offloaded");
+      const name = ref.name === undefined ? "" : ` ${JSON.stringify(ref.name)}`;
+      return `image${name} (${details.join(", ")})`;
+    }
+    case "file": {
+      const ref = block.attachment;
+      return `file ${JSON.stringify(ref.name)} (${ref.bytes} bytes, ${String(ref.attachmentId)})`;
+    }
+    case "tool-addition":
+    case "tool-removal":
+      return `${block.type} ${JSON.stringify(block.toolName)}`;
+    case "reasoning":
+    case "text":
+      return block.type;
+    case "tool-call":
+      return `tool-call ${block.name}`;
+    default:
+      return (block as { type: string }).type;
+  }
 }
