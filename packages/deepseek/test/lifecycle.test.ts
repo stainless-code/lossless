@@ -294,3 +294,66 @@ describe("lcm read-only verbs", () => {
     expect(readFileSync(target, "utf8")).toContain("LCM diagnose bundle:");
   });
 });
+
+describe("lcm dump verb", () => {
+  it("dump prints the calling session sidecar and answers a free-text query", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("dump-1"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "dump-1", ["dump hello world"]);
+    const result = await invoke(
+      ctx,
+      depsFor(dir, new Map([["dump-1", store]])),
+      "dump-1",
+      "dump hello",
+    );
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("LCM sidecar dump: dump-1");
+    expect(result.text).toContain("dump hello world");
+  });
+
+  it("dump --save writes the dump to a file with 0600 mode", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("dump-2"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "dump-2", ["dump save hello"]);
+    const target = join(dir, "dump-out.txt");
+    const deps = depsFor(dir, new Map([["dump-2", store]]));
+    const result = await invoke(ctx, deps, "dump-2", `dump --save ${target}`);
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("mode 0600");
+    expect(result.text).toContain(target);
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+    expect(readFileSync(target, "utf8")).toContain("LCM sidecar dump: dump-2");
+  });
+
+  it("dump --save without a path errors", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("dump-3"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "dump-3", ["dump missing hello"]);
+    const deps = depsFor(dir, new Map([["dump-3", store]]));
+    const result = await invoke(ctx, deps, "dump-3", "dump --save");
+    expect(result.kind).toBe("error");
+    expect(result.text).toContain("name the file to write");
+  });
+
+  it("dump --include-removed surfaces removed rows the default dump hides", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("dump-4"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "dump-4", ["dump keeper alpha", "dump hidden beta"]);
+    store.setRemoved(["e01"], Date.now());
+    const deps = depsFor(dir, new Map([["dump-4", store]]));
+    const plain = await invoke(ctx, deps, "dump-4", "dump beta");
+    expect(plain.kind).toBe("success");
+    expect(plain.text).not.toContain("dump hidden beta");
+    const kept = await invoke(ctx, deps, "dump-4", "dump beta --include-removed");
+    expect(kept.kind).toBe("success");
+    expect(kept.text).toContain("dump hidden beta");
+  });
+});

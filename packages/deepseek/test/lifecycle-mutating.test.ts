@@ -456,6 +456,98 @@ describe("lcm mutating verbs", () => {
     }
   });
 
+  it("gc --session collects only that session", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-sel";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-sel"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    const live = deps.storeFor!(liveId);
+    seedMessages(live, ["live history stays"]);
+    for (const stem of ["stale-sel-a", "stale-sel-b"]) {
+      const stale = new LcmStore(join(dir, `${stem}.sqlite`));
+      try {
+        seedMessages(stale, [`history for ${stem}`]);
+      } finally {
+        stale.close();
+      }
+      ageFile(join(dir, `${stem}.sqlite`), 31);
+    }
+    const dry = await invoke(ctx, deps, liveId, "gc --session stale-sel-a");
+    expect(dry.kind).toBe("success");
+    expect(dry.text).toContain("stale-sel-a");
+    expect(dry.text).not.toContain("stale-sel-b");
+    const applied = await invoke(ctx, deps, liveId, "gc --session stale-sel-a --apply");
+    expect(applied.kind).toBe("success");
+    expect(applied.text).toContain("removed 1 of 1");
+    expect(existsSync(join(dir, "stale-sel-a.sqlite"))).toBe(false);
+    expect(existsSync(join(dir, "stale-sel-b.sqlite"))).toBe(true);
+  });
+
+  it("gc --older-than collects only sidecars older than the window", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-age";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-age"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    const oldPath = join(dir, "stale-old-age.sqlite");
+    const old = new LcmStore(oldPath);
+    try {
+      seedMessages(old, ["two days old"]);
+    } finally {
+      old.close();
+    }
+    ageFile(oldPath, 2);
+    const freshPath = join(dir, "stale-fresh-age.sqlite");
+    const fresh = new LcmStore(freshPath);
+    try {
+      seedMessages(fresh, ["fresh today"]);
+    } finally {
+      fresh.close();
+    }
+    const recent = await invoke(ctx, deps, liveId, "gc --older-than 1d");
+    expect(recent.kind).toBe("success");
+    expect(recent.text).toContain("stale-old-age");
+    expect(recent.text).not.toContain("stale-fresh-age");
+    const dflt = await invoke(ctx, deps, liveId, "gc");
+    expect(dflt.kind).toBe("success");
+    expect(dflt.text).toContain("nothing eligible");
+  });
+
+  it("gc refuses a missing or invalid selector value", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-bad";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-bad"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    const missingSession = await invoke(ctx, deps, liveId, "gc --session");
+    expect(missingSession.kind).toBe("error");
+    expect(missingSession.text).toContain("--session takes a session id");
+    const missingDays = await invoke(ctx, deps, liveId, "gc --older-than");
+    expect(missingDays.kind).toBe("error");
+    expect(missingDays.text).toContain("--older-than takes a number of days");
+    const invalidDays = await invoke(ctx, deps, liveId, "gc --older-than soon");
+    expect(invalidDays.kind).toBe("error");
+    expect(invalidDays.text).toContain("--older-than takes a number of days");
+    const liveSelected = await invoke(ctx, deps, liveId, `gc --session ${liveId}`);
+    expect(liveSelected.kind).toBe("error");
+    expect(liveSelected.text).toContain("never deletes an open sidecar");
+    const unknown = await invoke(ctx, deps, liveId, "gc --session no-such-sidecar");
+    expect(unknown.kind).toBe("success");
+    expect(unknown.text).toContain("no sidecar for session no-such-sidecar");
+  });
+
   it("heal dry-run lists a truncated node and apply repairs it on a scripted model", async () => {
     const scripts = [[...textChunks("a repaired leaf summary")]];
     const { ctx } = setupContext(ROUTE, scripts);

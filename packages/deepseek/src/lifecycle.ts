@@ -1,6 +1,6 @@
-import { chmodSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { Context } from "@deepseek-ai/cordis";
@@ -37,6 +37,7 @@ import {
 
 import { healLlmConfig, healRunBudgets } from "./ladder.ts";
 import { agentRoute, dshModelHost, type DshRoute } from "./model-host.ts";
+import { dumpSidecar } from "./sidecar-dump.ts";
 
 export interface LcmCommandDeps {
   readonly stores: () => ReadonlyMap<string, LcmStore>;
@@ -320,7 +321,10 @@ function parseSaveFlag(flags: readonly string[]): SaveFlag {
     const flag = flags[i];
     if (flag === "--save") {
       const next = flags[i + 1];
-      return next === undefined ? { kind: "missing-path" } : { kind: "path", path: next };
+      // `--save --repair` is a missing value, not a file named `--repair`.
+      return next === undefined || next.startsWith("--")
+        ? { kind: "missing-path" }
+        : { kind: "path", path: next };
     }
     if (flag?.startsWith("--save=")) {
       const path = flag.slice("--save=".length);
@@ -328,6 +332,54 @@ function parseSaveFlag(flags: readonly string[]): SaveFlag {
     }
   }
   return { kind: "absent" };
+}
+
+/** Value after `--name value` or inside `--name=value`. A missing value or a
+ * follow-on flag reads as absent, so `--save --repair` never names a file. */
+function valueOf(args: readonly string[], name: string): string | undefined {
+  const inline = args.find((arg) => arg.startsWith(`${name}=`));
+  if (inline !== undefined) return inline.slice(name.length + 1);
+  const index = args.indexOf(name);
+  const value = index >= 0 ? args[index + 1] : undefined;
+  return value !== undefined && !value.startsWith("--") ? value : undefined;
+}
+
+function writeDumpTarget(target: string, text: string): void {
+  // Unique temp with exclusive creation, then an atomic rename: a planted
+  // predictable path is never touched and the destination swaps at once.
+  const dir = dirname(target);
+  const base = basename(target);
+  let tmp = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = join(
+      dir,
+      `.${base}.${process.pid}.${Date.now()}.${Math.floor(Math.random() * 1e9)}.tmp`,
+    );
+    try {
+      writeFileSync(candidate, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      tmp = candidate;
+      break;
+    } catch (error) {
+      if ((error as { code?: string })?.code === "EEXIST") continue;
+      // A write can create the private file and then fail (disk full), so
+      // remove the candidate before surfacing the error. EEXIST keeps its
+      // continue above and never unlinks a pre-existing collision.
+      try {
+        unlinkSync(candidate);
+      } catch {}
+      throw error;
+    }
+  }
+  if (tmp === "") throw new Error(`LCM dump: cannot create temp file beside ${target}.`);
+  try {
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, target);
+  } catch (error) {
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    throw error;
+  }
 }
 
 function pluginLabel(): string {
@@ -483,6 +535,56 @@ export function handleImport(
   };
 }
 
+/** Read-only dump of the calling session's sidecar, opened with `queryOnly`
+ * so a dump never mutates the store. Free-text args sample one FTS5 query;
+ * `--save` writes the dump through the atomic writer instead of printing it. */
+export function handleDump(
+  deps: LcmCommandDeps,
+  invocation: CommandInvocation,
+  args: readonly string[],
+): CommandResult {
+  const sessionId = String(invocation.agent.session.id);
+  const includeRemoved = args.includes("--include-removed");
+  if (args.includes("--save") && valueOf(args, "--save") === undefined) {
+    return {
+      kind: "error",
+      text: "LCM dump --save: name the file to write, e.g. `/lcm dump --save lcm-dump.txt`.",
+    };
+  }
+  const save = valueOf(args, "--save");
+  const query = args.filter((arg) => !arg.startsWith("--") && arg !== save).join(" ");
+  const result = dumpSidecar({
+    path: deps.storePathFor(sessionId),
+    sessionId,
+    redact: redactSecrets,
+    ...(includeRemoved ? { includeRemoved: true as const } : {}),
+    metricRows: metricRows(deps, sessionId),
+    ...(query.length > 0 ? { sampleQuery: query } : {}),
+  });
+  if (result.status === "skipped") {
+    return {
+      kind: "error",
+      text: `LCM dump skipped: ${result.reason} (${result.detail}).`,
+    };
+  }
+  if (save !== undefined) {
+    const target = resolve(save);
+    try {
+      writeDumpTarget(target, `${result.text}\n`);
+    } catch (error) {
+      return {
+        kind: "error",
+        text: `LCM dump failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    return {
+      kind: "success",
+      text: `LCM dump: wrote ${Buffer.byteLength(result.text, "utf8")} bytes to ${target} (mode 0600).`,
+    };
+  }
+  return { kind: "success", text: result.text };
+}
+
 /** Live stems guard gc: disk stems are sanitized session ids, so the check
  * compares those, not raw ids, and fails closed by also covering the calling
  * session even when its store is not in the map yet. */
@@ -498,12 +600,19 @@ const GC_DEFAULT_DAYS = 30;
 function gcCandidates(
   deps: LcmCommandDeps,
   sessionId: string,
+  days: number,
+  onlySession: string | undefined,
 ): Array<{ id: string; path: string; sizeBytes: number; ageDays: number }> {
   const live = liveStems(deps, sessionId);
-  const cutoff = Date.now() - GC_DEFAULT_DAYS * 86_400_000;
-  const out: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }> = [];
-  for (const ref of listSidecarRefs(deps.sidecarDir)) {
-    if (live.has(ref.id)) continue;
+  const refs = listSidecarRefs(deps.sidecarDir).filter((ref) => !live.has(ref.id));
+  // A named session bypasses the age window: the filter itself is the intent.
+  const selected =
+    onlySession === undefined
+      ? refs
+      : refs.filter((ref) => ref.id === onlySession || ref.id === sanitizeSidecarId(onlySession));
+  const cutoff = Date.now() - days * 86_400_000;
+  const candidates: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }> = [];
+  for (const ref of selected) {
     try {
       const stat = statSync(ref.path);
       if (!stat.isFile()) continue;
@@ -513,8 +622,8 @@ function gcCandidates(
           mtimeMs = Math.max(mtimeMs, statSync(`${ref.path}${suffix}`).mtimeMs);
         } catch {}
       }
-      if (mtimeMs > cutoff) continue;
-      out.push({
+      if (onlySession === undefined && mtimeMs > cutoff) continue;
+      candidates.push({
         id: ref.id,
         path: ref.path,
         sizeBytes: stat.size,
@@ -524,7 +633,7 @@ function gcCandidates(
       continue;
     }
   }
-  return out;
+  return candidates;
 }
 
 /** Age-based sidecar collection. Dry-run default; only --apply deletes, and
@@ -536,19 +645,43 @@ export function handleGc(
 ): CommandResult {
   const sessionId = String(invocation.agent.session.id);
   const apply = args.includes("--apply");
+  if (args.includes("--session") && valueOf(args, "--session") === undefined) {
+    return { kind: "error", text: "LCM gc: --session takes a session id." };
+  }
+  if (args.includes("--older-than") && valueOf(args, "--older-than") === undefined) {
+    return { kind: "error", text: "LCM gc: --older-than takes a number of days." };
+  }
+  const onlySession = valueOf(args, "--session");
+  if (onlySession !== undefined && liveStems(deps, sessionId).has(sanitizeSidecarId(onlySession))) {
+    return {
+      kind: "error",
+      text: `LCM gc: session ${onlySession} is open in this process; gc never deletes an open sidecar.`,
+    };
+  }
+  const rawDays = valueOf(args, "--older-than") ?? String(GC_DEFAULT_DAYS);
+  const days = Number.parseFloat(rawDays.replace(/d$/u, ""));
+  if (!Number.isFinite(days) || days < 0) {
+    return { kind: "error", text: "LCM gc: --older-than takes a number of days." };
+  }
   let candidates: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }>;
   try {
-    candidates = gcCandidates(deps, sessionId);
+    candidates = gcCandidates(deps, sessionId, days, onlySession);
   } catch (error) {
     return {
       kind: "error",
       text: `LCM gc failed: cannot list ${deps.sidecarDir} (${error instanceof Error ? error.message : String(error)}).`,
     };
   }
+  if (onlySession !== undefined && candidates.length === 0) {
+    return {
+      kind: "success",
+      text: `LCM gc: no sidecar for session ${onlySession} (the current session is never a candidate).`,
+    };
+  }
   if (candidates.length === 0) {
     return {
       kind: "success",
-      text: `LCM gc: nothing eligible (no sidecar older than ${GC_DEFAULT_DAYS} day(s); live sidecars are never candidates).`,
+      text: `LCM gc: nothing eligible (no sidecar older than ${days} day(s); live sidecars are never candidates).`,
     };
   }
   const lines = candidates.map(

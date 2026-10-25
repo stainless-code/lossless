@@ -6,6 +6,7 @@ import { ManualCompactionError } from "@deepseek-ai/dsh-compaction";
 import {
   handleBackup,
   handleDiagnose,
+  handleDump,
   handleExport,
   handleGc,
   handleHeal,
@@ -19,7 +20,7 @@ import {
 export type { LcmCommandDeps } from "./lifecycle.ts";
 
 const USAGE =
-  "Usage: /lcm [status|report|backup [file]|export [file]|import <file>|gc [--apply]|migrate [--apply]|heal [--apply] [--max-nodes N]|diagnose [--save <file>]|compact]";
+  "Usage: /lcm [status|report|dump [--save <file>] [--include-removed] [query]|backup [file]|export [file]|import <file>|gc [--apply] [--session <id>] [--older-than <days>]|migrate [--apply]|heal [--apply] [--max-nodes N]|diagnose [--save <file>]|compact]";
 
 function assertNever(value: never): never {
   throw new Error(`unknown manual compaction error code: ${String(value)}`);
@@ -88,13 +89,14 @@ export function lcmCommandDefinition(ctx: Context, deps: LcmCommandDeps) {
     definitionId: CommandDefinitionId("deepseek-lossless"),
     name: "lcm",
     description:
-      "Lossless session memory: status, report, backup, export, import, gc, migrate, heal, diagnose, compact",
+      "Lossless session memory: status, report, dump, backup, export, import, gc, migrate, heal, diagnose, compact",
     handler: (invocation: CommandInvocation): Promise<CommandResult> => {
       const tokens = invocation.rawInput.trim().split(/\s+/).filter(Boolean);
       const verb = tokens[0] ?? "";
       const args = tokens.slice(1);
       if (verb === "" || verb === "status") return handleStatus(ctx, deps, invocation);
       if (verb === "report") return Promise.resolve(handleReport(deps, invocation));
+      if (verb === "dump") return Promise.resolve(handleDump(deps, invocation, args));
       if (verb === "backup") return Promise.resolve(handleBackup(deps, invocation, args));
       if (verb === "export") return Promise.resolve(handleExport(deps, invocation, args));
       if (verb === "import") return Promise.resolve(handleImport(deps, invocation, args));
