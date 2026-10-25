@@ -4,4 +4,4 @@
 "opencode-lossless": patch
 ---
 
-Report orphan sidecars in doctor. `integritySnapshot` now lists `.sqlite` files and stale `wal` and `shm` files with no live session. `checkIntegrity` reports them as a read-only `orphan-sidecar` finding through `lcm doctor` and the diagnose bundle. Report only. Deletion stays manual.
+Report orphan sidecars in doctor. `integritySnapshot` now lists sidecar files and stale `wal` and `shm` files with no live session (`.sqlite` by default, `.db` for Pi). `checkIntegrity` reports them as a read-only `orphan-sidecar` finding through `lcm doctor` and the diagnose bundle. Report only. Deletion stays manual.
