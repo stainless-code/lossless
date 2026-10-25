@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { test } from "vite-plus/test";
 
-import { EXPORT_VERSION, exportTranscript } from "../src/export.ts";
+import { EXPORT_VERSION, exportTranscript, type ExportRow } from "../src/export.ts";
 import { describeFile, filePreviewText, kindOf } from "../src/files.ts";
 import { importTranscript, parseExport } from "../src/import.ts";
 import { ingestEntries } from "../src/ingest.ts";
@@ -359,4 +359,98 @@ test("import: a file row naming an entry the file does not hold is refused", () 
   assert.match(result.refused ?? "", /came from entry missing/);
   assert.equal(target.stats().files, 0);
   target.close();
+});
+
+test("export/import/export: a file store round-trips byte-identical", () => {
+  const source = new LcmStore(":memory:");
+  const body = jsonBody(400);
+  ingestEntries(
+    source,
+    [
+      {
+        entryId: "e0",
+        role: "toolResult",
+        text: body,
+        timestamp: 1,
+        fileHint: { path: "/x/big.json" },
+      },
+    ],
+    POLICY,
+  );
+  const first = exportTranscript(source).toJSONL();
+  const target = new LcmStore(":memory:");
+  const parsed = parseExport(first);
+  assert.ok("rows" in parsed);
+  const result = importTranscript(target, (parsed as { rows: never[] }).rows);
+  assert.equal(result.refused, undefined);
+  const second = exportTranscript(target).toJSONL();
+  assert.equal(second, first);
+  target.close();
+  source.close();
+});
+
+test("import: a file row whose hash does not match its message is refused without writing", () => {
+  const source = new LcmStore(":memory:");
+  const body = jsonBody(400);
+  ingestEntries(
+    source,
+    [
+      {
+        entryId: "e0",
+        role: "toolResult",
+        text: body,
+        timestamp: 1,
+        fileHint: { path: "/x/big.json" },
+      },
+    ],
+    POLICY,
+  );
+  const parsed = parseExport(exportTranscript(source).toJSONL());
+  assert.ok("rows" in parsed);
+  const tampered: ExportRow[] = (parsed as { rows: ExportRow[] }).rows.map((r) =>
+    r.rowType === "file" ? { ...r, sha256: "0".repeat(64) } : r,
+  );
+  const target = new LcmStore(":memory:");
+  const result = importTranscript(target, tampered);
+  assert.match(result.refused ?? "", /sha256/);
+  assert.equal(target.messageCount(), 0);
+  assert.equal(target.stats().files, 0);
+  target.close();
+  source.close();
+});
+
+test("import: a file row whose length does not match its message is refused, existing rows untouched", () => {
+  const source = new LcmStore(":memory:");
+  const body = jsonBody(400);
+  ingestEntries(
+    source,
+    [
+      {
+        entryId: "e0",
+        role: "toolResult",
+        text: body,
+        timestamp: 1,
+        fileHint: { path: "/x/big.json" },
+      },
+    ],
+    POLICY,
+  );
+  const text = exportTranscript(source).toJSONL();
+  const parsed = parseExport(text);
+  assert.ok("rows" in parsed);
+  const target = new LcmStore(":memory:");
+  const first = importTranscript(target, (parsed as { rows: never[] }).rows);
+  assert.equal(first.refused, undefined);
+  assert.equal(target.stats().files, 1);
+  const before = target.allFiles()[0]!;
+  const tampered: ExportRow[] = (parsed as { rows: ExportRow[] }).rows.map((r) =>
+    r.rowType === "file" ? { ...r, bytes: before.bytes + 1 } : r,
+  );
+  const result = importTranscript(target, tampered);
+  assert.match(result.refused ?? "", /chars/);
+  assert.equal(target.stats().files, 1);
+  assert.equal(target.allFiles()[0]!.sha256, before.sha256);
+  assert.equal(target.allFiles()[0]!.bytes, before.bytes);
+  target.close();
+  source.close();
 });

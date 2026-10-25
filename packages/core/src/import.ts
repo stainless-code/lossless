@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   EXPORT_VERSION,
   type ExportFileRow,
@@ -217,6 +219,33 @@ const REFUSED = (reason: string): ImportResult => ({
   refused: reason,
 });
 
+/** A file row names the body its messages already carry, so the bytes and the
+ * hash have to match what those rows hold. The check runs before any write, so
+ * a corrupt file refuses without a partial import. Rows with no linked entries
+ * carry nothing to check. */
+function fileHashProblem(rows: readonly ExportRow[]): string | undefined {
+  const textByEntry = new Map(
+    rows
+      .filter((r): r is ExportMessageRow => r.rowType === "message")
+      .map((m) => [m.entryId, m.text]),
+  );
+  for (const f of rows) {
+    if (f.rowType !== "file") continue;
+    for (const entryId of f.entryIds) {
+      const text = textByEntry.get(entryId);
+      if (text === undefined) continue;
+      if (text.length !== f.bytes) {
+        return `file ${f.fileId} claims ${f.bytes} chars but entry ${entryId} holds ${text.length}`;
+      }
+      const actual = createHash("sha256").update(text).digest("hex");
+      if (actual !== f.sha256) {
+        return `file ${f.fileId} carries sha256 ${f.sha256} but entry ${entryId} hashes to ${actual}`;
+      }
+    }
+  }
+  return undefined;
+}
+
 function fileDescriptor(f: ExportFileRow): FileDescriptor {
   return {
     fileId: f.fileId,
@@ -244,6 +273,9 @@ export function importTranscript(store: LcmStore, rows: readonly ExportRow[]): I
 
   const problem = provenanceProblem(rows);
   if (problem) return REFUSED(problem);
+
+  const hashProblem = fileHashProblem(rows);
+  if (hashProblem) return REFUSED(hashProblem);
 
   const exported = new Set(messages.map((m) => m.entryId));
   const foreign = store.allMessages().filter((m) => !exported.has(m.entryId));
