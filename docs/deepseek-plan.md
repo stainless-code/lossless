@@ -167,7 +167,9 @@ Traced from the pinned `dsh-compaction-basic` lib. Config types and
   `compactCheckpointSource`) is reader and tooling surface: custom commits
   must reuse it byte for byte.
 - No live-model verification exists on this branch: every slice proves
-  itself through scripted adapters only.
+  itself through scripted adapters only. The live-proof Evidence bullet below
+  covers the adapter loop on a live session; the transaction-flow numbers
+  (item 1) still wait on a DeepSeek key.
 
 ### Candidate A: orchestrated multi-compact through the published seam
 
@@ -490,6 +492,20 @@ Current pins: `dsh-*@0.2.1-rc.3`, `cordis@4.0.5`, against harness HEAD `22ddee37
   one `backfill` metrics row with its ingested count and span. Suite: 79
   tests green (`vp check`, `tsc`, `bun run test packages/deepseek`,
   `bun run pack`).
+- Live proof 2026-10-25 (installed dsh 0.2.1-rc.3, throwaway `lossless-proof`
+  profile, wrapper outside the repos, agent on OpenCode Go
+  `deepseek-v4.1-flash`): auto pressure fired on a live session; the seam
+  path stored 6 leaves plus 1 condensed node with a checkpoint replace on
+  the surface and one `pass` metrics row. Summarizer routed to OpenRouter
+  `deepseek/deepseek-v4.1-flash-1017` wrote real prose leaves plus a
+  condensed parent (usage billed); the Go route 400s direct summarizer calls
+  (`MissingSessionID`: no `x-opencode-session` header), which escalation
+  absorbed into mechanical nodes. A fresh session called `lcm_grep` plus
+  `lcm_expand` and answered verbatim with cross-session entry citations.
+  A defaults quiet run mirrored 7 rows with 0 summaries. Two boot bugs fixed
+  with TDD on the branch (uninjectable `sessionQuery` degrades to
+  live-mirror-only; cold message map re-derives from the live log). Suite:
+  873 tests green. Merge and item 10 stay owner decisions.
 
 ## Open questions for the owner
 
