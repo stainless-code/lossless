@@ -24,9 +24,11 @@ import {
   summarizeTerse,
   summarizeWithEscalation,
   deterministicTruncate,
+  LEVEL3_TOKENS,
   type EscalationResult,
   type LlmComplete,
 } from "./summarize.ts";
+import { isMechanicalToolMessage, normalizeMechanicalTools } from "./util/summarizer-config.ts";
 
 const LEAF_CHUNK_TOKENS = 3000;
 /** Deepest condensed node the DAG may grow. With MAX_DAG_FANOUT children this
@@ -49,6 +51,9 @@ export interface CompactionInput {
   targetTokens?: number;
   /** Where the returned summary must reach back to; defaults to the span start. */
   frontierFrom?: string;
+  /** Tool names whose spans compact mechanically. Read at compaction time
+   * only; ingest still stores every message verbatim. */
+  mechanicalTools?: readonly string[];
 }
 
 export type CompactionOutcome =
@@ -87,6 +92,9 @@ export async function runCompaction(
     session?: string;
     maxDepth?: number;
     stage?: CompactionStage;
+    /** Tool names whose spans compact mechanically. Merged with
+     * `input.mechanicalTools`; an empty list keeps the LLM path. */
+    mechanicalTools?: readonly string[];
   },
 ): Promise<CompactionOutcome> {
   const targetTokens = input.targetTokens ?? 1500;
@@ -114,13 +122,133 @@ export async function runCompaction(
 
   const leafIds: number[] = [];
   const claimedLeaves: PlainSummary[] = [];
+  const mechanicalTools = normalizeMechanicalTools([
+    ...(input.mechanicalTools ?? []),
+    ...(opts?.mechanicalTools ?? []),
+  ]);
+  const uncoveredAll = store.uncoveredMessagesInSpan(bounds.firstEntryId, bounds.lastEntryId);
+  const payloadByEntry = new Map(input.span.map((e) => [e.entryId, e.payload]));
+  const mechanicalIds = mechanicalMessageIds(uncoveredAll, mechanicalTools, payloadByEntry);
   const chunks = mergeToLimit(
-    chunkContiguous(
-      store.uncoveredMessagesInSpan(bounds.firstEntryId, bounds.lastEntryId),
-      leafChunkBudget,
-    ),
+    chunkContiguous(uncoveredAll, leafChunkBudget),
     opts?.maxChunks ?? 24,
-  );
+  ).flatMap((chunk) => splitByMechanical(chunk, mechanicalIds));
+  // A mechanical leaf is the deterministic truncate over the same redacted
+  // source the ladder would fall back to, stored without a model call. The
+  // rows stay covered through provenance, so heal can re-derive the span.
+  async function storeMechanicalLeaf(
+    remaining: StoredMessage[],
+    chunkHead: StoredMessage,
+    chunkTail: StoredMessage,
+  ): Promise<void> {
+    const started = Date.now();
+    const fileRefs = store.filesForMessages(remaining.map((m) => m.id));
+    const fileByMessage = new Map(fileRefs.map((r) => [r.messageId, r]));
+    const source = remaining.map((m) => {
+      const ref = fileByMessage.get(m.id);
+      return { role: m.role, text: ref ? redact(filePreviewText(ref)) : redact(m.text) };
+    });
+    const sourceChars = source.reduce((n, m) => n + m.text.length, 0);
+    const plain = source.map((m) => `[${m.role}]\n${m.text}`).join("\n\n");
+    const truncated = deterministicTruncate(plain, LEVEL3_TOKENS);
+    const stored = `${TRUNCATED_SUMMARY_PREFIX}\n${redact(truncated)}`;
+    const tokens = estimateTokens(stored);
+    const claimed = store.uncoveredMessagesInSpan(chunkHead.entryId, chunkTail.entryId);
+    const ours =
+      claimed.length === remaining.length && claimed.every((m, i) => m.id === remaining[i]?.id);
+    if (!ours) {
+      remaining.length = 0;
+      remaining.push(...claimed);
+      if (remaining.length === 0) return;
+      if (!remaining.every((m) => mechanicalIds.has(m.id))) return;
+      await storeMechanicalLeaf(remaining, remaining[0]!, remaining[remaining.length - 1]!);
+      return;
+    }
+    const inserted = store.insertSummary({
+      kind: "leaf",
+      text: stored,
+      tokens,
+      depth: 0,
+      quality: "mechanical",
+      firstEntryId: chunkHead.entryId,
+      lastEntryId: chunkTail.entryId,
+      messageIds: remaining.map((m) => m.id),
+      fileIds: [...new Set(fileRefs.map((r) => r.fileId))],
+    });
+    const durationMs = Date.now() - started;
+    if (!inserted.created) {
+      reportSkippedExisting(
+        inserted.id,
+        inserted.existingTokens,
+        session,
+        "leaf",
+        0,
+        [chunkHead.entryId, chunkTail.entryId],
+        tokens,
+        durationMs,
+        emit,
+      );
+      if (inserted.foreignLive) {
+        claimedLeaves.push({
+          id: inserted.id,
+          depth: 0,
+          firstEntryId: chunkHead.entryId,
+          lastEntryId: chunkTail.entryId,
+          text: inserted.existingText,
+        });
+      }
+      if (
+        inserted.own &&
+        replaceIfSmaller(
+          store,
+          inserted.id,
+          inserted.existingTokens,
+          stored,
+          tokens,
+          "mechanical",
+          session,
+          "leaf",
+          started,
+          emit,
+        )
+      ) {
+        leafIds.push(inserted.id);
+        reportFallbackStored(
+          "leaf",
+          3,
+          session,
+          [chunkHead.entryId, chunkTail.entryId],
+          sourceChars,
+          inserted.id,
+          emit,
+        );
+      }
+      return;
+    }
+    reportFallbackStored(
+      "leaf",
+      3,
+      session,
+      [chunkHead.entryId, chunkTail.entryId],
+      sourceChars,
+      inserted.id,
+      emit,
+    );
+    leafIds.push(inserted.id);
+    emit({
+      event: "lcm",
+      kind: "summary-stored",
+      stage: "leaf",
+      level: 3,
+      quality: "mechanical",
+      depth: 0,
+      tokens,
+      summaryId: inserted.id,
+      session,
+      span: [chunkHead.entryId, chunkTail.entryId],
+      durationMs,
+    });
+  }
   // Another writer can claim part of a chunk between the snapshot above and the
   // insert below, so the range is re-asked after the model answers and checked
   // with no await before the insert, leaving no gap for another claim.
@@ -137,6 +265,14 @@ export async function runCompaction(
       // and the clip metric stays quiet.
       const refs = store.filesForMessages(remaining.map((m) => m.id));
       const refByMessage = new Map(refs.map((r) => [r.messageId, r]));
+      if (
+        mechanicalTools.length > 0 &&
+        remaining.length > 0 &&
+        remaining.every((m) => mechanicalIds.has(m.id))
+      ) {
+        await storeMechanicalLeaf(remaining, chunkHead, chunkTail);
+        return;
+      }
       let sourceClipped = false;
       const items = remaining.flatMap((m) => {
         const ref = refByMessage.get(m.id);
@@ -316,15 +452,26 @@ export async function runCompaction(
     if (!groupHead || !groupTail) break;
     const depth = groupHead.depth + 1;
     const started = Date.now();
-    const answer = await summarizeWithEscalation(
-      group.map((n) => ({ role: "summary", text: n.text })),
-      targetTokens,
-      llm,
-      session,
-    );
-    const { text, level } = answer;
     const span: [string, string] = [groupHead.firstEntryId, groupTail.lastEntryId];
     const sourceChars = group.reduce((n, s) => n + s.text.length, 0);
+    // A group of only mechanical children carries no clean source, so the
+    // parent is the deterministic truncate, with no model spend. Heal repairs
+    // the leaves first and the parent after, as with any tainted ancestor.
+    const mechanicalGroup = mechanicalTools.length > 0 && group.every((n) => isMechanicalNode(n));
+    const answer = mechanicalGroup
+      ? null
+      : await summarizeWithEscalation(
+          group.map((n) => ({ role: "summary", text: n.text })),
+          targetTokens,
+          llm,
+          session,
+        );
+    const { text, level } =
+      answer ??
+      (() => {
+        const plain = group.map((n) => `[summary]\n${n.text}`).join("\n\n");
+        return { text: deterministicTruncate(plain, LEVEL3_TOKENS), level: 3 as const };
+      })();
     const stored = storedSummaryText(text, level, redact);
     const tokens = estimateTokens(stored);
     const quality = condensedQuality(level, group);
@@ -340,7 +487,7 @@ export async function runCompaction(
       // A parent inherits its children's handles, which is how a top-level
       // node answers "which files does this cover" without expanding.
       fileIds: store.fileIdsForSummaries(group.map((n) => n.id)),
-      ...(answer.thoroughText === undefined ? {} : { thoroughText: answer.thoroughText }),
+      ...(answer?.thoroughText === undefined ? {} : { thoroughText: answer.thoroughText }),
     });
     const durationMs = Date.now() - started;
     if (!inserted.created) {
@@ -381,7 +528,7 @@ export async function runCompaction(
     }
     condensedIds.push(inserted.id);
     reportFallbackStored("condensed", level, session, span, sourceChars, inserted.id, emit);
-    if (tokens > targetTokens || answer.retried) {
+    if (!mechanicalGroup && answer && (tokens > targetTokens || answer.retried)) {
       reportOversize(
         "condensed",
         depth,
@@ -417,7 +564,10 @@ export async function runCompaction(
   // overshoot counts, which is the same twice-the-target bar the final render
   // clips at, so the reduction hits exactly the nodes that would be cut.
   const lone = frontier.length === 1 ? frontier[0] : undefined;
-  if (lone && frontierTok > targetTokens * 2) {
+  // A mechanical lone node stays as stored: re-summarizing the truncate would
+  // spend a call to reproduce the same tier.
+  const loneMechanical = lone !== undefined && isMechanicalNode(lone);
+  if (lone && frontierTok > targetTokens * 2 && !loneMechanical) {
     const beforeTokens = lone.tokens;
     const started = Date.now();
     const answer = await summarizeTerse(
@@ -770,5 +920,68 @@ function adjacentRuns(frontier: readonly SummaryNode[]): SummaryNode[][] {
     if (current && current[0]?.depth === node.depth) current.push(node);
     else runs.push([node]);
   }
+  return runs;
+}
+
+/** A node the mechanical path may fold without a call: the verdict says so,
+ * or the text carries the storage marker predated rows keep. */
+function isMechanicalNode(node: SummaryNode): boolean {
+  return node.quality === "mechanical" || node.text.startsWith(TRUNCATED_SUMMARY_PREFIX);
+}
+
+/** Message ids that compact mechanically: a direct tool-name hit, or a
+ * toolResult right after a listed call, which is how Pi stores a result whose
+ * own text names no tool. Runs over row order so a covered call still marks
+ * its uncovered result. */
+function mechanicalMessageIds(
+  messages: readonly StoredMessage[],
+  tools: readonly string[],
+  payloadByEntry?: ReadonlyMap<string, string | undefined>,
+): Set<number> {
+  const ids = new Set<number>();
+  if (tools.length === 0) return ids;
+  let prevDirectListed = false;
+  for (const m of messages) {
+    const payload = payloadByEntry?.get(m.entryId) ?? m.payload;
+    const direct = isMechanicalToolMessage({ text: m.text, payload }, tools);
+    if (direct) {
+      ids.add(m.id);
+      prevDirectListed = true;
+      continue;
+    }
+    if (m.role === "toolResult" && prevDirectListed) {
+      ids.add(m.id);
+      prevDirectListed = false;
+      continue;
+    }
+    prevDirectListed = false;
+  }
+  return ids;
+}
+
+/** Split a token chunk into runs of mechanical and non-mechanical messages,
+ * so a noisy result isolates from the prose around it. Order is kept. */
+function splitByMechanical(
+  chunk: StoredMessage[],
+  mechanicalIds: ReadonlySet<number>,
+): StoredMessage[][] {
+  if (chunk.length === 0 || mechanicalIds.size === 0) return chunk.length === 0 ? [] : [chunk];
+  const runs: StoredMessage[][] = [];
+  let current: StoredMessage[] = [];
+  let currentFlag: boolean | undefined;
+  for (const m of chunk) {
+    const flag = mechanicalIds.has(m.id);
+    if (current.length === 0) {
+      current = [m];
+      currentFlag = flag;
+    } else if (flag === currentFlag) {
+      current.push(m);
+    } else {
+      runs.push(current);
+      current = [m];
+      currentFlag = flag;
+    }
+  }
+  if (current.length > 0) runs.push(current);
   return runs;
 }
