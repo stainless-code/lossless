@@ -6,3 +6,4 @@ const icon = (name: string, light: string, dark: string): string =>
 
 export const PI_ICON = icon("cmp-pi", "pi-light.svg", "pi-dark.svg");
 export const OPENCODE_ICON = icon("cmp-opencode", "opencode-light.svg", "opencode-dark.svg");
+export const DEEPSEEK_ICON = icon("cmp-deepseek", "deepseek.svg", "deepseek.svg");

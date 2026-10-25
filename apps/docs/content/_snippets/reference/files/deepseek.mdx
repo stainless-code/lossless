@@ -1,0 +1,73 @@
+The adapter writes under `sidecarDir`. The exception is an export or backup path you name yourself.
+
+## Store
+
+<FileTree>
+
+- sidecarDir/
+  - ses_0123456789abcdef.sqlite
+  - ses_0123456789abcdef.sqlite-wal
+  - ses_0123456789abcdef.sqlite-shm
+  - ses_0123456789abcdef.sqlite.backup-2026-10-25T12-00-00
+  - metrics.jsonl
+  - metrics.jsonl.2026-10-25T12-00-00
+  - lcm-export-2026-10-25T12-00-00.jsonl
+  - lcm-export-gc-2026-10-25T12-00-00.jsonl
+
+</FileTree>
+
+One sidecar per session holds the verbatim mirror, the DAG, and the checkpoint marker. The `.sqlite-wal` and `.sqlite-shm` files belong to it. Disk stems are sanitized session ids, which is what the gc live-stem guard compares. The directory is created 0700; the database, WAL, and shared-memory files are 0600.
+
+The live session log remains the source of truth for the conversation. The adapter does not backfill a deleted sidecar, so deleting one forgets that session's recall. `/lcm export` keeps a portable copy; `/lcm backup` keeps a byte copy.
+
+Sessions already live when the plugin mounts backfill through the same mirror path as the live feed, paged at 50 events with a 500-event per-session cap; re-mirroring inserts nothing. Each backfill writes one `backfill` metrics row with its ingested count and span.
+
+## Metrics
+
+`metrics.jsonl` holds one row per event, tagged with the session. Groups:
+
+| Group       | Kinds                                      |
+| ----------- | ------------------------------------------ |
+| Pass        | `pass`                                     |
+| Checkpoint  | `compaction-checkpoint`                    |
+| Backfill    | `backfill`                                 |
+| Recall      | `recall`                                   |
+| Reader      | `retrieval`                                |
+
+One `pass` row lands per ladder run with its outcome plus leaf and condensed counts and tracker usage; one `compaction-checkpoint` row lands per DAG bracket commit with condensed plus leaf seqs. `/lcm report` is a view over these rows. The log rotates at 5 MB, keeps three generations, and is created 0600.
+
+## Exports, backups, and gc
+
+| Path                                                | Written by            | Contents                                              |
+| --------------------------------------------------- | --------------------- | ----------------------------------------------------- |
+| `<sidecar>.backup-<timestamp>` beside the sidecar   | `/lcm backup`         | A byte copy of the sidecar. Never deleted by LCM.     |
+| `lcm-export-<timestamp>.jsonl`                      | `/lcm export`         | Every message and summary, verbatim, mode 0600.       |
+| `lcm-export-gc-<timestamp>.jsonl`                   | `/lcm gc --apply`     | The transcripts of every sidecar it is about to delete. |
+
+`/lcm import <path>` restores missing rows and skips present ones. It runs on its named file, so a fresh session can restore history it never mirrored.
+
+## Diagnostics
+
+```text
+/lcm diagnose                     # rendered, not written
+/lcm diagnose --save <path>       # exact bytes, mode 0600
+```
+
+The block carries versions, store facts, the effective options, and this session's metrics. [Commands](/reference/deepseek/command#diagnose) lists the flags.
+
+## Footprint
+
+One sidecar per session, so the directory grows with use. `/lcm gc` removes the ones older than 30 days that no live session holds; a deleted sidecar is not rebuilt from the session log.
+
+## Config
+
+The capability options live in the composition config, not under `sidecarDir`. [Config](/reference/deepseek/config) lists every key.
+
+<Callout type="warning" title="Plaintext, secrets included">
+  Stores, backups, and exports hold the session verbatim. Treat them like the session file.
+</Callout>
+
+## Related
+
+- [Security](/concepts/security): modes, contents, and what each surface exposes.
+- [Commands](/reference/deepseek/command): the subcommands that read and write these files.

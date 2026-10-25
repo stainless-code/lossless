@@ -1,14 +1,21 @@
 import { withBase } from "blume/components/islands/base-path.ts";
 
-import { OPENCODE_ICON } from "./harness-icons.ts";
+import { DEEPSEEK_ICON, OPENCODE_ICON } from "./harness-icons.ts";
 
-export type HostId = "pi" | "opencode";
+export type HostId = "pi" | "opencode" | "deepseek";
 
 export interface Host {
   id: HostId;
   label: string;
   description: string;
   icon: string;
+  /**
+   * Static entry route used when the current section holds no group for this
+   * host. DeepSeek ships reference only, so the guides-shaped default would
+   * link a page that does not exist. Mirrors the first entry of
+   * `content/reference/deepseek/meta.ts`.
+   */
+  entry?: string;
 }
 
 export const HOSTS: readonly Host[] = [
@@ -24,6 +31,13 @@ export const HOSTS: readonly Host[] = [
     description: "The OpenCode plugin",
     icon: OPENCODE_ICON,
   },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    description: "The DeepSeek adapter",
+    icon: DEEPSEEK_ICON,
+    entry: "/reference/deepseek/tools",
+  },
 ];
 
 export const under = (route: string, prefix: string): boolean =>
@@ -34,5 +48,6 @@ export const hostFromRoute = (route: string): HostId | undefined => {
   if (under(route, "/guides/opencode") || under(route, "/reference/opencode")) {
     return "opencode";
   }
+  if (under(route, "/reference/deepseek")) return "deepseek";
   return undefined;
 };

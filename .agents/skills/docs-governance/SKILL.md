@@ -15,6 +15,7 @@ Each doc has exactly one job, keep content in its lane:
 | `packages/*/CHANGELOG.md`                             | Each package's version history, written by changesets                                         | Marketing prose, roadmap                                                        |
 | `apps/docs/content/reference/pi/comparison.mdx`       | Audited Pi peer comparison; the page and the source are one file                              | Feature marketing, unverified cells                                             |
 | `apps/docs/content/reference/opencode/comparison.mdx` | Audited OpenCode v2 peer comparison; the page and the source are one file                     | Feature marketing, unverified cells                                             |
+| `apps/docs/content/reference/deepseek/comparison.mdx` | Audited DeepSeek peer comparison; the page and the source are one file                        | Feature marketing, unverified cells                                             |
 | `apps/docs/content/_snippets/**`                      | Shared Markdown or MDX fragments, spliced into the per-harness wrapper pages with `<include>` | Frontmatter, a second full copy of a page, or the other harness's content       |
 | `packages/core/README.md`                             | The engine's API: the entry, the two ports, the boundary rule                                 | Pi-specific behaviour, the split's rationale                                    |
 | `docs/roadmap.md`                                     | Forward-looking work, evidence gates, rejected items                                          | Shipped-feature history                                                         |
@@ -53,8 +54,8 @@ Each doc has exactly one job, keep content in its lane:
    "Last verified: …" before treating a cell as settled. Credit a peer's win in
    the cell: a comparison that shows only our wins is marketing.
    Peer package names appear in
-   `apps/docs/content/reference/{pi,opencode}/comparison.mdx`, and nowhere else
-   in this repo or on the site (owner policy). Those two pages are both the
+   `apps/docs/content/reference/{pi,opencode,deepseek}/comparison.mdx`, and nowhere else
+   in this repo or on the site (owner policy). Those three pages are both the
    audited source and the rendered page: edit a cell there, with its
    verification note and date, never in a second copy. There are no inspiration
    credits: the design cites the LCM paper (algorithmic
@@ -71,7 +72,7 @@ Each doc has exactly one job, keep content in its lane:
    the landing npm shows, `packages/<name>/CHANGELOG.md` is the version history
    changesets writes in place, and `packages/<name>/LICENSE` is a copy of the root
    licence. The comparisons live in
-   `apps/docs/content/reference/{pi,opencode}/comparison.mdx`, so the tarball
+   `apps/docs/content/reference/{pi,opencode,deepseek}/comparison.mdx`, so the tarball
    no longer ships them. The
    holder named there is the org brand, `stainless-code`, as in every other
    stainless-code package, never a personal name. npm

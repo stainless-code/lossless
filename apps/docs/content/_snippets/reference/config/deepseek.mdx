@@ -1,0 +1,40 @@
+The config is the capability's `config` object in the composition; there is no separate config file. `enabled` is opt-in: anything but exactly `true` registers nothing.
+
+## Keys
+
+| Key                        | Type               | Default         | Rides                | Effect                                                                                                              |
+| -------------------------- | ------------------ | --------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                  | boolean            | `false`         | mount                | Master flag. Anything but exactly `true` returns a no-op.                                                           |
+| `auto`                     | boolean            | `false`         | seam                 | Automatic step-boundary pressure and overflow-recovery listeners.                                                   |
+| `bracketAuto`              | boolean            | `false`         | adapter deps         | Route automatic pressure compaction through the DAG bracket instead of the seam.                                    |
+| `sidecarDir`               | string             | `"./.lossless"` | adapter              | One SQLite file per session; created when missing.                                                                  |
+| `summaryTokens`            | number             | `1500`          | adapter deps         | Tokens one summary aims for.                                                                                        |
+| `leafChunkTokens`          | number             | `3000`          | adapter deps         | Tokens one leaf chunk may hold before it splits.                                                                    |
+| `summarizationProvider`    | string             | unset           | seam                 | Summary provider; unset follows the routed model.                                                                   |
+| `summarizationModel`       | string             | unset           | seam                 | Summary model; unset follows the routed model.                                                                      |
+| `thresholdRatio`           | number             | `0.8`           | seam                 | Window fraction for pressure; capped at the window minus reserved output and headroom.                                |
+| `retainTokens`             | number             | unset           | seam                 | Recent context retained as an absolute token budget. Mutually exclusive with `retainRatio`.                           |
+| `retainRatio`              | number             | `0.16`          | seam                 | Recent context retained as a fraction of the priced window. Mutually exclusive with `retainTokens`.                   |
+| `headroomTokens`           | number             | `65536`         | seam                 | Pressure headroom beyond the routed output reservation.                                                             |
+| `modelPolicies`            | object[]           | unset           | seam                 | Exact provider/model overrides, merged over the defaults per routed target. Duplicate targets fail load.              |
+| `summarizerTokensPerCall`  | number             | `60000`         | adapter-only         | Ceiling on one summarizer request, refused before the provider is called.                                            |
+| `summarizerTokensPerPass`  | number             | `250000`        | adapter-only         | Ceiling on one pass across its calls.                                                                                |
+| `summarizerTokensPerHeal`  | number             | `120000`        | adapter-only         | Ceiling on one `/lcm heal --apply` repair run.                                                                       |
+| `healSourceTokens`         | number             | derived         | adapter-only         | Source tokens one heal map window may read. Unset derives `8 x summaryTokens`, clamped to `3000` through `24000`.    |
+
+Seam keys ride the harness `BasicCompactionConfig`, whose resolver rejects unknown keys, so every adapter-only key stays on the adapter's own deps and never crosses the seam. `bracketAuto` rides the adapter deps for the same reason. The manual `/lcm compact` path keeps the seam's 0 retain: it forces one useful reduction, so `retainTokens` prices only the pressure path the seam owns.
+
+The summarizer follows the routed provider and model unless both summarizer fields are set. The reader calls the calling agent's model: the latest routed request first, agent options second. `reasoning` stays false on every adapter model call, so a reasoning model never silently spends the output cap.
+
+## Parse rules
+
+- `enabled` mounts the mirror, the tools, the engine, and the command only when it is exactly `true`.
+- `auto` and `bracketAuto` stay off unless exactly `true`.
+- `retainTokens` and `retainRatio` are mutually exclusive; the seam's default shape is the ratio form.
+- `modelPolicies` entries match an exact provider plus model route; duplicates fail plugin load.
+- Unknown keys on the seam config are rejected by the seam resolver; adapter-only keys never reach it.
+
+## Related
+
+- [Compaction zones](/concepts/compaction-zones): the resolved lines in context.
+- [Commands](/reference/deepseek/command): the verbs that read and repair these values.

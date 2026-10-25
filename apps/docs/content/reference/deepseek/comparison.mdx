@@ -1,0 +1,120 @@
+---
+title: DeepSeek comparison
+description: "deepseek-lossless against the harness native compaction backend: one matrix, where the harness leads, and what is not comparable."
+sidebar:
+  label: "Comparison"
+search:
+  tags: ["reference", "comparison"]
+---
+
+deepseek-lossless is the DeepSeek harness adapter for a lossless context engine. It
+mirrors every session event into a per-session SQLite sidecar and summarizes the aged
+span into a DAG. Manual `/lcm compact` commits one condensed replacement plus log-only
+leaf records in a single bracket; automatic pressure stays on the harness seam unless
+`bracketAuto` routes it through the bracket too. The original bytes stay addressable,
+so what compaction removed can be read back.
+
+**Scope.** This page is DeepSeek only. The peer below is the harness's own replay-aware
+basic compaction backend, with the pruner service and the token meter it drives. A
+session runs one backend, so the cells compare what each one does with the same window.
+
+Cells are read from the pinned packages, never from a project's README. This package's
+own cells are read from this repository.
+
+Last verified: 2026-10-25.
+
+That date covers the peer cells and the audits named in the verification note,
+and this package's own cells, measured from this repository (`packages/core`
+plus `packages/deepseek`).
+
+## One matrix on the same axes
+
+Legend: ✅ full · 🟡 partial · ❌ none.
+
+| Dimension                          | deepseek-lossless                                                                                          | harness basic backend                                                                                              |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Owns the compaction boundary       | 🟡 manual `/lcm compact` commits through the DAG bracket; auto pressure stays on the seam unless `bracketAuto` is set | ✅ `compactIfNeeded`, `compactNow`, and `compactRegion` on one engine per composition, one checkpoint per transaction |
+| Model-visible history after a pass | condensed replacement naming `[lcm:summary #N]` refs; leaves land as log-only records under the same id    | checkpoint preamble plus a tagged summary block; a prior checkpoint merges instead of re-summarizing                |
+| Own store of the thread            | ✅ every derived text block verbatim in a per-session SQLite sidecar plus FTS5                              | ❌ none; reads the live session log                                                                                |
+| Verbatim original reachable        | ✅ any stored entry by id, any summary by id, character-windowed reads, cross-session reads                 | ❌ the checkpoint is the only copy; tool results survive only through the pruner                                    |
+| Recall mechanism                   | FTS5 `lcm_grep`, `lcm_describe`, `lcm_expand`, and in-process `lcm_expand_query` over stored history        | none; the checkpoint carries goals and decisions forward as prose                                                  |
+| Recall tools                       | `lcm_grep`, `lcm_describe`, `lcm_expand`, `lcm_expand_query`                                                | none                                                                                                               |
+| Cross-session scope                | one global sidecar directory; a 20-store, 40-hit, 1.5 s scan with 10 hits per store; reads by session id    | ❌ none; continuity is the prior-checkpoint merge within one session                                                |
+| Child sessions                     | ❌ none; the reader is one streaming call per step, at most 6 steps, inside the calling process             | n/a; the backend makes no reader calls                                                                             |
+| Prefix-cache behavior              | single-message `complete()` envelope; cannot express prefix reuse                                           | ✅ replays the conversation prefix with the instruction last, so the provider's warm prefix cache is reused         |
+| Model-free reduction               | ❌ the ladder is always model-backed, with a mechanical floor as fallback                                   | ✅ a pruner service trims tool results before pressure and overflow measurement, with no model call                 |
+| Checkpoint structure               | `[lcm:summary #N]` refs that resolve in the sidecar; resume rebuilds the last checkpoint from stored rows   | ✅ preamble framing, sectioned prompt with a verbatim-quoted goals section, snapshot pricing of the replayed range |
+| Pressure measurement               | seam meter drives pressure; status shows total against window plus thresholds and the last pass             | ✅ per-request uncached, cache-read, and cache-write buckets; pressure includes cache traffic; budgets scale to routed capacity |
+| Summary quality control            | ✅ leaf plus condensed ladder with escalation to a deterministic floor; shrink check on the condensed replace | ✅ one retry after the first compaction when pressure remains; overflow recovery; shrink check on the framed checkpoint |
+| Safety controls                    | ✅ redaction at every seam that hands stored text to a model; the store stays verbatim                      | labelled established-background framing on the checkpoint; a hostile id cannot escape the sidecar directory on reads |
+| Token budgeting and thresholds     | seam knobs (`thresholdRatio`, retain, headroom, per-model policies) plus adapter caps per call, pass, and heal | ✅ threshold ratio with capacity cap, retain ratio or tokens, headroom, exact-target policy table, generation caps |
+| Runtime dependencies               | `node:sqlite`, Node `>=22.19`; the engine inlines `typebox`; the harness packages stay external            | the harness itself; no sidecar, no store                                                                           |
+| Operator surface                   | `/lcm` with status, report, backup, export, import, gc, migrate, heal, diagnose, and compact                | the harness compaction surface the backend mounts behind                                                           |
+| Resume behavior                    | ✅ pre-mount backfill pages history at 50 events up to 500, then rebuilds the last checkpoint from the sidecar | prior checkpoint text in the log carries continuity; no backfill of older history                                   |
+
+## Where each one leads
+
+**deepseek-lossless.** Verbatim recall with provenance, a DAG behind one checkpoint
+per transaction, cross-session search and reads, and a resume path that rebuilds
+continuity from the sidecar.
+
+**The harness backend.** The closest peer and the default. It reuses the provider
+prefix cache by construction, trims tool results without spending a model call,
+frames checkpoints with merge rules and a goals section, prices pressure with
+cache-bucket resolution, and recovers from overflow. None of that needs a store.
+
+## By design, not missing
+
+Gaps against this backend, each with the reason it stays that way:
+
+- **No prefix-cache riding on summarizer calls.** The ladder sends one message per
+  call, which cannot express prefix reuse. Deterministic input ordering ships as
+  hygiene; cache-share claims wait on a replay prototype plus measured cache-read
+  share plus a live key.
+- **No pruner call on the adapter paths.** The seam runs the pruner before its own
+  pressure and overflow measurement. The bracket paths summarize the selected span
+  as stored; pruning live history would rewrite what the verbatim promise covers.
+- **No curated goals section.** The checkpoint prompt captures evolving goals as
+  prose. This package keeps the full transcript addressable, so goals are
+  recoverable by address rather than carried as a section.
+- **No child-session reader.** The harness has no hosted child session to borrow,
+  so the reader runs in process with a step and token budget. Findings stay wrapped
+  so raw transcript never enters the caller's context.
+
+## Live proof
+
+Run 2026-10-25 on the pinned harness with a live session: auto pressure stored 6
+leaves plus 1 condensed node with a checkpoint replacement on the surface and one
+`pass` metrics row. The summarizer wrote prose leaves plus a condensed parent with
+billed usage; a depth-2 DAG of 61 summaries formed over 4 swaps. A fresh session
+answered from aged history verbatim with cross-session entry citations. A defaults
+quiet run mirrored 7 rows with 0 summaries and left the log untouched. Two boot
+defects were fixed with tests (uninjectable session query degrades to
+live-mirror-only; the cold message map re-derives from the live log). Suite: 873
+tests green.
+
+Caveat, kept as a tuning follow-up rather than a loop defect: one model route was
+pathologically verbose on rung prompts and hit the output cap where another route
+wrote clean prose on the same prompts, so those nodes fell back mechanical.
+
+## When to pick which
+
+| You want                                                                                  | Reach for                |
+| ----------------------------------------------------------------------------------------- | ------------------------ |
+| A lossless transcript, a navigable DAG, recall by address, and cross-session search       | **deepseek-lossless**    |
+| The harness default: cache-reusing summaries, model-free pruning, and overflow recovery   | the basic backend        |
+
+## Verification note
+
+Method and coverage:
+
+- The peer cells were read from the installed tarballs at `dsh-compaction-basic`
+  `0.2.1-rc.3` with `cordis` `4.0.5`, against harness checkout `22ddee3792`:
+  the summarizer envelope and prefix-cache comment, the checkpoint preamble and
+  prior-merge rule, the goals section, the pruner call sites, the meter buckets
+  and pressure arithmetic, and the retry and overflow configuration vocabulary
+  all came from package source.
+- This package's cells came from this branch. The adapter opts in with
+  `enabled: true`, keeps auto pressure on the seam by default, and leaves the
+  harness packages external, packing to 26 KB.
+- This field moves fast. Re-verify a cell before relying on it.
