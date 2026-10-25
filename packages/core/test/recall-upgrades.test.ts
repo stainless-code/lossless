@@ -21,6 +21,7 @@ import {
 import { redactSecrets } from "../src/redact.ts";
 import { searchSessions } from "../src/sessions.ts";
 import { LcmStore } from "../src/store.ts";
+import { mechanicalToolNameOf } from "../src/util/summarizer-config.ts";
 
 function seedRoleTime(): LcmStore {
   const store = new LcmStore(":memory:");
@@ -699,6 +700,86 @@ test("toolScope: a user-quoted marker opens no scope but mixed assistant still m
     assert.match(missed.text, /No matches/);
     const kept = hitIds(grepView(store, redactSecrets, { query: "mixedword", toolName: "read" }));
     assert.deepEqual(kept, ["r02"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("toolScope: an assistant prose-plus-tool-call row opens scope for its tool", () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      {
+        entryId: "a00",
+        role: "assistant",
+        text: 'Here is why the change is safe.\ntool-call: read {"path": "/a"}',
+        timestamp: 1,
+      },
+      { entryId: "r00", role: "toolResult", text: "prosecallword body here", timestamp: 2 },
+      {
+        entryId: "a01",
+        role: "assistant",
+        text: "note: the log said tool-call: read mid-line",
+        timestamp: 3,
+      },
+      { entryId: "r01", role: "toolResult", text: "midlineword body here", timestamp: 4 },
+    ]);
+    const byEntry = new Map(store.allMessages().map((m) => [m.entryId, m.id]));
+    const scoped = toolScopeMessageIds(store, "read");
+    assert.ok(scoped.has(byEntry.get("a00")!), "prose-plus-call row opens scope");
+    assert.ok(scoped.has(byEntry.get("r00")!), "result after prose-plus-call stays in");
+    assert.ok(!scoped.has(byEntry.get("a01")!), "mid-line quote opens no scope");
+    assert.ok(!scoped.has(byEntry.get("r01")!), "result after a mid-line quote stays out");
+    const kept = hitIds(
+      grepView(store, redactSecrets, { query: "prosecallword", toolName: "read" }),
+    );
+    assert.deepEqual(kept, ["r00"]);
+    const missed = grepView(store, redactSecrets, { query: "midlineword", toolName: "read" });
+    assert.equal(missed.ok, true);
+    assert.match(missed.text, /No matches/);
+    // The tier decision is untouched: the mixed row stays on the summarizer path.
+    assert.equal(
+      mechanicalToolNameOf({
+        text: 'Here is why the change is safe.\ntool-call: read {"path": "/a"}',
+        role: "assistant",
+      }),
+      undefined,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("toolScope: a result naming another tool-call ends the scope", () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      {
+        entryId: "a00",
+        role: "assistant",
+        text: 'Here is why the change is safe.\ntool-call: read {"path": "/a"}',
+        timestamp: 1,
+      },
+      { entryId: "r00", role: "toolResult", text: "firstword body here", timestamp: 2 },
+      {
+        entryId: "r01",
+        role: "toolResult",
+        text: 'tool-call: bash {"cmd": "ls"}\nsecondword',
+        timestamp: 3,
+      },
+      { entryId: "r02", role: "toolResult", text: "thirdword body here", timestamp: 4 },
+    ]);
+    const byEntry = new Map(store.allMessages().map((m) => [m.entryId, m.id]));
+    const scoped = toolScopeMessageIds(store, "read");
+    assert.ok(scoped.has(byEntry.get("a00")!), "prose-plus-call row opens scope");
+    assert.ok(scoped.has(byEntry.get("r00")!), "plain result after the call stays in");
+    assert.ok(!scoped.has(byEntry.get("r01")!), "result naming another tool ends scope");
+    assert.ok(!scoped.has(byEntry.get("r02")!), "rows after the other tool stay out");
+    const kept = hitIds(grepView(store, redactSecrets, { query: "firstword", toolName: "read" }));
+    assert.deepEqual(kept, ["r00"]);
+    const missed = grepView(store, redactSecrets, { query: "secondword", toolName: "read" });
+    assert.equal(missed.ok, true);
+    assert.match(missed.text, /No matches/);
   } finally {
     store.close();
   }

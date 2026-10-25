@@ -71,7 +71,10 @@ export function mechanicalToolNameOf(message: {
   return toolNameOfPayload(message.payload);
 }
 
-function toolNameOfText(text: string, role?: string): string | undefined {
+/** The literal marker line a row carries, if any. Same line scan the
+ * mechanical decision reads, without the tool-only gate: a scope matcher
+ * calls this directly so a call embedded in prose still anchors. */
+export function toolNameOfText(text: string, role?: string): string | undefined {
   const head = text.match(/^\s*tool\s+([A-Za-z0-9_:\-/.]+)/i);
   if (head?.[1]) return head[1].toLowerCase();
   const lineMarker = /^\s*(?:\[tool:([^\]]+)\]|tool[_-]?call:\s*([A-Za-z0-9_:\-/.]+))/i;

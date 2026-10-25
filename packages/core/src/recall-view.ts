@@ -9,7 +9,7 @@ import {
   type PatternScanOutcome,
 } from "./pattern-scan.ts";
 import type { LcmStore, StoredMessage, SummaryNode } from "./store.ts";
-import { mechanicalToolNameOf } from "./util/summarizer-config.ts";
+import { mechanicalToolNameOf, toolNameOfText } from "./util/summarizer-config.ts";
 
 /**
  * Every view masks stored text with the injected `redact` before it is cut down
@@ -80,8 +80,10 @@ export function withToolScope(query: string, toolName: string): string {
  * only in the result. A trailing run of toolResult rows after a marker row
  * belongs to that call batch; any other role ends the run, as does a
  * toolResult row that names a different tool. Bracket text is checked
- * directly so one row naming two tools anchors both, and
- * mechanicalToolNameOf covers the `tool <name>` and payload forms. User and
+ * directly so one row naming two tools anchors both,
+ * mechanicalToolNameOf covers the `tool <name>` and payload forms, and
+ * toolNameOfText re-reads the marker lines without the mechanical tool-only
+ * gate so a call embedded in prose still anchors. User and
  * custom rows never open a scope, so quoting a marker in chat pulls in no
  * results; a mixed assistant block still opens through its literal marker. */
 export function toolScopeMessageIds(
@@ -102,18 +104,24 @@ export function toolScopeMessageIds(
     );
   let open = false;
   for (const row of visible) {
+    // toolNameOfText reads the same marker lines without the mechanical
+    // tool-only gate, so a call embedded in prose still anchors a scope.
     const namesTool =
       row.role !== "user" &&
       row.role !== "custom" &&
       (row.text.toLowerCase().includes(`[tool:${want}]`) ||
-        mechanicalToolNameOf({ text: row.text, payload: row.payload, role: row.role }) === want);
+        mechanicalToolNameOf({ text: row.text, payload: row.payload, role: row.role }) === want ||
+        toolNameOfText(row.text, row.role) === want);
     if (namesTool) {
       out.add(row.id);
       open = true;
       continue;
     }
     if (row.role === "toolResult" && open) {
-      const other = mechanicalToolNameOf({ text: row.text, payload: row.payload }) ?? "";
+      const other =
+        mechanicalToolNameOf({ text: row.text, payload: row.payload }) ??
+        toolNameOfText(row.text, row.role) ??
+        "";
       if ((other.length > 0 && other !== want) || /\[tool:/i.test(row.text)) {
         open = false;
         continue;
