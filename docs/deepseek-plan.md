@@ -506,6 +506,14 @@ Current pins: `dsh-*@0.2.1-rc.3`, `cordis@4.0.5`, against harness HEAD `22ddee37
   with TDD on the branch (uninjectable `sessionQuery` degrades to
   live-mirror-only; cold message map re-derives from the live log). Suite:
   873 tests green. Merge and item 10 stay owner decisions.
+- Live proof, continued: the Go `MissingSessionID` 400s are fixed on our end
+  by stamping the calling session id into `GenerateOptions` (the port field
+  pi-ai maps to the header; agent calls always had it, ours never sent it).
+  Depth-2 DAG formed live (61 summaries: 47 leaves, 14 condensed, max depth
+  2, over 4 swaps with billed usage). Caveat as tuning follow-up, not a loop
+  defect: Flash via Go is pathologically verbose on rung prompts (60k
+  output-cap hits on 2-3k-token sources), so those nodes fell back
+  mechanical, while OpenRouter Flash wrote clean prose on the same prompts.
 
 ## Open questions for the owner
 
