@@ -93,13 +93,14 @@ function toCoreDeps(deps: RecallDeps): CoreRecallDeps {
     storeFor: (sessionId) => deps.store(sessionId === "" ? undefined : sessionId),
     redact,
     ...(deps.record === undefined ? {} : { record: deps.record }),
-    searchPast: (session, query, scope, limit) => {
-      const result = searchPastSessions(
-        { past, redact },
-        session,
-        query,
-        typeof limit === "number" ? { limit } : {},
-      );
+    searchPast: (session, query, scope, limit, filters) => {
+      const result = searchPastSessions({ past, redact }, session, query, {
+        ...(typeof limit === "number" ? { limit } : {}),
+        ...(filters?.role === undefined ? {} : { role: filters.role }),
+        ...(filters?.dateStart === undefined ? {} : { dateStart: filters.dateStart }),
+        ...(filters?.dateEnd === undefined ? {} : { dateEnd: filters.dateEnd }),
+        ...(filters?.toolName === undefined ? {} : { toolName: filters.toolName }),
+      });
       return {
         text: result.text,
         hits: result.hits,
@@ -141,7 +142,14 @@ export function searchPastSessions(
   deps: PastSearchDeps,
   callingSessionId: string | undefined,
   query: string,
-  opts: { limit?: number; now?: () => number } = {},
+  opts: {
+    limit?: number;
+    now?: () => number;
+    role?: "user" | "assistant" | "toolResult" | "custom";
+    dateStart?: number;
+    dateEnd?: number;
+    toolName?: string;
+  } = {},
 ): PastSearchResult & { stoppedBy?: PastSearchStop; elapsedMs: number } {
   const now = opts.now ?? deps.now ?? Date.now;
   const started = now();
@@ -177,6 +185,10 @@ export function searchPastSessions(
       const view = grepView(store, deps.redact, {
         query,
         limit: Math.min(CROSS_SESSION_PER_STORE_HITS, hitLimit - hits),
+        ...(opts.role === undefined ? {} : { role: opts.role }),
+        ...(opts.dateStart === undefined ? {} : { dateStart: opts.dateStart }),
+        ...(opts.dateEnd === undefined ? {} : { dateEnd: opts.dateEnd }),
+        ...(opts.toolName === undefined ? {} : { toolName: opts.toolName }),
         expandTool: "lcm_expand",
       });
       if (!view.ok) {
@@ -306,6 +318,10 @@ export interface GrepArgs {
   readonly limit?: number;
   readonly summary_id?: number;
   readonly include_removed?: boolean;
+  readonly role?: "user" | "assistant" | "toolResult" | "custom";
+  readonly date_start?: number;
+  readonly date_end?: number;
+  readonly tool_name?: string;
   readonly scope?: string;
 }
 
@@ -395,7 +411,13 @@ export function answerGrep(deps: RecallDeps, callerSessionId: string, args: Grep
       { past: deps.pastSessions, redact: deps.redact },
       session,
       query,
-      typeof args.limit === "number" ? { limit: args.limit } : {},
+      {
+        ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+        ...(args.role === undefined ? {} : { role: args.role }),
+        ...(args.date_start === undefined ? {} : { dateStart: args.date_start }),
+        ...(args.date_end === undefined ? {} : { dateEnd: args.date_end }),
+        ...(args.tool_name === undefined ? {} : { toolName: args.tool_name }),
+      },
     );
     recordGrep(deps, session, {
       tool: "lcm_grep",
@@ -439,6 +461,10 @@ export function answerGrep(deps: RecallDeps, callerSessionId: string, args: Grep
     ...(sessionLimit === undefined ? {} : { limit: sessionLimit }),
     ...(typeof args.summary_id === "number" ? { summaryId: args.summary_id } : {}),
     ...(args.include_removed === undefined ? {} : { includeRemoved: args.include_removed }),
+    ...(args.role === undefined ? {} : { role: args.role }),
+    ...(args.date_start === undefined ? {} : { dateStart: args.date_start }),
+    ...(args.date_end === undefined ? {} : { dateEnd: args.date_end }),
+    ...(args.tool_name === undefined ? {} : { toolName: args.tool_name }),
     expandTool: "lcm_expand",
   });
   const hits = view.ok && typeof view.details.hits === "number" ? view.details.hits : 0;
@@ -478,6 +504,7 @@ export function describeAnswer(
 export interface ExpandArgs {
   readonly id?: number;
   readonly entry_id?: string;
+  readonly anchor?: string;
   readonly session?: string;
   readonly offset?: number;
   readonly limit?: number;
@@ -747,6 +774,24 @@ function lcmGrepTool(deps: RecallDeps) {
         description:
           "Include matches from a branch that left the active path (excluded by default)",
       },
+      role: {
+        type: "string",
+        enum: ["user", "assistant", "toolResult", "custom"],
+        description: "Keep only rows stored with this role",
+      },
+      date_start: {
+        type: "number",
+        description: "Keep only rows at or after this timestamp",
+      },
+      date_end: {
+        type: "number",
+        description: "Keep only rows at or before this timestamp",
+      },
+      tool_name: {
+        type: "string",
+        description:
+          "Keep only tool-result rows for this tool. It matches [tool:Name] markers. It applies to query searches only.",
+      },
       scope: {
         type: "string",
         enum: [...RECALL_SCOPES],
@@ -790,10 +835,14 @@ function lcmExpandTool(deps: RecallDeps) {
   return defineTool({
     name: "lcm_expand",
     description:
-      "Read the original messages a summary covers, or one named entry. Without entry_id, list `limit` messages from message index `offset`. With entry_id, read that one message from `char_offset` for up to `max_chars` characters; continue from the char_offset the result reports. `id` is the summary to list, or to check that the entry is covered; omit it to read an entry that no summary covers yet. Pass `session` with the id from an [lcm:session <id>] hit to read that past session's sidecar; the text is labelled as a past session's history and the read is read-only.",
+      "Read the original messages a summary covers, or one named entry. Without entry_id, list `limit` messages from message index `offset`, or centered on `anchor` when it names an entry id. With entry_id, read that one message from `char_offset` for up to `max_chars` characters; continue from the char_offset the result reports. `id` is the summary to list, or to check that the entry is covered; omit it to read an entry that no summary covers yet. Pass `session` with the id from an [lcm:session <id>] hit to read that past session's sidecar; the text is labelled as a past session's history and the read is read-only.",
     parameters: {
       id: { type: "integer", description: "Summary id, the N in [lcm:summary #N ...]" },
       entry_id: { type: "string", description: "Read this one message by entry id" },
+      anchor: {
+        type: "string",
+        description: "Center the listing window on this entry id (with id, without entry_id)",
+      },
       session: {
         type: "string",
         description:

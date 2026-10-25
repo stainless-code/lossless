@@ -227,6 +227,73 @@ describe("cross-session recall", () => {
     expect(statSync(path).mtimeMs).toBe(before.mtimeMs);
     expect(existsSync(join(dir, `${CURRENT}.sqlite`))).toBe(false);
   });
+
+  it("forwards role, date, and tool filters to past sessions", () => {
+    const dir = tempDir();
+    const past = new LcmStore(join(dir, `${PAST}.sqlite`));
+    try {
+      ingestEntries(past, [
+        {
+          entryId: `${PAST}:prompt:msg_1`,
+          role: "user",
+          text: "zephyr routing decision from a user",
+          timestamp: 100,
+        },
+        {
+          entryId: `${PAST}:prompt:msg_2`,
+          role: "assistant",
+          text: "zephyr routing decision from the assistant",
+          timestamp: 200,
+        },
+        {
+          entryId: `${PAST}:prompt:msg_3`,
+          role: "assistant",
+          text: "[tool:Read] zephyr routing decision file",
+          timestamp: 300,
+        },
+        {
+          entryId: `${PAST}:prompt:msg_4`,
+          role: "toolResult",
+          text: "[tool:Read] zephyr routing decision contents",
+          timestamp: 400,
+        },
+      ]);
+    } finally {
+      past.close();
+    }
+    const { sidecars, recall } = deps(dir, undefined);
+    try {
+      const role = answerGrep(recall, CURRENT, {
+        query: "zephyr",
+        scope: "sessions",
+        role: "assistant",
+      });
+      expect(role).toContain("msg_2");
+      expect(role).toContain("msg_3");
+      expect(role).not.toContain("msg_1");
+      expect(role).not.toContain("msg_4");
+      const window = answerGrep(recall, CURRENT, {
+        query: "zephyr",
+        scope: "sessions",
+        date_start: 150,
+        date_end: 250,
+      });
+      expect(window).toContain("msg_2");
+      expect(window).not.toContain("msg_1");
+      expect(window).not.toContain("msg_3");
+      const scoped = answerGrep(recall, CURRENT, {
+        query: "zephyr",
+        scope: "sessions",
+        tool_name: "Read",
+      });
+      expect(scoped).toContain("msg_3");
+      expect(scoped).toContain("msg_4");
+      expect(scoped).not.toContain("msg_1");
+      expect(scoped).not.toContain("msg_2");
+    } finally {
+      sidecars.close();
+    }
+  });
 });
 
 describe("cross-session caps", () => {

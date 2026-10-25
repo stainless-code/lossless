@@ -55,6 +55,30 @@ function hitLines(text: string): string[] {
   return text.split("\n").filter((line) => line.startsWith("["));
 }
 
+function seedSpan(): { store: LcmStore; leaf: number } {
+  const store = new LcmStore(":memory:");
+  ingestEntries(
+    store,
+    Array.from({ length: 10 }, (_, i) => ({
+      entryId: `a${i}`,
+      role: "user" as const,
+      text: `span message ${i} about the harbor relay`,
+      timestamp: i,
+    })),
+  );
+  const messageIds = store.messagesInSpan("a0", "a9").map((message) => message.id);
+  const leaf = store.insertSummary({
+    kind: "leaf",
+    text: "leaf over the whole span",
+    tokens: 4,
+    depth: 0,
+    firstEntryId: "a0",
+    lastEntryId: "a9",
+    messageIds,
+  }).id;
+  return { store, leaf };
+}
+
 describe("recall tools", () => {
   it("registers three tools whose schemas reach the wire projection", async () => {
     const ctx = new Context();
@@ -354,6 +378,130 @@ describe("recall tools", () => {
       expect(second).toContain("2..2 of 4");
       expect(hitLines(second)).toHaveLength(1);
       expect(second).not.toBe(first);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("exposes role, date, tool, and anchor params in the tool schemas", async () => {
+    const ctx = new Context();
+    await ctx.plugin(SystemPrompt, {});
+    void new ToolRuntime(ctx);
+    const store = seedStore();
+    const dispose = registerRecallTools(ctx, { store: () => store, redact: identity });
+    try {
+      const schemas = ctx.tools.schemas();
+      const grep = schemas.find((schema) => schema.name === "lcm_grep");
+      expect(Object.keys(grep?.parameters.properties ?? {})).toEqual(
+        expect.arrayContaining(["role", "date_start", "date_end", "tool_name"]),
+      );
+      const expand = schemas.find((schema) => schema.name === "lcm_expand");
+      expect(Object.keys(expand?.parameters.properties ?? {})).toContain("anchor");
+    } finally {
+      dispose();
+      store.close();
+    }
+  });
+
+  it("forwards role, date, and tool filters through session grep", () => {
+    const store = new LcmStore(":memory:");
+    try {
+      ingestEntries(store, [
+        { entryId: "f0", role: "user", text: "zephyr routing decision", timestamp: 100 },
+        {
+          entryId: "f1",
+          role: "assistant",
+          text: "zephyr routing decision confirmed",
+          timestamp: 200,
+        },
+        {
+          entryId: "f2",
+          role: "assistant",
+          text: "[tool:Read] zephyr routing decision file",
+          timestamp: 300,
+        },
+        {
+          entryId: "f3",
+          role: "toolResult",
+          text: "[tool:Read] zephyr routing decision contents",
+          timestamp: 400,
+        },
+      ]);
+      const role = grepAnswer(store, identity, { query: "zephyr", role: "assistant" });
+      expect(role).toContain("[f1]");
+      expect(role).toContain("[f2]");
+      expect(role).not.toContain("[f0]");
+      expect(role).not.toContain("[f3]");
+      const window = grepAnswer(store, identity, {
+        query: "zephyr",
+        date_start: 150,
+        date_end: 250,
+      });
+      expect(window).toContain("[f1]");
+      expect(window).not.toContain("[f0]");
+      expect(window).not.toContain("[f2]");
+      const scoped = grepAnswer(store, identity, { query: "zephyr", tool_name: "Read" });
+      expect(scoped).toContain("[f2]");
+      expect(scoped).toContain("[f3]");
+      expect(scoped).not.toContain("[f0]");
+      expect(scoped).not.toContain("[f1]");
+      const both = grepAnswer(store, identity, {
+        query: "zephyr",
+        role: "assistant",
+        tool_name: "Read",
+      });
+      expect(both).toContain("[f2]");
+      expect(both).not.toContain("[f3]");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("refuses a pattern scoped to a tool and a pattern over past sessions", () => {
+    const store = seedStore();
+    try {
+      expect(grepAnswer(store, identity, { pattern: "message", tool_name: "Read" })).toContain(
+        "toolName scopes a query search",
+      );
+      expect(
+        answerGrep(
+          {
+            store: () => store,
+            redact: identity,
+            pastSessions: { list: () => [] },
+          },
+          "ses_current",
+          { pattern: "message", scope: "sessions" },
+        ),
+      ).toContain("a pattern scan searches this session");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("centers a summary listing on an anchor", () => {
+    const { store, leaf } = seedSpan();
+    try {
+      const centered = expandAnswer(store, identity, { id: leaf, anchor: "a5", limit: 5 });
+      expect(centered).toContain("anchored at a5");
+      for (const id of ["a3", "a4", "a5", "a6", "a7"]) {
+        expect(centered).toContain(`[${id}]`);
+      }
+      expect(centered).not.toContain("[a0]");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("refuses an anchor without an id and an anchor with an entry id", () => {
+    const { store, leaf } = seedSpan();
+    try {
+      expect(expandAnswer(store, identity, { anchor: "a5" })).toContain(
+        "anchor centers a summary listing",
+      );
+      expect(expandAnswer(store, identity, { id: leaf, entry_id: "a5", anchor: "a5" })).toContain(
+        "pass anchor or entry_id",
+      );
     } finally {
       store.close();
     }
