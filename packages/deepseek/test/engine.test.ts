@@ -290,6 +290,39 @@ describe("LosslessSummarizerEngine", () => {
     expect(store.allMessages().length).toBe(expected);
   });
 
+  it("orders a backfilled span by seq when rows landed out of order", async () => {
+    const session = buildSession("backfill order ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    const events = session.snapshotEvents();
+    // Two mirror batches shaped like a real catch-up: the first batch holds
+    // a prefix plus newer live rows, the second backfills the gap in order,
+    // so gap rows land on newer rowids than the newer rows they precede.
+    const gap = events.slice(4, 7);
+    const rest = events.filter((event) => !gap.includes(event));
+    for (const event of rest) mirrorEvent(session, event, store, index);
+    for (const event of gap) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const rows: Record<string, unknown>[] = [];
+    const agent = fakeAgent(session, ROUTE);
+    const engine = new LosslessSummarizerEngine(
+      ctx,
+      { auto: false },
+      { store: () => store, index: () => index, redact: identity, record: (row) => rows.push(row) },
+    );
+    const pre = [...session.surface.nodes];
+    await engine.compactRegion(pre[1]!, pre[pre.length - 1]!, agent);
+    const seqs = pre.slice(1).map(Number);
+    const sid = String(session.id);
+    const pass = rows.find((row) => row.kind === "pass");
+    expect(pass?.span).toEqual([`${sid}:${Math.min(...seqs)}`, `${sid}:${Math.max(...seqs)}`]);
+  });
+
   it("rethrows the original span error when no history source exists", async () => {
     const session = buildSession("gap notes ".repeat(20));
     const store = new LcmStore(":memory:");

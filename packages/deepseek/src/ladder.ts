@@ -183,6 +183,19 @@ export function resolveSummarizationTarget(
   return configured ?? agentRoute(agent);
 }
 
+/** Seq suffix of a sidecar entry id (`<session>:<seq>`), split on the last
+ * colon. Throws exactly like a missing row: an unparseable id never guesses
+ * span order. Shared by both span builders so the rule cannot drift. */
+export function seqOfEntry(entryId: string): number {
+  const tail = entryId.slice(entryId.lastIndexOf(":") + 1);
+  if (!/^\d+$/.test(tail)) {
+    throw new Error(
+      `lossless compaction: entry ${entryId} has no parseable seq; refusing to guess span order`,
+    );
+  }
+  return Number(tail);
+}
+
 /** What one ladder run stored: the condensed text plus the sidecar ids and
  * the model call facts for the checkpoint record. */
 export interface LadderOutcome {

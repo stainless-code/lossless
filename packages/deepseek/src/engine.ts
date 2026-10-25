@@ -17,6 +17,7 @@ import {
   checkpointMemory,
   resolveSummarizationTarget,
   runLadder,
+  seqOfEntry,
   withSummaryRefs,
 } from "./ladder.ts";
 
@@ -209,7 +210,7 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
   ): CompactionSpanEntry[] {
     // A leading system message is the retained head, not shadowed content.
     const startAt = input.messages[0]?.role === "system" ? 1 : 0;
-    const items: Array<{ rowId: number; entry: CompactionSpanEntry }> = [];
+    const items: Array<{ seq: number; entry: CompactionSpanEntry }> = [];
     for (const message of input.messages.slice(startAt)) {
       const entryId = index.entryId(message.id) ?? this.resolveEntryId(session, index, message.id);
       if (entryId === undefined) {
@@ -221,14 +222,14 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
       if (!row) {
         throw new Error(`lossless compaction: sidecar holds no row for ${entryId}`);
       }
-      items.push({ rowId: row.id, entry: { entryId, role: row.role, text: row.text } });
+      items.push({ seq: seqOfEntry(entryId), entry: { entryId, role: row.role, text: row.text } });
     }
     if (items.length === 0)
       throw new Error("lossless compaction: no mirrorable messages in the span");
     // Core reads a span as a storage range, so frontierFrom must name the
-    // storage minimum. Surface order diverges from storage order after a
-    // replace (the checkpoint row is newest), so order by rowid here.
-    items.sort((a, b) => a.rowId - b.rowId);
+    // seq minimum. Catch-up backfill lands older seqs on newer rows, so
+    // rowid order no longer matches narrative order.
+    items.sort((a, b) => a.seq - b.seq);
     return items.map((item) => item.entry);
   }
 

@@ -175,6 +175,79 @@ describe("commitDagTransaction", () => {
     expect(typeof checkpoints[0]?.ts).toBe("number");
   });
 
+  it("orders the prepared span by seq when rows landed out of order", async () => {
+    const session = buildSession("backfill order ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    const events = session.snapshotEvents();
+    // Two mirror batches shaped like a real catch-up: the first batch holds
+    // a prefix plus newer live rows, the second backfills the gap in order,
+    // so gap rows land on newer rowids than the newer rows they precede.
+    const gap = events.slice(4, 7);
+    const rest = events.filter((event) => !gap.includes(event));
+    for (const event of rest) mirrorEvent(session, event, store, index);
+    for (const event of gap) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const rows: Record<string, unknown>[] = [];
+    const agent = fakeAgent(session, ROUTE);
+    const pre = [...session.surface.nodes];
+    await commitDagTransaction(
+      { ...deps(ctx, store, index), record: (row) => rows.push(row) },
+      agent,
+      { start: pre[1]!, end: pre[pre.length - 1]! },
+      { owner: "current-turn", stability: "whole-surface" },
+    );
+    const seqs = pre.slice(1).map(Number);
+    const sid = String(session.id);
+    const pass = rows.find((row) => row.kind === "pass");
+    expect(pass?.span).toEqual([`${sid}:${Math.min(...seqs)}`, `${sid}:${Math.max(...seqs)}`]);
+  });
+
+  it("keeps the checkpoint at its seq position after a replace", async () => {
+    const session = buildSession("checkpoint order ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const agent = fakeAgent(session, ROUTE);
+    const firstNodes = session.surface.nodes;
+    await commitDagTransaction(
+      deps(ctx, store, index),
+      agent,
+      { start: firstNodes[1]!, end: firstNodes[2]! },
+      { owner: "current-turn", stability: "whole-surface" },
+    );
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const rows: Record<string, unknown>[] = [];
+    const pre = [...session.surface.nodes];
+    await commitDagTransaction(
+      { ...deps(ctx, store, index), record: (row) => rows.push(row) },
+      agent,
+      { start: pre[1]!, end: pre[pre.length - 1]! },
+      { owner: "current-turn", stability: "whole-surface" },
+    );
+    const seqs = pre.slice(1).map(Number);
+    const sid = String(session.id);
+    const pass = rows.find((row) => row.kind === "pass");
+    expect(pass?.span).toEqual([`${sid}:${Math.min(...seqs)}`, `${sid}:${Math.max(...seqs)}`]);
+  });
+
   it("closes the bracket with the error and releases the lock when the ladder fails", async () => {
     const session = buildSession("failing notes ".repeat(20));
     const store = new LcmStore(":memory:");

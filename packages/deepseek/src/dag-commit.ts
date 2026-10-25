@@ -19,7 +19,7 @@ import type { TokenMeasurement, TokenMeter, TokenSurfaceNode } from "@deepseek-a
 import { selectCompactableRange, type CompactionSpanEntry } from "lossless-core";
 
 import type { LadderOutcome, LosslessEngineDeps } from "./ladder.ts";
-import { resolveSummarizationTarget, runLadder, withSummaryRefs } from "./ladder.ts";
+import { resolveSummarizationTarget, runLadder, seqOfEntry, withSummaryRefs } from "./ladder.ts";
 import type { DshRoute } from "./model-host.ts";
 
 /** Deps for the DAG bracket: the ladder deps, the composition the ladder
@@ -137,7 +137,7 @@ export async function commitDagTransaction(
   } else {
     if (entryState.openTurn === null) {
       throw new Error(
-        "compactRegion: no open turn — automatic compaction events must be enclosed in a turn",
+        "compactRegion: no open turn: automatic compaction events must be enclosed in a turn",
       );
     }
     owner = entryState.openTurn;
@@ -372,18 +372,18 @@ function prepareDagCommit(
   const store = deps.store(sessionId);
   if (!store) throw new Error(`lossless compaction: no sidecar store for session ${sessionId}`);
   // Core reads a span as a storage range, so frontierFrom must name the
-  // storage minimum. Surface order diverges from storage order after a
-  // replace (the checkpoint row is newest), so order by rowid here.
-  const items: Array<{ rowId: number; entry: CompactionSpanEntry }> = [];
+  // seq minimum. Catch-up backfill lands older seqs on newer rows, so
+  // rowid order no longer matches narrative order.
+  const items: Array<{ seq: number; entry: CompactionSpanEntry }> = [];
   for (const seq of validated.shadowedSeqs) {
     // Entry ids mirror the ingest projection (ingest.ts projectedEntry), so
     // the seq maps to its row without touching the live message index.
     const entryId = `${session.id}:${seq}`;
     const row = store.messageByEntryId(entryId);
     if (!row) throw new Error(`lossless dag commit: sidecar holds no row for ${entryId}`);
-    items.push({ rowId: row.id, entry: { entryId, role: row.role, text: row.text } });
+    items.push({ seq: seqOfEntry(entryId), entry: { entryId, role: row.role, text: row.text } });
   }
-  items.sort((a, b) => a.rowId - b.rowId);
+  items.sort((a, b) => a.seq - b.seq);
   return {
     ...validated,
     sessionId,
