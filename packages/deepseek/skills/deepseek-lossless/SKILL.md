@@ -1,6 +1,6 @@
 ---
 name: deepseek-lossless
-description: "Use when a DeepSeek session has deepseek-lossless applied: search compacted history with lcm_grep, lcm_describe, lcm_expand, or lcm_expand_query; run /lcm status, report, backup, export, import, gc, migrate, heal, diagnose, or compact; or tune the compaction thresholds."
+description: "Use when a DeepSeek session has deepseek-lossless applied: search compacted history with lcm_grep, lcm_describe, lcm_expand, or lcm_expand_query; run /lcm status, report, dump, backup, export, import, gc, migrate, heal, diagnose, or compact; or tune the compaction thresholds."
 license: MIT
 metadata:
   type: composition
@@ -35,10 +35,11 @@ the tools, and the command.
 
 - `/lcm status`: session counts plus the meter window and last pass outcome.
 - `/lcm report`: this session's metrics rows.
+- `/lcm dump [query] [--include-removed] [--save <file>]`: read-only sidecar dump; free-text query samples one FTS5 query, `--include-removed` keeps removed rows, `--save` writes the file at mode 0600.
 - `/lcm backup [file]`: copy this session's sidecar (mode 0600).
 - `/lcm export [file]`: write the verbatim transcript and summaries as JSONL (mode 0600).
 - `/lcm import <file>`: restore rows from an export.
-- `/lcm gc [--apply]`: dry-run age-based sidecar collection; `--apply` deletes.
+- `/lcm gc [--apply] [--session <id>] [--older-than <days>]`: dry-run age-based sidecar collection; `--apply` deletes. `--session` narrows to one sidecar.
 - `/lcm migrate [--apply]`: dry-run the older-schema list; `--apply` migrates.
 - `/lcm heal [--apply] [--max-nodes N]`: dry-run the truncated list; `--apply` spends model calls.
 - `/lcm diagnose [--save <file>]`: redacted, pasteable diagnostics bundle.
@@ -61,7 +62,10 @@ the tools, and the command.
 - `auto: false` (default) runs no automatic pressure compaction; `/lcm compact` works regardless. `bracketAuto: true` routes automatic compaction through the DAG bracket.
 - `summarizationProvider` / `summarizationModel` unset follow the routed model.
 - `thresholdRatio` (default `0.8`) sets the window fraction where pressure compacts; `retainRatio` (default `0.16`) keeps that fraction of recent context verbatim. `retainTokens` replaces the fraction with an absolute budget; the two are mutually exclusive.
+- `summaryTokens` (default `1500`) targets one summary; `leafChunkTokens` (default `3000`) caps one leaf chunk before it splits.
+- `headroomTokens` (default `65536`) reserves pressure headroom past the routed output reservation; `modelPolicies` unset merges exact provider and model overrides per routed target.
 - Budgets: `summarizerTokensPerCall`, `summarizerTokensPerPass`, `summarizerTokensPerHeal`; `healSourceTokens` unset derives 8x `summaryTokens`, clamped to 3000 through 24000.
+- `mechanicalTools` (default `[]`) compacts named tool spans without a model call; ingest still stores every message verbatim.
 
 ## Common mistakes
 

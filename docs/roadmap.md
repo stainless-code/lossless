@@ -128,12 +128,13 @@ Where this implementation departs from the paper, and what it does not claim:
 10. **A third consumer: DeepSeek.** OpenCode v2 shipped on its own adapter
     (`packages/opencode`); the live gate and the two host limits (a child-session
     reader, estimated summarizer usage) are recorded in that package's README.
-    The next consumer is the DeepSeek harness. It stays on the spike branch
-    until it is proven live and extracted on `feat/deepseek`; the open questions
-    are its plugin surface, its reader substitute, and whether its summarizer
-    reports usage. The comparison has an audited page for each shipping adapter,
-    [Pi](../apps/docs/content/reference/pi/comparison.mdx) and
-    [OpenCode v2](../apps/docs/content/reference/opencode/comparison.mdx).
+    The DeepSeek harness adapter lives on `feat/deepseek` with live proof
+    recorded in `docs/deepseek-plan.md`; the remaining step is the merge
+    decision. The open questions are its plugin surface, its reader substitute,
+    and whether its summarizer reports usage. The comparison has an audited page
+    for each adapter, [Pi](../apps/docs/content/reference/pi/comparison.mdx),
+    [OpenCode v2](../apps/docs/content/reference/opencode/comparison.mdx), and
+    [DeepSeek](../apps/docs/content/reference/deepseek/comparison.mdx).
 11. **The gallery asset.** A `video` (mp4, hover-autoplay) or
     `image` field per the Pi packages documentation: a long session, context
     filling, the swap notification, then `lcm_expand_query` recovering verbatim
@@ -217,8 +218,8 @@ Each of these was verified in peer source and is worth doing only with a reason.
 `opencode-lossless` is the OpenCode v2 adapter, `deepseek-lossless` is the
 unshipped DeepSeek adapter, and `lossless-core`
 is the engine. A `@stainless-code/` scope arrives only on a real collision, and
-then it arrives once, for every package at the same time. `pi-lossless` 0.1.0 and `lossless-core` 0.1.0 are
-published; `opencode-lossless` is pending its first release. The unscoped `lossless` on npm is an unrelated published
+then it arrives once, for every package at the same time. `pi-lossless` 0.1.2, `lossless-core` 0.1.2, and
+`opencode-lossless` 0.1.2 are published; `deepseek-lossless` 0.1.0 is unshipped. The unscoped `lossless` on npm is an unrelated published
 package, which is what the harness prefix is for; and the docs app is already
 scoped and private (`@stainless-code/lossless-docs`), so scoping stays a
 decision available rather than one made by accident. What would force the scope

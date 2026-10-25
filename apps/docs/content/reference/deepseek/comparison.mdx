@@ -47,8 +47,8 @@ Legend: ✅ full · 🟡 partial · ❌ none. Inventory rows name what ships, no
 | Safety controls                    | ✅ redaction at every seam that hands stored text to a model; the store stays verbatim                      | labelled established-background framing on the checkpoint; a hostile id cannot escape the sidecar directory on reads |
 | Token budgeting and thresholds     | seam knobs (`thresholdRatio`, retain, headroom, per-model policies) plus adapter caps per call, pass, and heal | ✅ threshold ratio with capacity cap, retain ratio or tokens, headroom, exact-target policy table, generation caps |
 | Runtime dependencies               | `node:sqlite`, Node `>=22.19`; the engine inlines `typebox`; the harness packages stay external            | the harness itself; no sidecar, no store                                                                           |
-| Operator surface                   | `/lcm` with status, report, backup, export, import, gc, migrate, heal, diagnose, and compact                | the harness compaction surface the backend mounts behind                                                           |
-| Resume behavior                    | ✅ pre-mount backfill pages history at 50 events up to 500, then rebuilds the last checkpoint from the sidecar | prior checkpoint text in the log carries continuity; no backfill of older history                                   |
+| Operator surface                   | `/lcm` with status, report, dump, backup, export, import, gc, migrate, heal, diagnose, and compact                | the harness compaction surface the backend mounts behind                                                           |
+| Resume behavior                    | ✅ pre-mount backfill pages history at 50 with a 500 inserted-row cap, then rebuilds the last checkpoint from the sidecar | prior checkpoint text in the log carries continuity; no backfill of older history                                   |
 
 ## Where each one leads
 

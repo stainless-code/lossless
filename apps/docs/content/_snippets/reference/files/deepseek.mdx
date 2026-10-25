@@ -10,9 +10,9 @@ The adapter writes under `sidecarDir`. Named export and backup paths are the exc
   - ses_0123456789abcdef.sqlite-shm
   - ses_0123456789abcdef.sqlite.backup-2026-10-25T12-00-00
   - metrics.jsonl
-  - metrics.jsonl.2026-10-25T12-00-00
+  - metrics.jsonl.<Date.now()>
   - lcm-export-2026-10-25T12-00-00.jsonl
-  - lcm-export-gc-2026-10-25T12-00-00.jsonl
+  - lcm-export-gc-<id>-2026-10-25T12-00-00.jsonl
 
 </FileTree>
 
@@ -20,7 +20,7 @@ One sidecar per session holds the verbatim mirror, the DAG, and the checkpoint m
 
 The live session log remains the source of truth for the conversation. The adapter does not backfill a deleted sidecar, so deleting one forgets that session's recall. `/lcm export` keeps a portable copy; `/lcm backup` keeps a byte copy.
 
-Sessions already live when the plugin mounts backfill through the same mirror path as the live feed, paged at 50 events with a 500-event per-session cap; re-mirroring inserts nothing. Each backfill writes one `backfill` metrics row with its ingested count and span.
+Sessions already live when the plugin mounts backfill through the same mirror path as the live feed, paged at 50 with a 500 inserted-row per-session cap; re-mirroring inserts nothing. Each backfill writes one `backfill` metrics row with its ingested count and span.
 
 ## Metrics
 
@@ -42,7 +42,7 @@ One `pass` row lands per ladder run with its outcome, leaf and condensed counts,
 | --------------------------------------------------- | --------------------- | ----------------------------------------------------- |
 | `<sidecar>.backup-<timestamp>` beside the sidecar   | `/lcm backup`         | A byte copy of the sidecar. Never deleted by LCM.     |
 | `lcm-export-<timestamp>.jsonl`                      | `/lcm export`         | Every message and summary, verbatim, mode 0600.       |
-| `lcm-export-gc-<timestamp>.jsonl`                   | `/lcm gc --apply`     | The transcripts of every sidecar it is about to delete. |
+| `lcm-export-gc-<id>-<timestamp>.jsonl`          | `/lcm gc --apply`     | The transcripts of every sidecar it is about to delete. |
 
 `/lcm import <path>` restores missing rows and skips present ones. It runs on its named file, so a fresh session can restore history it never mirrored.
 

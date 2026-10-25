@@ -125,6 +125,7 @@ export function healLlmConfig(
   };
 }
 
+/** Per-session checkpoint texts for the ladder. `previous` returns the noted text, else hydrates the latest checkpoint from the sidecar and caches it; stays undefined with no store or no stored summary. Called with no lookup, it serves noted texts only. */
 export function checkpointMemory(
   stores?: (sessionId: string) => LcmStore | undefined,
 ): CheckpointMemory {

@@ -68,10 +68,11 @@ const stop = applyLossless(ctx, { enabled: true });
 
 - `status`: session counts plus the meter window and last pass outcome.
 - `report`: rolls up the metrics rows.
+- `dump [query] [--include-removed] [--save <file>]`: read-only sidecar dump; free-text query samples one FTS5 query, `--include-removed` keeps removed rows, `--save` writes the file at mode 0600.
 - `backup [file]`: writes a `0600` store copy.
 - `export [file]`: writes a `0600` transcript copy.
 - `import <file>`: dedups the named file.
-- `gc [--apply]`: dry-runs age-based sidecar collection; `--apply` deletes.
+- `gc [--apply] [--session <id>] [--older-than <days>]`: dry-runs age-based sidecar collection; `--apply` deletes. `--session` narrows to one sidecar.
 - `migrate [--apply]`: lists older-schema sidecars; `--apply` migrates.
 - `heal [--apply] [--max-nodes N]`: lists truncated summaries; `--apply` repairs.
 - `diagnose [--save <file>]`: builds the redacted diagnose bundle.

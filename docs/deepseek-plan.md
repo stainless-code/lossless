@@ -32,8 +32,8 @@ These come from the tree, not from preference.
 - Names stay unscoped until a collision forces the one-commit migration that
   `docs/roadmap.md` already describes. The working name below is a placeholder
   the owner replaces.
-- No comparison claims ship with this work. `apps/docs/COMPARISON.md` stays
-  Pi-only per roadmap item 10.
+- Comparison claims ship on audited per-harness pages, including
+  `apps/docs/content/reference/deepseek/comparison.mdx`, per roadmap item 10.
 
 ## Candidates considered
 
@@ -393,8 +393,7 @@ Current pins: `dsh-*@0.2.1-rc.3`, `cordis@4.0.5`, against harness HEAD `22ddee37
 - Target baseline: `pnpm vitest run packages/compaction` in the checkout,
   13 files and 263 tests green.
 - Lossless suite with the new package: 578 tests green (`vp check`, `tsc`,
-  `bun run test`, `bun run pack` all pass; the package packs to 26KB with
-  the harness left external).
+  `bun run test`, `bun run pack` all pass, with the harness left external).
 - Phase 1: scripted adapter through the real escalation ladder and one
   `runRetrieval` in two steps against a real store.
 - Phase 2: every derived text block lands in the sidecar, re-mirroring
@@ -504,7 +503,7 @@ Current pins: `dsh-*@0.2.1-rc.3`, `cordis@4.0.5`, against harness HEAD `22ddee37
   `lcm_expand` and answered verbatim with cross-session entry citations.
   A defaults quiet run mirrored 7 rows with 0 summaries. Two boot bugs fixed
   with TDD on the branch (uninjectable `sessionQuery` degrades to
-  live-mirror-only; cold message map re-derives from the live log). Suite:
+  live-mirror-only; cold message map re-derives from the live log). Suite at that run:
   873 tests green. Merge and item 10 stay owner decisions.
 - Live proof, continued: the Go `MissingSessionID` 400s are fixed on our end
   by stamping the calling session id into `GenerateOptions` (the port field
@@ -532,8 +531,8 @@ Current pins: `dsh-*@0.2.1-rc.3`, `cordis@4.0.5`, against harness HEAD `22ddee37
 ## What this plan does not change
 
 No source, no config, and no version beyond what `feat/deepseek` already
-carries. No changeset, because nothing ships. No edit to the docs site or
-any package README beyond this file. The B1-B3 bracket spike was proven on
+carries. The branch carries `.changeset/deepseek-lossless.md` plus docs site
+and package README edits. The B1-B3 bracket spike was proven on
 scripted models; roadmap item 10 stays a tracking item, so no spike log
 attaches to it beyond this plan.
 

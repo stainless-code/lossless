@@ -9,6 +9,7 @@ import { healInFlightSessions } from "./lifecycle.ts";
 import { createRecord } from "./metrics.ts";
 import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 
+/** Composition options for `applyLossless`. Each field carries its own default. */
 export interface LosslessPluginConfig {
   /** Master flag. Nothing registers, mirrors, or mounts until true. */
   readonly enabled?: boolean;

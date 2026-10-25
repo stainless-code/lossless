@@ -1,17 +1,18 @@
 ```text
 /lcm status
 /lcm report
+/lcm dump [query] [--include-removed] [--save <file>]
 /lcm backup [file]
 /lcm export [file]
 /lcm import <file>
-/lcm gc [--apply]
+/lcm gc [--apply] [--session <id>] [--older-than <days>]
 /lcm migrate [--apply]
 /lcm heal [--apply] [--max-nodes N]
 /lcm diagnose [--save <file>]
 /lcm compact
 ```
 
-Ten verbs on one `/lcm` command.
+Eleven verbs on one `/lcm` command.
 
 ## Settings
 
@@ -32,6 +33,16 @@ Message and compaction-summary counts for the live sidecars, plus the meter wind
 ```
 
 Pass, checkpoint, backfill, recall, and retrieval rows for this session. With no rows, it reports that the session has none.
+
+## dump
+
+```text
+/lcm dump [query]
+/lcm dump [query] --include-removed
+/lcm dump --save <file>      # or --save=<file>
+```
+
+Read-only sidecar dump: store facts, history, summaries, message samples, and this session's metrics, redacted. Free-text args sample one FTS5 query; `--include-removed` keeps removed rows; `--save` writes the dump at mode 0600 instead of printing it.
 
 ## backup
 
@@ -62,9 +73,10 @@ Restores rows from a file written by `/lcm export`. Re-importing the same file i
 ```text
 /lcm gc                  # dry-run list
 /lcm gc --apply          # export each transcript, then delete
+/lcm gc --session <id>   # narrow to one sidecar
 ```
 
-Collects sidecars older than 30 days that no live session holds. It never touches a live session's sidecar and exports each transcript before deleting it. A no-op apply writes no export file.
+Collects sidecars older than 30 days that no live session holds (`--older-than` sets the window). It never touches a live session's sidecar and exports each transcript before deleting it. A no-op apply writes no export file.
 
 ## migrate
 
