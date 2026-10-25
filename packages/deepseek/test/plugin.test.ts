@@ -94,6 +94,40 @@ describe("applyLossless", () => {
     }
   });
 
+  it("dispose closes every open sidecar and stays safe to run twice", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+    const originalClose = Reflect.get(LcmStore.prototype, "close") as (this: LcmStore) => void;
+    let closes = 0;
+    LcmStore.prototype.close = function (this: LcmStore): void {
+      closes += 1;
+      Reflect.apply(originalClose, this, []);
+    };
+    try {
+      const session = ctx.sessions.create(SessionId("close-1"), { meta: { cwd: dir } });
+      appendConversation(session, ROUTE, "close me ".repeat(20));
+      session.append("turn/start", { turn: 3 });
+      const path = join(dir, "close-1.sqlite");
+      expect(existsSync(path)).toBe(true);
+      const mirrored = session.deriveMessages().length;
+      expect(mirrored).toBeGreaterThan(0);
+      dispose();
+      expect(closes).toBeGreaterThan(0);
+      dispose();
+    } finally {
+      LcmStore.prototype.close = originalClose;
+    }
+    const reopened = new LcmStore(join(dir, "close-1.sqlite"));
+    try {
+      const session = ctx.sessions.get(SessionId("close-1"));
+      expect(reopened.allMessages().length).toBe(session?.deriveMessages().length);
+    } finally {
+      reopened.close();
+    }
+  });
+
   it("forces a manual compaction through /lcm compact", async () => {
     const { ctx } = setupContext(
       ROUTE,

@@ -109,8 +109,8 @@ class SessionSidecars extends SidecarStores {
  * into its own sidecar, register the recall tools against the calling
  * session, mount the summarizer engine as the compaction backend, and
  * register `/lcm`. Disabled by default; enable on one composition at a
- * time. The returned disposer stops the mirror, the tools, and the command.
- * The engine follows the composition lifetime.
+ * time. The returned disposer stops the mirror, the tools, and the command,
+ * and closes every open sidecar. The engine follows the composition lifetime.
  * @example
  * ```ts
  * const stop = applyLossless(ctx, { enabled: true });
@@ -218,11 +218,32 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
       ? {}
       : { summarizerTokensPerHeal: config.summarizerTokensPerHeal }),
     ...(config.healSourceTokens === undefined ? {} : { healSourceTokens: config.healSourceTokens }),
+    // The heal model rides these; unset keeps the agent route fallback.
+    ...(config.summarizationProvider === undefined
+      ? {}
+      : { summarizationProvider: config.summarizationProvider }),
+    ...(config.summarizationModel === undefined
+      ? {}
+      : { summarizationModel: config.summarizationModel }),
+    // Status and diagnose report effective values from these seam keys.
+    ...(config.thresholdRatio === undefined ? {} : { thresholdRatio: config.thresholdRatio }),
+    ...(config.retainTokens === undefined ? {} : { retainTokens: config.retainTokens }),
+    ...(config.retainRatio === undefined ? {} : { retainRatio: config.retainRatio }),
+    ...(config.headroomTokens === undefined ? {} : { headroomTokens: config.headroomTokens }),
+    ...(config.modelPolicies === undefined ? {} : { modelPolicies: config.modelPolicies }),
   });
   return () => {
     stopMirror();
     stopTools();
     stopExpandQuery();
     stopCommand();
+    // Every held sidecar closes here so no handle survives dispose. Each
+    // close is guarded so one failure cannot block the rest, and nothing
+    // awaits in-flight compactions: dispose stays prompt.
+    for (const store of sidecars.storesMap().values()) {
+      try {
+        store.close();
+      } catch {}
+    }
   };
 }

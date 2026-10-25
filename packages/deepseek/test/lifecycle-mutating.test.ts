@@ -313,6 +313,72 @@ describe("lcm mutating verbs", () => {
     expect(quiet.text).toContain("nothing to do");
   });
 
+  it("heal --apply uses the configured summary model over the agent route", async () => {
+    const scripts = [[...textChunks("a repaired leaf summary")]];
+    const { ctx, adapter } = setupContext(ROUTE, scripts);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("heal-cfg"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps: LcmCommandDeps = {
+      ...depsFor(dir, stores),
+      summarizationProvider: ROUTE.provider,
+      summarizationModel: "configured-heal-model",
+    };
+    const store = deps.storeFor!("heal-cfg");
+    seedMessages(store, [
+      `heal source alpha ${"detail ".repeat(60)}`,
+      `heal source beta ${"context ".repeat(60)}`,
+    ]);
+    const messageIds = store.messagesInSpan("e00", "e01").map((message) => message.id);
+    store.insertSummary({
+      kind: "leaf",
+      text: `${TRUNCATED_SUMMARY_PREFIX}\nmechanical`,
+      tokens: 5,
+      depth: 0,
+      firstEntryId: "e00",
+      lastEntryId: "e01",
+      messageIds,
+      quality: "mechanical",
+    });
+    const applied = await invoke(ctx, deps, "heal-cfg", "heal --apply");
+    expect(applied.kind).toBe("success");
+    expect(applied.text).toContain("repaired 1 clean");
+    expect(adapter.requests.length).toBeGreaterThan(0);
+    expect(adapter.requests[0]?.model).toBe("configured-heal-model");
+  });
+
+  it("heal --apply falls back to the agent route when no summary model is configured", async () => {
+    const scripts = [[...textChunks("a repaired leaf summary")]];
+    const { ctx, adapter } = setupContext(ROUTE, scripts);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("heal-fb"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    const store = deps.storeFor!("heal-fb");
+    seedMessages(store, [
+      `heal source alpha ${"detail ".repeat(60)}`,
+      `heal source beta ${"context ".repeat(60)}`,
+    ]);
+    const messageIds = store.messagesInSpan("e00", "e01").map((message) => message.id);
+    store.insertSummary({
+      kind: "leaf",
+      text: `${TRUNCATED_SUMMARY_PREFIX}\nmechanical`,
+      tokens: 5,
+      depth: 0,
+      firstEntryId: "e00",
+      lastEntryId: "e01",
+      messageIds,
+      quality: "mechanical",
+    });
+    const applied = await invoke(ctx, deps, "heal-fb", "heal --apply");
+    expect(applied.kind).toBe("success");
+    expect(applied.text).toContain("repaired 1 clean");
+    expect(adapter.requests.length).toBeGreaterThan(0);
+    expect(adapter.requests[0]?.model).toBe(ROUTE.model);
+  });
+
   it("heal dry-run lists a truncated node and apply repairs it on a scripted model", async () => {
     const scripts = [[...textChunks("a repaired leaf summary")]];
     const { ctx } = setupContext(ROUTE, scripts);

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { Context } from "@deepseek-ai/cordis";
 import type { Agent } from "@deepseek-ai/dsh-agent";
 import type { CommandInvocation, CommandResult } from "@deepseek-ai/dsh-commands";
+import type { ModelCompactPolicyConfig } from "@deepseek-ai/dsh-compaction-basic";
 import {
   appendMetric,
   buildDiagnoseBundle,
@@ -31,10 +32,11 @@ import {
   type HealOutcome,
   LcmStore,
   type LlmComplete,
+  type ThresholdConfig,
 } from "lossless-core";
 
 import { healLlmConfig, healRunBudgets } from "./ladder.ts";
-import { agentRoute, dshModelHost } from "./model-host.ts";
+import { agentRoute, dshModelHost, type DshRoute } from "./model-host.ts";
 
 export interface LcmCommandDeps {
   readonly stores: () => ReadonlyMap<string, LcmStore>;
@@ -55,6 +57,17 @@ export interface LcmCommandDeps {
   /** Estimated tokens one heal node may read as source. Unset derives the
    * core default (8 x target, clamped) inside runHeal. */
   readonly healSourceTokens?: number;
+  /** Configured summary route. A set pair names the heal model; unset
+   * follows the calling agent's route, like the ladder. */
+  readonly summarizationProvider?: string;
+  readonly summarizationModel?: string;
+  /** Seam pressure keys status and diagnose report as effective values. */
+  readonly thresholdRatio?: number;
+  readonly retainTokens?: number;
+  readonly retainRatio?: number;
+  readonly headroomTokens?: number;
+  /** Exact provider/model pressure overrides, merged per routed target. */
+  readonly modelPolicies?: ModelCompactPolicyConfig[];
 }
 
 const STAMP = (): string => new Date().toISOString().replace(/[:.]/g, "-");
@@ -107,6 +120,36 @@ function numberOf(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+/** Heal model: the configured pair first, the calling route after. */
+function healRoute(deps: LcmCommandDeps, agent: Agent | undefined): DshRoute | undefined {
+  const provider = deps.summarizationProvider;
+  const model = deps.summarizationModel;
+  if (provider !== undefined && provider.length > 0 && model !== undefined && model.length > 0) {
+    return { provider, model };
+  }
+  return agentRoute(agent);
+}
+
+/** Pressure override for one routed model: exact match, like the seam. */
+function policyFor(
+  deps: LcmCommandDeps,
+  route: DshRoute | undefined,
+): ModelCompactPolicyConfig | undefined {
+  if (route === undefined) return undefined;
+  return deps.modelPolicies?.find(
+    (policy) => policy.provider === route.provider && policy.model === route.model,
+  );
+}
+
+/** Zone status and diagnose report: base seam keys plus the routed override. */
+function pressureZone(deps: LcmCommandDeps, route: DshRoute | undefined): ThresholdConfig {
+  const override = policyFor(deps, route)?.thresholdRatio;
+  return mergeZone(
+    deps.thresholdRatio === undefined ? {} : { swapAtRatio: deps.thresholdRatio },
+    override === undefined ? undefined : { swapAtRatio: override },
+  );
+}
+
 function lastPassLine(passRows: readonly Record<string, unknown>[]): string {
   const last = passRows[passRows.length - 1];
   if (!last) return "none recorded";
@@ -149,7 +192,8 @@ export async function handleStatus(
     lines.push(
       `window (${sessionId}): ${total}/${fmtTokens(window)} tokens (${occupancy.toFixed(0)}%)`,
     );
-    const resolved = effectiveThresholds(mergeZone({}, undefined), window);
+    const route = agentRoute(invocation.agent);
+    const resolved = effectiveThresholds(pressureZone(deps, route), window);
     lines.push(
       `thresholds: swap ${(resolved.swap * 100).toFixed(0)}% / recut ${(resolved.recut * 100).toFixed(0)}%${resolved.clamped ? " (clamped)" : ""}`,
     );
@@ -313,6 +357,8 @@ export async function handleDiagnose(
   const stats = store.stats();
   const integrity = checkIntegrity(store);
   const route = agentRoute(invocation.agent);
+  const policy = policyFor(deps, route);
+  const zone = pressureZone(deps, route);
   const model =
     route === undefined
       ? "(session model)"
@@ -340,15 +386,26 @@ export async function handleDiagnose(
       window:
         window === undefined
           ? null
-          : { tokens: window, effective: effectiveThresholds(mergeZone({}, undefined), window) },
+          : { tokens: window, effective: effectiveThresholds(zone, window) },
       chain: { level: "info", state: "summarizer: deepseek ladder (leaf plus condensed DAG)" },
-      zoneConfigured: false,
-      config: { swapAtRatio: 0.7, recutAtRatio: 0.85, assemblyEnabled: false },
-      keepRecentTokens: 0,
+      zoneConfigured: policy !== undefined,
+      config: {
+        swapAtRatio: zone.swapAtRatio ?? 0.7,
+        recutAtRatio: zone.recutAtRatio ?? 0.85,
+        assemblyEnabled: false,
+      },
+      keepRecentTokens: deps.retainTokens ?? 0,
       configPath: "plugin options",
     },
     config: {
-      effective: JSON.stringify({ swapAtRatio: 0.7, recutAtRatio: 0.85 }),
+      effective: JSON.stringify({
+        swapAtRatio: zone.swapAtRatio ?? 0.7,
+        recutAtRatio: zone.recutAtRatio ?? 0.85,
+        ...(deps.retainTokens === undefined ? {} : { retainTokens: deps.retainTokens }),
+        ...(deps.retainRatio === undefined ? {} : { retainRatio: deps.retainRatio }),
+        ...(deps.headroomTokens === undefined ? {} : { headroomTokens: deps.headroomTokens }),
+        ...(deps.modelPolicies === undefined ? {} : { modelPolicies: deps.modelPolicies }),
+      }),
       path: "plugin options",
     },
     metrics: sessionRows(metricRows(deps, sessionId), sessionId),
@@ -687,7 +744,7 @@ export async function handleHeal(
       );
       return { kind: "success", text: healReport(outcome) };
     }
-    const route = agentRoute(invocation.agent);
+    const route = healRoute(deps, invocation.agent);
     const host = dshModelHost(ctx, {
       ...(route === undefined ? {} : { defaultRoute: route }),
       signal: invocation.signal,

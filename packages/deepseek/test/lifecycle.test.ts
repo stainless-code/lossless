@@ -103,6 +103,58 @@ describe("lcm read-only verbs", () => {
     expect(result.text).toContain("last pass (status-1): stored (2 leaf, 1 condensed)");
   });
 
+  it("status reports the configured pressure threshold instead of the default", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const session = ctx.sessions.create(SessionId("status-cfg"), { meta: { cwd: dir } });
+    appendConversation(session, ROUTE, "status notes");
+    const store = seedStore(dir, "status-cfg", ["status hello"]);
+    const deps: LcmCommandDeps = {
+      ...depsFor(dir, new Map([["status-cfg", store]])),
+      thresholdRatio: 0.5,
+    };
+    const result = await invoke(ctx, deps, "status-cfg", "status");
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("thresholds: swap 50% / recut 85%");
+    expect(result.text).not.toContain("swap 70%");
+  });
+
+  it("status applies the routed model policy over the base zone", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const session = ctx.sessions.create(SessionId("status-pol"), { meta: { cwd: dir } });
+    appendConversation(session, ROUTE, "status notes");
+    const store = seedStore(dir, "status-pol", ["status hello"]);
+    const deps: LcmCommandDeps = {
+      ...depsFor(dir, new Map([["status-pol", store]])),
+      thresholdRatio: 0.5,
+      modelPolicies: [{ provider: ROUTE.provider, model: ROUTE.model, thresholdRatio: 0.3 }],
+    };
+    const result = await invoke(ctx, deps, "status-pol", "status");
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("thresholds: swap 30% / recut 85%");
+    expect(result.text).not.toContain("swap 50%");
+  });
+
+  it("diagnose reports the configured pressure threshold", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("diag-cfg"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "diag-cfg", ["diagnose hello"]);
+    const deps: LcmCommandDeps = {
+      ...depsFor(dir, new Map([["diag-cfg", store]])),
+      thresholdRatio: 0.5,
+    };
+    const result = await invoke(ctx, deps, "diag-cfg", "diagnose");
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("swap 50%");
+    expect(result.text).toContain('"swapAtRatio":0.5');
+    expect(result.text).not.toContain("swap 70%");
+  });
+
   it("report rolls up seeded pass, checkpoint, recall, and retrieval rows", async () => {
     const { ctx } = setupContext(ROUTE, []);
     await mountBase(ctx);
