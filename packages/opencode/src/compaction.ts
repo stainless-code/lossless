@@ -180,7 +180,12 @@ export function createCheckpointWriter(deps: CheckpointDeps): CheckpointWriter {
             targetTokens: deps.options.summaryTokens,
             stage: "blocking",
             ...(previousText === undefined ? {} : { previousSummary: previousText }),
-            summarizer: summarizerConfig(deps.options),
+            summarizer: {
+              ...summarizerConfig(deps.options),
+              ...(deps.options.mechanicalTools === undefined
+                ? {}
+                : { mechanicalTools: deps.options.mechanicalTools }),
+            },
           },
         );
       } catch (error) {

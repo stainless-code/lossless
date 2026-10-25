@@ -239,6 +239,46 @@ describe("runLosslessPass", () => {
     }
   });
 
+  it("forwards mechanicalTools so a listed tool skips the model", async () => {
+    const session = "ses_pass_mechanical";
+    const path = sidecarPath();
+    const store = new LcmStore(path);
+    try {
+      const prose = `decide the plan ${"x".repeat(400)}`;
+      const entries: AlignedEntry[] = [
+        { entryId: `${session}:prompt:msg_1`, role: "user", text: prose },
+        {
+          entryId: `${session}:tool:msg_2:call_1`,
+          role: "toolResult",
+          text: `tool noisy-read {"path":"/a"}\n${"z".repeat(3000)}`,
+        },
+      ];
+      const prompts: string[] = [];
+      const ctx = ctxWith({
+        text: async (input: { prompt: string }) => {
+          prompts.push(input.prompt);
+          return { text: "prose summary" };
+        },
+      });
+      const outcome = await runLosslessPass(
+        { store: () => store, ctx, model: MODEL },
+        session,
+        entries,
+        { targetTokens: 1500, summarizer: { mechanicalTools: ["noisy-read"] } },
+      );
+      expect(outcome.kind).toBe("stored");
+      if (outcome.kind !== "stored") return;
+      expect(prompts).toHaveLength(1);
+      expect(prompts[0]).toContain("decide the plan");
+      expect(prompts[0]).not.toContain("noisy-read");
+      const leaves = outcome.leafSummaryIds.map((id) => store.getSummary(id)!);
+      expect(leaves).toHaveLength(2);
+      expect(leaves.map((leaf) => leaf.quality).sort()).toEqual(["clean", "mechanical"]);
+    } finally {
+      store.close();
+    }
+  });
+
   it("returns a no-entries outcome without opening a run", async () => {
     const { store } = seeded();
     try {

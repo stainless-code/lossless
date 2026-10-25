@@ -5,6 +5,7 @@ import { test } from "vite-plus/test";
 import { runCompaction } from "../src/compaction-engine.ts";
 import { estimateTokens } from "../src/estimate-tokens.ts";
 import { runHeal } from "../src/heal.ts";
+import { ingestEntries } from "../src/ingest.ts";
 import { checkIntegrity } from "../src/integrity.ts";
 import { LcmStore, TRUNCATED_SUMMARY_PREFIX } from "../src/store.ts";
 import type { LlmComplete } from "../src/summarize.ts";
@@ -113,6 +114,90 @@ test("mechanical tier: mixed spans isolate noisy leaves and still call once for 
   }
 });
 
+test("mechanical tier: quoted markers are not tool traffic", () => {
+  assert.equal(
+    isMechanicalToolMessage({ text: "I saw [tool:noisy] in the docs", role: "user" }, ["noisy"]),
+    false,
+  );
+  assert.equal(
+    isMechanicalToolMessage(
+      { text: "note: the log said tool-call: noisy mid-line", role: "assistant" },
+      ["noisy"],
+    ),
+    false,
+  );
+  assert.equal(
+    isMechanicalToolMessage(
+      { text: 'Why this is safe.\n[tool:noisy] {"path":"/a"}', role: "assistant" },
+      ["noisy"],
+    ),
+    false,
+  );
+  assert.equal(
+    isMechanicalToolMessage({ text: '[tool:noisy] {"path":"/a"}', role: "assistant" }, ["noisy"]),
+    true,
+  );
+});
+
+test("mechanical tier: mixed prose plus noisy call stays on the summarizer path", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const prose = "Here is why the migration is safe";
+    const span = [
+      {
+        entryId: "e0",
+        role: "assistant" as const,
+        text: `${prose}.\n[tool:noisy-read] {"path":"/a"}`,
+      },
+    ];
+    const calls: string[] = [];
+    const outcome = await storedPass(
+      store,
+      { span, targetTokens: 1500, mechanicalTools: ["noisy-read"] },
+      countingLlm(() => "prose summary", calls),
+    );
+    assert.equal(calls.length, 1, "mixed prose falls back to the model path");
+    assert.ok(calls[0]!.includes(prose));
+    const leaf = store.getSummary(outcome.leafSummaryIds[0]!);
+    assert.ok(leaf);
+    assert.equal(leaf.quality, "clean");
+    assert.deepEqual(store.uncoveredMessagesInSpan("e0", "e0"), []);
+  } finally {
+    store.close();
+  }
+});
+
+test("mechanical tier: alternating spans keep leaf work within maxChunks", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const span = Array.from({ length: 20 }, (_, i) =>
+      i % 2 === 0
+        ? {
+            entryId: `e${i}`,
+            role: "user" as const,
+            text: `ordinary question ${i} ${"p".repeat(50)}`,
+          }
+        : {
+            entryId: `e${i}`,
+            role: "toolResult" as const,
+            text: `tool noisy-read {"n":${i}}}\n${"z".repeat(200)}`,
+          },
+    );
+    const calls: string[] = [];
+    const outcome = await storedPass(
+      store,
+      { span, targetTokens: 1500, mechanicalTools: ["noisy-read"] },
+      countingLlm(() => "summary", calls),
+      { leafChunkTokens: 100_000, maxChunks: 4 },
+    );
+    assert.ok(calls.length <= 4, `leaf attempts stay capped, got ${calls.length}`);
+    assert.ok(outcome.leafSummaryIds.length <= 4);
+    assert.deepEqual(store.uncoveredMessagesInSpan("e0", "e19"), []);
+  } finally {
+    store.close();
+  }
+});
+
 test("mechanical tier: a Pi result follows its call onto the skip path", async () => {
   const store = new LcmStore(":memory:");
   try {
@@ -190,6 +275,61 @@ test("mechanical tier: without the list the same span pays for a call", async ()
       countingLlm(() => "summary", calls),
     );
     assert.equal(calls.length, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test("mechanical tier: a lone fallback node without the list still pays for the terse path", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(
+      store,
+      Array.from({ length: 6 }, (_, i) => ({
+        entryId: `e${i}`,
+        role: "user" as const,
+        text: `message ${i}`,
+        timestamp: i + 1,
+      })),
+    );
+    const messageIds = store.uncoveredMessagesInSpan("e0", "e5").map((m) => m.id);
+    const leaf = store.insertSummary({
+      kind: "leaf",
+      text: "leaf text",
+      tokens: 4,
+      depth: 0,
+      firstEntryId: "e0",
+      lastEntryId: "e5",
+      messageIds,
+    }).id;
+    // A level-3 fallback from before the tier existed: mechanical by verdict
+    // and by the stored prefix, with no opted-in tool behind it.
+    const node = store.insertSummary({
+      kind: "condensed",
+      text: `${TRUNCATED_SUMMARY_PREFIX}\n${"long ".repeat(2000)}`,
+      tokens: 2500,
+      depth: 1,
+      quality: "mechanical",
+      firstEntryId: "e0",
+      lastEntryId: "e5",
+      childSummaryIds: [leaf],
+    }).id;
+    const terse = "terse ".repeat(40).trim();
+    const calls: string[] = [];
+    const span = Array.from({ length: 6 }, (_, i) => ({
+      entryId: `e${i}`,
+      role: "user" as const,
+      text: `message ${i}`,
+    }));
+    const outcome = await storedPass(
+      store,
+      { span, targetTokens: 500 },
+      countingLlm(() => terse, calls),
+      { leafChunkTokens: 100_000 },
+    );
+    assert.equal(calls.length, 1, "the empty list keeps the terse re-summarize");
+    assert.equal(store.getSummary(node)?.text, terse);
+    assert.deepEqual(outcome.condensedSummaryIds, []);
   } finally {
     store.close();
   }

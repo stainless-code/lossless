@@ -76,6 +76,10 @@ export interface OpencodeLosslessOptions {
    * A dry run spends nothing.
    * @default 120000 */
   readonly summarizerTokensPerHeal?: number;
+  /** Tool names whose spans compact without a model call. Empty keeps the
+   * LLM path.
+   * @default [] */
+  readonly mechanicalTools?: readonly string[];
   /** The occupancy share at which a request swaps in the projection. The
    * engine clamps it to 0.9 of the window.
    * @default 0.7 */
@@ -263,6 +267,9 @@ export async function setupOpencodeLossless(
           ...summarizerConfig(options),
           summarizerTokensPerHeal: options.summarizerTokensPerHeal,
           ...(options.zones === undefined ? {} : { zones: options.zones }),
+          ...(options.mechanicalTools === undefined
+            ? {}
+            : { mechanicalTools: options.mechanicalTools }),
         },
         version: pluginLabel,
         host: () => "opencode v2",
@@ -389,7 +396,12 @@ export async function setupOpencodeLossless(
                 {
                   targetTokens: options.summaryTokens,
                   stage: "direct",
-                  summarizer: summarizerConfig(options),
+                  summarizer: {
+                    ...summarizerConfig(options),
+                    ...(options.mechanicalTools === undefined
+                      ? {}
+                      : { mechanicalTools: options.mechanicalTools }),
+                  },
                 },
               );
             },
@@ -504,6 +516,7 @@ export function readOptions(raw: unknown): RuntimeOptions {
   const recutAtRatio = readRatio(record.recutAtRatio) ?? DEFAULT_RECUT_RATIO;
   const zones = readZones(record.zones);
   const healSourceTokens = readHealSourceTokens(record.healSourceTokens);
+  const mechanicalTools = readMechanicalTools(record.mechanicalTools);
   return {
     enabled: typeof record.enabled === "boolean" ? record.enabled : true,
     sidecarDir: typeof record.sidecarDir === "string" ? record.sidecarDir : DEFAULT_SIDECAR_DIR,
@@ -524,6 +537,7 @@ export function readOptions(raw: unknown): RuntimeOptions {
     ...(summarizer === undefined ? {} : { summarizer }),
     ...(smartZone === undefined ? {} : { smartZone }),
     ...(zones === undefined ? {} : { zones }),
+    ...(mechanicalTools === undefined ? {} : { mechanicalTools }),
   };
 }
 
@@ -532,6 +546,25 @@ function readSummarizer(raw: unknown): string | string[] | undefined {
   if (!Array.isArray(raw)) return undefined;
   const chain = raw.filter((entry): entry is string => typeof entry === "string");
   return chain.length === 0 ? undefined : chain;
+}
+
+/** Tool names that skip the model. One name or a list; blanks and repeats
+ * drop, and an empty result keeps the LLM path. */
+function readMechanicalTools(raw: unknown): string[] | undefined {
+  const list = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : undefined;
+  if (list === undefined) return undefined;
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of list) {
+    if (typeof entry !== "string") continue;
+    const name = entry.trim();
+    if (name.length === 0) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out.length === 0 ? undefined : out;
 }
 
 function positiveNumber(raw: unknown): number | undefined {

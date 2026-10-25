@@ -132,9 +132,16 @@ export async function runLosslessPass(
         ...(opts.targetTokens === undefined ? {} : { targetTokens: opts.targetTokens }),
       },
       llm,
-      // The pass stage is the engine's own vocabulary, so a direct pass labels
-      // its completer rows and its engine rows alike.
-      { redact: makeRedactConfigAdapter({}), session: sessionID, stage },
+      {
+        // The pass stage is the engine's own vocabulary, so a direct pass labels
+        // its completer rows and its engine rows alike.
+        redact: makeRedactConfigAdapter({}),
+        session: sessionID,
+        stage,
+        ...(opts.summarizer?.mechanicalTools === undefined
+          ? {}
+          : { mechanicalTools: opts.summarizer.mechanicalTools }),
+      },
     );
     if (outcome.kind === "stored") {
       // A stored outcome with no model answer is the ladder's mechanical

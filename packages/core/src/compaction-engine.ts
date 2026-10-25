@@ -127,10 +127,16 @@ export async function runCompaction(
   const uncoveredAll = store.uncoveredMessagesInSpan(bounds.firstEntryId, bounds.lastEntryId);
   const payloadByEntry = new Map(input.span.map((e) => [e.entryId, e.payload]));
   const mechanicalIds = mechanicalMessageIds(uncoveredAll, mechanicalTools, payloadByEntry);
+  const maxChunks = opts?.maxChunks ?? 24;
+  // The split below multiplies ranges past the cap (alternating noisy and
+  // ordinary messages split one chunk into one range each), so the cap applies
+  // again after it: over the cap adjacent ranges merge and share one attempt.
   const chunks = mergeToLimit(
-    chunkContiguous(uncoveredAll, leafChunkBudget),
-    opts?.maxChunks ?? 24,
-  ).flatMap((chunk) => splitByMechanical(chunk, mechanicalIds));
+    mergeToLimit(chunkContiguous(uncoveredAll, leafChunkBudget), maxChunks).flatMap((chunk) =>
+      splitByMechanical(chunk, mechanicalIds),
+    ),
+    maxChunks,
+  );
   // Same redacted source the ladder would fall back to, stored without a call;
   // provenance keeps rows covered for heal.
   async function storeMechanicalLeaf(
@@ -560,8 +566,9 @@ export async function runCompaction(
   // overshoot counts, which is the same twice-the-target bar the final render
   // clips at, so the reduction hits exactly the nodes that would be cut.
   const lone = frontier.length === 1 ? frontier[0] : undefined;
-  // A mechanical lone node already stores the truncate, so skip the re-summarize call.
-  const loneMechanical = lone !== undefined && isMechanicalNode(lone);
+  // A lone mechanical node under an opted-in list already stores the
+  // truncate, so skip the re-summarize call.
+  const loneMechanical = lone !== undefined && mechanicalTools.length > 0 && isMechanicalNode(lone);
   if (lone && frontierTok > targetTokens * 2 && !loneMechanical) {
     const beforeTokens = lone.tokens;
     const started = Date.now();
@@ -936,7 +943,7 @@ function mechanicalMessageIds(
   let prevDirectListed = false;
   for (const m of messages) {
     const payload = payloadByEntry?.get(m.entryId) ?? m.payload;
-    const direct = isMechanicalToolMessage({ text: m.text, payload }, tools);
+    const direct = isMechanicalToolMessage({ text: m.text, payload, role: m.role }, tools);
     if (direct) {
       ids.add(m.id);
       prevDirectListed = true;

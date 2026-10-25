@@ -633,6 +633,9 @@ export default function (pi: ExtensionAPI) {
               redact,
               session: sessionTag,
               stage: "blocking",
+              ...(config.mechanicalTools === undefined
+                ? {}
+                : { mechanicalTools: config.mechanicalTools }),
             },
           );
           const closed = store.commitRun(token);
@@ -781,6 +784,9 @@ export default function (pi: ExtensionAPI) {
         redact,
         session: sessionTag,
         stage: "async",
+        ...(config.mechanicalTools === undefined
+          ? {}
+          : { mechanicalTools: config.mechanicalTools }),
       },
     )
       .then((outcome) => {
