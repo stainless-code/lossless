@@ -463,7 +463,15 @@ export function handleImport(
   if (!store) {
     return { kind: "error", text: "LCM import: no stored history for this session yet." };
   }
-  const result = importTranscript(store, parsed.rows);
+  let result: ReturnType<typeof importTranscript>;
+  try {
+    result = importTranscript(store, parsed.rows);
+  } catch (error) {
+    return {
+      kind: "error",
+      text: `LCM import failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
   if (result.refused !== undefined) {
     return { kind: "error", text: `LCM import refused: ${result.refused}.` };
   }

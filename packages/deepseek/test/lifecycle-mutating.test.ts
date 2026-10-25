@@ -121,6 +121,31 @@ describe("lcm mutating verbs", () => {
     expect(missing.kind).toBe("error");
   });
 
+  it("import against a closed store returns an error instead of throwing", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("closed-src"), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("closed-dst"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    seedMessages(deps.storeFor!("closed-src"), ["closed store one", "closed store two"]);
+    const target = join(dir, "closed.jsonl");
+    const exported = await invoke(ctx, deps, "closed-src", `export ${target}`);
+    expect(exported.kind).toBe("success");
+    deps.storeFor!("closed-dst").close();
+    let result: { kind: string; text?: string } | undefined;
+    let threw: unknown = null;
+    try {
+      result = await invoke(ctx, deps, "closed-dst", `import ${target}`);
+    } catch (error) {
+      threw = error;
+    }
+    expect(threw).toBeNull();
+    expect(result?.kind).toBe("error");
+    expect(result?.text).toContain("LCM import failed:");
+  });
+
   it("gc dry-run lists without deleting and apply deletes only stale sidecars", async () => {
     const { ctx } = setupContext(ROUTE, []);
     await mountBase(ctx);
