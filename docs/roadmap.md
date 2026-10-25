@@ -195,6 +195,20 @@ Each of these was verified in peer source and is worth doing only with a reason.
   never drop child pointers. Deliberately not grafted: surface pruning (rewrites
   live history this package promises verbatim; externalization already covers
   the need) and goals/objectives (a second product, not a better memory).
+- **Arena verdict on the grafts (three-lens viability pass, order 4, 3, 2, 1).**
+  Usage reuse first: it denominates every later spend claim in believed tokens,
+  through calibration gates only, never synthesized, stale-report guard stays.
+  Untrusted framing second: past-session answers only (same-session use would
+  train the model to ignore it), one or two sentences mirroring proven wording,
+  cosmetic until a live misread. Structured prompts third: section wording under
+  fidelity and oversize gates, merge as text concatenation with id-set equality
+  green, deterministic prepend stays the default. Cache inputs last, with a
+  correction to the entry above: deterministic ordering ships as hygiene, but
+  cache-riding claims need a message-replay prototype plus measured cacheRead
+  share plus a live key, because the single-message `complete()` envelope cannot
+  express prefix reuse. Kill gates: cacheRead share under 10 pct, oversize rate
+  up over 5 points, any orphan-child or fidelity regression, calibration null
+  rate above baseline.
 
 ## Names
 
