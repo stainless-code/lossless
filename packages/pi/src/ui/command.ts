@@ -131,6 +131,12 @@ function writeDumpTarget(target: string, text: string): void {
       break;
     } catch (error) {
       if ((error as { code?: string })?.code === "EEXIST") continue;
+      // A write can create the private file and then fail (disk full), so
+      // remove the candidate before surfacing the error. EEXIST keeps its
+      // continue above and never unlinks a pre-existing collision.
+      try {
+        unlinkSync(candidate);
+      } catch {}
       throw error;
     }
   }

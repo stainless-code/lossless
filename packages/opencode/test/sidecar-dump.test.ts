@@ -400,4 +400,66 @@ describe("sidecar dump", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("removes its temp on every post-creation failure path", async () => {
+    // node:fs module namespaces are not configurable under ESM, so a write
+    // that creates the file then fails (disk full) resists spy fault
+    // injection. Pin the cleanup structure instead: the write catch unlinks
+    // the candidate before rethrowing, and EEXIST keeps its continue above
+    // without unlinking.
+    const source = readFileSync(new URL("../src/lifecycle.ts", import.meta.url), "utf8");
+    const helper = source.slice(
+      source.indexOf("function writeDumpTarget"),
+      source.indexOf("cannot create temp file"),
+    );
+    const eexist = helper.indexOf('code === "EEXIST"');
+    const unlink = helper.indexOf("unlinkSync(candidate)");
+    const rethrow = helper.indexOf("throw error");
+    expect(eexist).toBeGreaterThanOrEqual(0);
+    expect(unlink).toBeGreaterThanOrEqual(0);
+    expect(rethrow).toBeGreaterThanOrEqual(0);
+    expect(eexist).toBeLessThan(unlink);
+    expect(unlink).toBeLessThan(rethrow);
+    // Success path leaves no temp behind beside the destination.
+    const dir = tempDir();
+    const sidecars = new Sidecars(dir);
+    const texts: string[] = [];
+    const deps: LifecycleDeps = {
+      sidecars,
+      options: {
+        assembly: true,
+        swapAtRatio: 0.7,
+        recutAtRatio: 0.85,
+        keepRecentTokens: 20_000,
+      },
+      version: () => "opencode-lossless test",
+      host: () => "opencode v2",
+      prompt: (_sessionID, text) => {
+        texts.push(text);
+        return Promise.resolve(undefined);
+      },
+      record: () => {},
+      heal: async () => {
+        throw new Error("heal is not scripted in this harness");
+      },
+    };
+    try {
+      const store = sidecars.for(SESSION);
+      ingestEntries(store, [
+        { entryId: `${SESSION}:prompt:msg_1`, role: "user", text: "saved dump note", timestamp: 1 },
+      ]);
+      const target = join(dir, "lossless-dump-clean.txt");
+      await dumpCommand(deps).execute({
+        sessionID: SESSION,
+        prompt: { text: `/lossless-dump --save ${target}` },
+        delivery: {},
+      } as CommandInvocation);
+      expect(existsSync(target)).toBe(true);
+      expect(readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+      expect(texts.at(-1)).toContain("(mode 0600)");
+    } finally {
+      sidecars.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

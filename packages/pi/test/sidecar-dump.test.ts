@@ -429,3 +429,80 @@ test("dump --save: leaves a planted predictable temp untouched", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("dump --save: write failure path removes its temp", async () => {
+  // node:fs module namespaces are not configurable under ESM, so a write that
+  // creates the file then fails (disk full) resists spy fault injection. Pin
+  // the cleanup structure instead: the write catch unlinks the candidate
+  // before rethrowing, and EEXIST keeps its continue above without unlinking.
+  const source = readFileSync(new URL("../src/ui/command.ts", import.meta.url), "utf8");
+  const helper = source.slice(
+    source.indexOf("function writeDumpTarget"),
+    source.indexOf("cannot create temp file"),
+  );
+  const eexist = helper.indexOf('code === "EEXIST"');
+  const unlink = helper.indexOf("unlinkSync(candidate)");
+  const rethrow = helper.indexOf("throw error");
+  assert.ok(eexist >= 0 && unlink >= 0 && rethrow >= 0);
+  assert.ok(eexist < unlink && unlink < rethrow);
+  // Success path leaves no temp behind beside the destination.
+  const dir = tempDir();
+  const origHome = process.env.HOME;
+  process.env.HOME = dir;
+  try {
+    const dbPath = join(dir, "save-clean.sqlite");
+    const liveStore = new LcmStore(dbPath);
+    try {
+      ingestEntries(liveStore, [
+        { entryId: "m1", role: "user", text: "saved dump note", timestamp: 1 },
+      ]);
+      const commands = new Map<
+        string,
+        { handler: (args: string | undefined, ctx: unknown) => Promise<unknown> }
+      >();
+      const fakePi = {
+        registerCommand: (name: string, def: never) => {
+          commands.set(name, def);
+        },
+      };
+      const deps: LcmCommandDeps = {
+        getStore: () => liveStore,
+        openStore: () => liveStore,
+        getConfig: () => ({}),
+        patchConfig: () => {},
+        resetConfig: () => {},
+        clearCommitState: () => {},
+        getCommitState: () => null,
+        getDbPath: () => dbPath,
+        keepRecentTokens: () => 20_000,
+      };
+      registerLcmCommand(fakePi as never, deps);
+      const notifications: string[] = [];
+      const ctx = {
+        mode: "tui",
+        sessionManager: {
+          getSessionFile: () => join(dir, "sess.jsonl"),
+          getSessionId: () => "pi-dump-save",
+        },
+        getContextUsage: () => undefined,
+        ui: {
+          notify: (msg: string) => {
+            notifications.push(msg);
+          },
+        },
+      };
+      const target = join(dir, "lcm-dump-clean.txt");
+      await commands.get("lcm")!.handler(`dump --save ${target}`, ctx);
+      assert.ok(existsSync(target));
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.endsWith(".tmp")),
+        [],
+      );
+    } finally {
+      liveStore.close();
+    }
+  } finally {
+    process.env.HOME = origHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
