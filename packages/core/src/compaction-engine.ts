@@ -277,7 +277,11 @@ export async function runCompaction(
         return;
       }
       let sourceClipped = false;
+      // A post-split re-cap can join noisy and ordinary runs, so a mixed
+      // range keeps full provenance but prompts only ordinary messages.
+      // Contiguous spans stay intact for the span index and the frontier.
       const items = remaining.flatMap((m) => {
+        if (mechanicalIds.has(m.id)) return [];
         const ref = refByMessage.get(m.id);
         // The summarizer never reads a stored body unmasked. The mask runs on
         // the whole body rather than on the clipped copy, so a value that

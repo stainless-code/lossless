@@ -198,6 +198,65 @@ test("mechanical tier: alternating spans keep leaf work within maxChunks", async
   }
 });
 
+test("mechanical tier: alternating over-cap spans never prompt noisy bodies", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const span = Array.from({ length: 20 }, (_, i) =>
+      i % 2 === 0
+        ? {
+            entryId: `e${i}`,
+            role: "user" as const,
+            text: `ORDINARY-${i} ${"p".repeat(50)}`,
+          }
+        : {
+            entryId: `e${i}`,
+            role: "toolResult" as const,
+            text: `tool noisy-read {"n":${i}}\nNOISY-BODY-${i} ${"z".repeat(200)}`,
+          },
+    );
+    const calls: string[] = [];
+    const outcome = await storedPass(
+      store,
+      { span, targetTokens: 1500, mechanicalTools: ["noisy-read"] },
+      countingLlm(() => "summary", calls),
+      { leafChunkTokens: 100_000, maxChunks: 4 },
+    );
+    assert.ok(calls.length >= 1 && calls.length <= 4, `bounded attempts, got ${calls.length}`);
+    assert.ok(outcome.leafSummaryIds.length <= 4);
+    for (const prompt of calls) {
+      assert.ok(!prompt.includes("NOISY-BODY"), `noisy body leaked: ${prompt.slice(0, 120)}`);
+      assert.ok(!prompt.includes("noisy-read"), `noisy marker leaked: ${prompt.slice(0, 120)}`);
+    }
+    const joined = calls.join("\n");
+    for (let i = 0; i < 20; i += 2) {
+      assert.ok(joined.includes(`ORDINARY-${i}`), `ordinary ${i} reaches a prompt`);
+    }
+    const allIds = store
+      .allMessages()
+      .map((m) => m.id)
+      .sort((a, b) => a - b);
+    const covered: number[] = [];
+    for (const id of outcome.leafSummaryIds) covered.push(...store.summarySources(id).messages);
+    assert.deepEqual(
+      [...covered].sort((a, b) => a - b),
+      allIds,
+    );
+    assert.equal(new Set(covered).size, allIds.length, "no double summary");
+    assert.deepEqual(store.uncoveredMessagesInSpan("e0", "e19"), []);
+    const frontier = store.frontier("e0", "e19");
+    assert.deepEqual(
+      frontier.map((n) => n.id),
+      outcome.leafSummaryIds,
+    );
+    assert.deepEqual(
+      frontier.map((n) => n.firstEntryId),
+      ["e0", "e5", "e10", "e15"],
+    );
+  } finally {
+    store.close();
+  }
+});
+
 test("mechanical tier: a Pi result follows its call onto the skip path", async () => {
   const store = new LcmStore(":memory:");
   try {
