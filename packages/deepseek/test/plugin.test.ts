@@ -12,7 +12,7 @@ import SessionProjectionRegistry from "@deepseek-ai/dsh-session-projection";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
 import TokenMeter from "@deepseek-ai/dsh-token-meter";
 import ToolRuntime from "@deepseek-ai/dsh-tools";
-import { LcmStore } from "lossless-core";
+import { LcmStore, SidecarStores } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
 import { lcmCommandDefinition } from "../src/command.ts";
@@ -340,5 +340,114 @@ describe("applyLossless", () => {
     } finally {
       dispose();
     }
+  });
+
+  it("post-dispose engine reads absence instead of closed handles", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+    try {
+      const session = ctx.sessions.create(SessionId("evict-1"), { meta: { cwd: dir } });
+      appendConversation(session, ROUTE, "evict me ".repeat(20));
+      session.append("turn/start", { turn: 3 });
+      const engine = ctx.compaction as LosslessSummarizerEngine;
+      const deps = (
+        engine as unknown as {
+          lossless: {
+            store: (id: string) => LcmStore | undefined;
+            index: (id: string) => unknown;
+            memory: { previous: (id: string) => string | undefined };
+          };
+        }
+      ).lossless;
+      expect(deps.store("evict-1")).toBeDefined();
+      dispose();
+      expect(deps.store("evict-1")).toBeUndefined();
+      expect(deps.index("evict-1")).toBeUndefined();
+      expect(() => deps.memory.previous("evict-1")).not.toThrow();
+      expect(deps.memory.previous("evict-1")).toBeUndefined();
+    } finally {
+      dispose();
+    }
+  });
+
+  it("post-dispose summarize reports no-sidecar-store", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+    try {
+      const session = ctx.sessions.create(SessionId("evict-2"), { meta: { cwd: dir } });
+      appendConversation(session, ROUTE, "evict me ".repeat(20));
+      session.append("turn/start", { turn: 3 });
+      const engine = ctx.compaction as LosslessSummarizerEngine;
+      const summarize = (
+        engine as unknown as {
+          summarize: (input: { messages: readonly unknown[] }, agent: unknown) => Promise<unknown>;
+        }
+      ).summarize.bind(engine);
+      dispose();
+      await expect(summarize({ messages: [] }, fakeAgent(session, ROUTE))).rejects.toThrow(
+        "no sidecar store",
+      );
+    } finally {
+      dispose();
+    }
+  });
+
+  it("double dispose stays absent and safe after eviction", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+    const session = ctx.sessions.create(SessionId("evict-3"), { meta: { cwd: dir } });
+    appendConversation(session, ROUTE, "evict me ".repeat(20));
+    session.append("turn/start", { turn: 3 });
+    const engine = ctx.compaction as LosslessSummarizerEngine;
+    const deps = (
+      engine as unknown as { lossless: { store: (id: string) => LcmStore | undefined } }
+    ).lossless;
+    dispose();
+    expect(deps.store("evict-3")).toBeUndefined();
+    expect(() => dispose()).not.toThrow();
+    expect(deps.store("evict-3")).toBeUndefined();
+  });
+
+  it("SidecarStores.clear evicts without closing or deleting files", () => {
+    const dir = tempDir();
+    const caches = new SidecarStores({ dir });
+    const store = caches.for("unit-1");
+    store.insertMessage({
+      entryId: "unit-1:1",
+      role: "user",
+      text: "hello",
+      tokens: 1,
+      timestamp: Date.now(),
+    });
+    expect(caches.peek("unit-1")).toBe(store);
+    expect(caches.ids()).toContain("unit-1");
+    const path = caches.pathFor("unit-1");
+    caches.clear();
+    expect(caches.peek("unit-1")).toBeUndefined();
+    expect(caches.ids()).toEqual([]);
+    expect(existsSync(path)).toBe(true);
+    expect(() => store.allMessages()).not.toThrow();
+    store.close();
+  });
+
+  it("SidecarStores.evict forgets one entry and keeps the rest open", () => {
+    const dir = tempDir();
+    const caches = new SidecarStores({ dir });
+    const kept = caches.for("unit-keep");
+    const dropped = caches.for("unit-drop");
+    const droppedPath = caches.pathFor("unit-drop");
+    dropped.close();
+    caches.evict("unit-drop");
+    expect(caches.peek("unit-drop")).toBeUndefined();
+    expect(caches.peek("unit-keep")).toBe(kept);
+    expect(caches.ids()).toEqual(["unit-keep"]);
+    expect(existsSync(droppedPath)).toBe(true);
+    kept.close();
   });
 });

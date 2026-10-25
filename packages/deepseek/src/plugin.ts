@@ -104,6 +104,16 @@ class SessionSidecars extends SidecarStores {
     }
     return map;
   }
+
+  override clear(): void {
+    super.clear();
+    this.indexes.clear();
+  }
+
+  override evict(sessionId: string): void {
+    super.evict(sessionId);
+    this.indexes.delete(sessionId);
+  }
 }
 
 /** Compose lossless memory into a harness context: mirror every session
@@ -244,6 +254,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
       try {
         if (store.hasLiveRun() || healing.has(id)) continue;
         store.close();
+        sidecars.evict(id);
       } catch {}
     }
   };

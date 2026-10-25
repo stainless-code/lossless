@@ -142,4 +142,14 @@ export class SidecarStores {
     for (const store of this.stores.values()) store.close();
     this.stores.clear();
   }
+
+  /** Forget one cached store without closing or touching disk; the caller closes first. */
+  evict(sessionId: string): void {
+    this.stores.delete(sessionId);
+  }
+
+  /** Forget every held store without closing or touching disk; the caller closes first so a live handle can stay open. */
+  clear(): void {
+    this.stores.clear();
+  }
 }
