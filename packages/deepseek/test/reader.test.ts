@@ -54,4 +54,28 @@ describe("dshReader retrieval", () => {
     const roles = second?.messages.map((message) => message.role) ?? [];
     expect(roles).toEqual(["user", "assistant", "tool"]);
   });
+
+  it("stamps the calling session id on every step", async () => {
+    const store = seedStore();
+    const { ctx, adapter } = setupContext(ROUTE, [
+      toolCallChunks("call-1", "lcm_grep", { query: "compaction" }),
+      textChunks("The rollout decision is recorded under the compaction engine entries."),
+    ]);
+    const run = await runRetrieval(
+      store,
+      {
+        query: "compaction engine rollout",
+        prompt: "What did we decide about the compaction engine rollout?",
+        budgetTokens: 10000,
+        maxSteps: 6,
+        redact: (text) => text,
+      },
+      dshReader(ctx, { ref: dshRef(ROUTE), sessionId: "session-9" }),
+    );
+    expect(run.kind).toBe("answered");
+    expect(adapter.requests.length).toBeGreaterThan(0);
+    for (const request of adapter.requests) {
+      expect(request).toMatchObject({ sessionId: "session-9" });
+    }
+  });
 });

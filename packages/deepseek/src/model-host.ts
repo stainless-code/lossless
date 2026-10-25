@@ -24,6 +24,10 @@ export interface DshHostOptions {
   readonly defaultRoute?: DshRoute;
   /** Abort for every call this host makes. The reader owns its own signal. */
   readonly signal?: AbortSignal;
+  /** Calling session stamped into GenerateOptions so adapters can attach
+   * per-conversation transport (e.g. a session routing header). Absent sends
+   * nothing. */
+  readonly sessionId?: string;
 }
 
 /** One ref for one route. `reasoning` stays false: core adds
@@ -72,6 +76,7 @@ export function agentRoute(agent: Agent | undefined): DshRoute | undefined {
 export function dshModelHost(ctx: Context, options?: DshHostOptions): ModelHost<DshRoute> {
   const signal = options?.signal;
   const fallback = options?.defaultRoute;
+  const sessionId = options?.sessionId;
   return {
     notices: { kind: "none" } satisfies Notices,
     session: () => (fallback === undefined ? undefined : dshRef(fallback)),
@@ -79,12 +84,13 @@ export function dshModelHost(ctx: Context, options?: DshHostOptions): ModelHost<
       requested.provider.length > 0 && requested.id.length > 0
         ? dshRef({ provider: requested.provider, model: requested.id })
         : undefined,
-    complete: (model, request) => complete(ctx, { signal, ref: model, request }),
+    complete: (model, request) => complete(ctx, { signal, ref: model, request, sessionId }),
   };
 }
 
 interface CompleteArgs {
   readonly signal: AbortSignal | undefined;
+  readonly sessionId: string | undefined;
   readonly ref: ModelRef<DshRoute>;
   readonly request: CompletionRequest;
 }
@@ -98,6 +104,11 @@ async function complete(ctx: Context, args: CompleteArgs): Promise<ModelAnswer> 
     maxTokens: args.request.maxTokens,
     purpose: "compaction",
     ...(args.signal === undefined ? {} : { signal: args.signal }),
+    // Brand is harness-side identity; the string carries it. Omitted when the
+    // caller has no session, so direct calls stay routable without one.
+    ...(args.sessionId === undefined
+      ? {}
+      : { sessionId: args.sessionId as GenerateOptions["sessionId"] }),
   };
   try {
     for await (const chunk of ctx.llm.stream(options)) assembler.push(chunk);

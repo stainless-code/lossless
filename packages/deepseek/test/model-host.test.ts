@@ -87,6 +87,26 @@ describe("dshModelHost.complete", () => {
     });
   });
 
+  it("stamps the calling session id for per-conversation routing", async () => {
+    const { ctx, adapter } = setupContext(ROUTE, [textChunks("hello summary")]);
+    const host = dshModelHost(ctx, { defaultRoute: ROUTE, sessionId: "session-1" });
+    const ref = host.session();
+    if (!ref) throw new Error("session route did not resolve");
+    await host.complete(ref, { prompt: "summarize this", maxTokens: 100 });
+    expect(adapter.requests).toHaveLength(1);
+    expect(adapter.requests[0]).toMatchObject({ sessionId: "session-1" });
+  });
+
+  it("omits the session stamp when unset", async () => {
+    const { ctx, adapter } = setupContext(ROUTE, [textChunks("hello summary")]);
+    const host = dshModelHost(ctx, { defaultRoute: ROUTE });
+    const ref = host.session();
+    if (!ref) throw new Error("session route did not resolve");
+    await host.complete(ref, { prompt: "summarize this", maxTokens: 100 });
+    expect(adapter.requests).toHaveLength(1);
+    expect(adapter.requests[0]).not.toHaveProperty("sessionId");
+  });
+
   it("fails capped when the provider stops at its token cap", async () => {
     const { ctx } = setupContext(ROUTE, [cappedChunks("partial")]);
     const host = dshModelHost(ctx, { defaultRoute: ROUTE });

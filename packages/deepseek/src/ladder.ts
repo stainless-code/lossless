@@ -212,6 +212,7 @@ export async function runLadder(
   if (!first || !last) throw new Error("lossless compaction: span mapping came back empty");
   const host = dshModelHost(ctx, {
     defaultRoute: target,
+    sessionId,
     ...(signal === undefined ? {} : { signal }),
   });
   const tracker = new UsageTracker();

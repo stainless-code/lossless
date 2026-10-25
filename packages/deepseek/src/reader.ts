@@ -30,6 +30,9 @@ export interface DshReaderOptions {
   readonly ref: ModelRef<DshRoute>;
   /** Cancellation for the streaming call; an abort fails the step. */
   readonly signal?: AbortSignal;
+  /** Calling session, stamped into each step so adapters can attach
+   * per-conversation transport. Absent sends nothing. */
+  readonly sessionId?: string;
 }
 
 /** The core reader port over one streaming call per step. The loop owns the
@@ -57,6 +60,9 @@ function beginReading(ctx: Context, options: DshReaderOptions, request: ReaderRe
         messages,
         tools: request.tools.map(toolSchema),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(options.sessionId === undefined
+          ? {}
+          : { sessionId: options.sessionId as GenerateOptions["sessionId"] }),
       };
       try {
         for await (const chunk of ctx.llm.stream(stream)) assembler.push(chunk);

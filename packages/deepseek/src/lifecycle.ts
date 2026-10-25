@@ -687,6 +687,7 @@ export async function handleHeal(
     const host = dshModelHost(ctx, {
       ...(route === undefined ? {} : { defaultRoute: route }),
       signal: invocation.signal,
+      sessionId,
     });
     const llm = makeLlm(host, healLlmConfig(deps), {
       session: sessionId,

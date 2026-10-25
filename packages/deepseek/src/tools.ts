@@ -869,7 +869,11 @@ function lcmExpandQueryTool(ctx: Context, deps: RecallDeps) {
       }
       return answerExpandQuery(
         coreDeps,
-        dshReader(ctx, { ref: dshRef(route), signal: exec.signal }),
+        dshReader(ctx, {
+          ref: dshRef(route),
+          signal: exec.signal,
+          ...(sessionId === undefined ? {} : { sessionId }),
+        }),
         sessionId,
         args,
       );
