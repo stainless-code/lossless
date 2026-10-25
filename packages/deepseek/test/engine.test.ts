@@ -256,6 +256,56 @@ describe("LosslessSummarizerEngine", () => {
     );
   });
 
+  it("records a failed pass when span mapping throws", async () => {
+    const session = buildSession("unmirrored notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const { ctx } = setupContext(ROUTE, [textChunks(SUMMARY)]);
+    mountMeter(ctx);
+    const rows: Record<string, unknown>[] = [];
+    const agent = fakeAgent(session, ROUTE);
+    const engine = new LosslessSummarizerEngine(
+      ctx,
+      { auto: false },
+      {
+        store: () => store,
+        index: () => new MessageIndex(),
+        redact: identity,
+        record: (row) => rows.push(row),
+      },
+    );
+    const nodes = session.surface.nodes;
+    await expect(engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent)).rejects.toThrow(
+      "sidecar holds no row",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      event: "lcm",
+      kind: "pass",
+      session: String(session.id),
+      stage: "blocking",
+      outcome: "failed",
+      error: expect.stringContaining("sidecar holds no row"),
+    });
+    expect(typeof rows[0]?.durationMs).toBe("number");
+  });
+
+  it("throws cleanly without a recorder when span mapping throws", async () => {
+    const session = buildSession("unmirrored notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const { ctx } = setupContext(ROUTE, [textChunks(SUMMARY)]);
+    mountMeter(ctx);
+    const agent = fakeAgent(session, ROUTE);
+    const engine = new LosslessSummarizerEngine(
+      ctx,
+      { auto: false },
+      { store: () => store, index: () => new MessageIndex(), redact: identity },
+    );
+    const nodes = session.surface.nodes;
+    await expect(engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent)).rejects.toThrow(
+      "sidecar holds no row",
+    );
+  });
+
   it("heals a partial mirror through one backfill catch-up", async () => {
     const session = buildSession("catchup notes ".repeat(20));
     const store = new LcmStore(":memory:");

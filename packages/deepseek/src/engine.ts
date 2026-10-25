@@ -177,21 +177,37 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
       );
     }
     let span: CompactionSpanEntry[];
+    const started = Date.now();
     try {
-      span = this.spanOf(input, store, index, agent.session);
+      try {
+        span = this.spanOf(input, store, index, agent.session);
+      } catch (error) {
+        // A dead mirror heals on retry; anything else must stay fail-closed.
+        if (!isUnmappedSpanError(error)) throw error;
+        const source = historySourceFrom(this.ctx);
+        if (source === undefined) throw error;
+        await backfillSession(
+          agent.session,
+          store,
+          source,
+          index,
+          this.lossless.record === undefined ? {} : { record: this.lossless.record },
+        );
+        span = this.spanOf(input, store, index, agent.session);
+      }
     } catch (error) {
-      // A dead mirror heals on retry; anything else must stay fail-closed.
-      if (!isUnmappedSpanError(error)) throw error;
-      const source = historySourceFrom(this.ctx);
-      if (source === undefined) throw error;
-      await backfillSession(
-        agent.session,
-        store,
-        source,
-        index,
-        this.lossless.record === undefined ? {} : { record: this.lossless.record },
-      );
-      span = this.spanOf(input, store, index, agent.session);
+      // Span mapping never reaches the ladder, so this is the only pass row.
+      this.lossless.record?.({
+        ts: Date.now(),
+        event: "lcm",
+        kind: "pass",
+        session: sessionId,
+        stage: "blocking",
+        outcome: "failed",
+        error: error instanceof Error ? error.message.slice(0, 300) : String(error).slice(0, 300),
+        durationMs: Date.now() - started,
+      });
+      throw error;
     }
     const ladder = await runLadder(this.ctx, this.lossless, target, sessionId, span, signal);
     const checkpoint = withSummaryRefs(ladder.summaryText, [
