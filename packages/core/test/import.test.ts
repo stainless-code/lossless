@@ -322,6 +322,88 @@ test("import: a file row clashing with stored text for the same entry id is refu
   target.close();
 });
 
+test("import: the stored-text check, message inserts, and file links share one transaction", () => {
+  const body = "body for e00";
+  const rows: ExportRow[] = [
+    {
+      v: EXPORT_VERSION,
+      rowType: "message",
+      entryId: "e00",
+      role: "user",
+      text: body,
+      tokens: 1,
+      timestamp: 1,
+    },
+    {
+      v: EXPORT_VERSION,
+      rowType: "file",
+      fileId: "0123456789abcdef",
+      path: "/x/a.txt",
+      bytes: body.length,
+      sha256: createHash("sha256").update(body).digest("hex"),
+      kind: "text",
+      preview: "preview",
+      entryIds: ["e00"],
+    },
+  ];
+  const target = new LcmStore(":memory:");
+  // A second connection cannot slip a same-entry row between the check and
+  // the links while this handle holds BEGIN IMMEDIATE, so the test records
+  // the boundary instead of racing a real second connection.
+  const events: string[] = [];
+  const runInner = target.transaction.bind(target);
+  target.transaction = <T>(fn: () => T): T => {
+    events.push("begin");
+    try {
+      const value = runInner(fn);
+      events.push("commit");
+      return value;
+    } catch (error) {
+      events.push("rollback");
+      throw error;
+    }
+  };
+  const readRow = target.messageByEntryId.bind(target);
+  target.messageByEntryId = (entryId: string) => {
+    events.push(`check:${entryId}`);
+    return readRow(entryId);
+  };
+  const linkRow = target.linkMessageFile.bind(target);
+  target.linkMessageFile = (messageId: number, fileId: string) => {
+    events.push(`link:${messageId}:${fileId}`);
+    linkRow(messageId, fileId);
+  };
+
+  const result = importTranscript(target, rows);
+  assert.equal(result.refused, undefined);
+  assert.equal(result.messagesInserted, 1);
+  const begin = events.indexOf("begin");
+  const commit = events.indexOf("commit");
+  assert.ok(
+    begin >= 0 && commit > begin,
+    `one transaction wraps the import, saw ${events.join(",")}`,
+  );
+  assert.equal(events.filter((e) => e === "begin").length, 1, "the import commits once");
+  const inside = events.slice(begin, commit + 1);
+  assert.ok(
+    inside.some((e) => e.startsWith("check:")),
+    "the stored-text check runs inside the transaction",
+  );
+  assert.ok(
+    inside.some((e) => e.startsWith("link:")),
+    "the file links land before the commit",
+  );
+  assert.ok(
+    !events.slice(0, begin).some((e) => e.startsWith("check:") || e.startsWith("link:")),
+    "no check or link runs before the transaction",
+  );
+  assert.ok(
+    !events.slice(commit + 1).some((e) => e.startsWith("check:") || e.startsWith("link:")),
+    "no check or link runs after the commit",
+  );
+  target.close();
+});
+
 test("import: a role outside the stored four folds on the way in", () => {
   const source = seeded();
   const rows = (

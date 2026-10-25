@@ -8,7 +8,7 @@ import {
   type ExportSummaryRow,
 } from "./export.ts";
 import { FILE_KINDS, isFileKind, type FileDescriptor } from "./files.ts";
-import { ingestEntries } from "./ingest.ts";
+import { ingestEntries, type IngestStats } from "./ingest.ts";
 import {
   isSummaryQuality,
   normalizeRole,
@@ -320,36 +320,49 @@ export function importTranscript(store: LcmStore, rows: readonly ExportRow[]): I
   const hashProblem = fileHashProblem(rows);
   if (hashProblem) return REFUSED(hashProblem);
 
-  const clashProblem = existingEntryProblem(store, rows);
-  if (clashProblem) return REFUSED(clashProblem);
+  // The stored-text check and everything it protects share one write
+  // transaction. BEGIN IMMEDIATE takes the write lock before the first read,
+  // so a second connection cannot insert a same-entry row with different text
+  // between the check and the file links; INSERT OR IGNORE then keeps the
+  // checked text. Same-process writers cannot interleave this synchronous
+  // function in any case.
+  const prepared = store.transaction<
+    ImportResult | { ingested: IngestStats; idByEntry: Map<string, number> }
+  >(() => {
+    const clashProblem = existingEntryProblem(store, rows);
+    if (clashProblem) return REFUSED(clashProblem);
 
-  const exported = new Set(messages.map((m) => m.entryId));
-  const foreign = store.allMessages().filter((m) => !exported.has(m.entryId));
-  if (foreign.length > 0) {
-    return REFUSED(
-      `this store already holds ${foreign.length} message(s) the file does not name; import into an empty store instead`,
-    );
-  }
-
-  const ingested = ingestEntries(
-    store,
-    messages.map((m) => ({
-      entryId: m.entryId,
-      role: m.role,
-      text: m.text,
-      timestamp: m.timestamp,
-      ...(m.payload === undefined ? {} : { payload: m.payload }),
-    })),
-  );
-  const idByEntry = new Map(store.allMessages().map((m) => [m.entryId, m.id]));
-  for (const f of rows) {
-    if (f.rowType !== "file") continue;
-    store.insertFile(fileDescriptor(f), f.entryIds[0] ?? "");
-    for (const entryId of f.entryIds) {
-      const messageId = idByEntry.get(entryId);
-      if (messageId !== undefined) store.linkMessageFile(messageId, f.fileId);
+    const exported = new Set(messages.map((m) => m.entryId));
+    const foreign = store.allMessages().filter((m) => !exported.has(m.entryId));
+    if (foreign.length > 0) {
+      return REFUSED(
+        `this store already holds ${foreign.length} message(s) the file does not name; import into an empty store instead`,
+      );
     }
-  }
+
+    const ingested = ingestEntries(
+      store,
+      messages.map((m) => ({
+        entryId: m.entryId,
+        role: m.role,
+        text: m.text,
+        timestamp: m.timestamp,
+        ...(m.payload === undefined ? {} : { payload: m.payload }),
+      })),
+    );
+    const idByEntry = new Map(store.allMessages().map((m) => [m.entryId, m.id]));
+    for (const f of rows) {
+      if (f.rowType !== "file") continue;
+      store.insertFile(fileDescriptor(f), f.entryIds[0] ?? "");
+      for (const entryId of f.entryIds) {
+        const messageId = idByEntry.get(entryId);
+        if (messageId !== undefined) store.linkMessageFile(messageId, f.fileId);
+      }
+    }
+    return { ingested, idByEntry };
+  });
+  if (!("ingested" in prepared)) return prepared;
+  const { ingested, idByEntry } = prepared;
   const idByOrdinal = new Map<number, number>();
   let summariesInserted = 0;
   let summariesSkipped = 0;
