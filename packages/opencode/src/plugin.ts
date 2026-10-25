@@ -23,6 +23,7 @@ import { compactionMark, mirror, mirrorBusEvent, toolEntry, userEntry } from "./
 import {
   backupCommand,
   diagnoseCommand,
+  dumpCommand,
   exportCommand,
   gcCommand,
   healCommand,
@@ -335,6 +336,7 @@ export async function setupOpencodeLossless(
         exportCommand,
         importCommand,
         diagnoseCommand,
+        dumpCommand,
         migrateCommand,
         gcCommand,
         healCommand,

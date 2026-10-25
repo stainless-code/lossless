@@ -40,6 +40,7 @@ import {
 
 import type { CommandDefinition, ModelRef } from "./host.ts";
 import { readMetricRows } from "./metrics.ts";
+import { dumpSidecar } from "./sidecar-dump.ts";
 import type { SidecarRef, Sidecars } from "./sidecars.ts";
 import { summarizerConfig, type SummarizerOptions } from "./summarizer.ts";
 
@@ -607,6 +608,66 @@ export function healCommand(deps: LifecycleDeps): CommandDefinition {
           `LCM heal failed: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
+    },
+  };
+}
+
+/** Read-only dump of this session's sidecar plus its metrics. Opens the
+ * file with `queryOnly` instead of the live handle, so a dump never mutates
+ * the store it reads. */
+export function dumpCommand(deps: LifecycleDeps): CommandDefinition {
+  const redact = makeRedactConfigAdapter(deps.options);
+  return {
+    name: "lossless-dump",
+    description:
+      "Print a read-only dump of this session's sidecar: history, sampled summaries and messages, plus metrics.",
+    execute: async (input) => {
+      const args = argsOf(input.prompt.text);
+      const includeRemoved = args.includes("--include-removed");
+      if (args.includes("--save") && valueOf(args, "--save") === undefined) {
+        await deps.prompt(
+          input.sessionID,
+          "LCM dump --save: name the file to write, e.g. `/lossless-dump --save lossless-dump.txt`.",
+        );
+        return;
+      }
+      const save = valueOf(args, "--save");
+      const query = args.filter((arg) => !arg.startsWith("--") && arg !== save).join(" ");
+      const result = dumpSidecar({
+        path: deps.sidecars.pathFor(input.sessionID),
+        sessionId: input.sessionID,
+        redact,
+        ...(includeRemoved ? { includeRemoved: true as const } : {}),
+        metricRows: readMetricRows(deps.sidecars.dir).filter(
+          (row): row is Record<string, unknown> => isRecord(row),
+        ),
+        ...(query.length > 0 ? { sampleQuery: query } : {}),
+      });
+      if (result.status === "skipped") {
+        await deps.prompt(
+          input.sessionID,
+          `LCM dump skipped: ${result.reason} (${result.detail}).`,
+        );
+        return;
+      }
+      if (save !== undefined) {
+        try {
+          const target = resolve(save);
+          writeFileSync(target, `${result.text}\n`, { encoding: "utf8", mode: 0o600 });
+          chmodFile(target);
+          await deps.prompt(
+            input.sessionID,
+            `LCM dump: wrote ${Buffer.byteLength(result.text, "utf8")} bytes to ${target} (mode 0600).`,
+          );
+        } catch (error) {
+          await deps.prompt(
+            input.sessionID,
+            `LCM dump failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        return;
+      }
+      await deps.prompt(input.sessionID, result.text);
     },
   };
 }

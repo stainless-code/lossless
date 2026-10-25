@@ -42,6 +42,7 @@ import {
   type LcmConfig,
   lcmConfigPath,
 } from "./config-io.ts";
+import { dumpSidecar } from "./sidecar-dump.ts";
 
 export interface LcmCommandDeps {
   getStore(): LcmStore | undefined;
@@ -65,6 +66,7 @@ export const LCM_SUBCOMMANDS = [
   "export",
   "import",
   "report",
+  "dump",
   "doctor",
   "diagnose",
   "gc",
@@ -593,6 +595,62 @@ export function registerLcmCommand(
       if (sub === "report") {
         const report = buildReport(collectMetricsEvents());
         ctx.ui.notify(report, "info");
+        return;
+      }
+
+      if (sub === "dump") {
+        const flags = (args ?? "").trim().split(/\s+/).slice(1);
+        const save = parseSaveFlag(flags);
+        if (save.kind === "missing-path") {
+          ctx.ui.notify(
+            "LCM dump --save: name the file to write, e.g. `/lcm dump --save lcm-dump.txt`.",
+            "warning",
+          );
+          return;
+        }
+        const includeRemoved = flags.includes("--include-removed");
+        const savePath = save.kind === "path" ? save.path : undefined;
+        const query = flags
+          .filter((flag, index) => {
+            if (flag.startsWith("--")) return false;
+            if (save.kind === "path" && flags[index - 1] === "--save") return false;
+            if (save.kind === "path" && flag === save.path && flags.includes("--save")) {
+              return false;
+            }
+            return true;
+          })
+          .join(" ");
+        const tag = basename(db);
+        const result = dumpSidecar({
+          path: db,
+          sessionId: tag,
+          redact: makeRedact(deps.getConfig),
+          ...(includeRemoved ? { includeRemoved: true as const } : {}),
+          metricRows: collectMetricsEvents().filter((e) => e.session === tag),
+          ...(query.length > 0 ? { sampleQuery: query } : {}),
+        });
+        if (result.status === "skipped") {
+          ctx.ui.notify(`LCM dump skipped: ${result.reason} (${result.detail}).`, "warning");
+          return;
+        }
+        if (savePath !== undefined) {
+          try {
+            writeFileSync(savePath, `${result.text}\n`, "utf8");
+            chmodSync(savePath, 0o600);
+          } catch (error) {
+            ctx.ui.notify(
+              `LCM dump: cannot write ${savePath} (${error instanceof Error ? error.message : String(error)}).`,
+              "warning",
+            );
+            return;
+          }
+          ctx.ui.notify(
+            `LCM dump: wrote ${Buffer.byteLength(result.text, "utf8")} bytes to ${savePath} (mode 0600).`,
+            "info",
+          );
+          return;
+        }
+        ctx.ui.notify(result.text, "info");
         return;
       }
 
