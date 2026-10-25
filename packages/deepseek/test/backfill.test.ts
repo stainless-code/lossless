@@ -256,6 +256,18 @@ describe("pre-mount backfill", () => {
 });
 
 describe("history source seam", () => {
+  it("treats an uninjectable query backend as absent instead of throwing", () => {
+    // Live cordis scopes reject undeclared service reads with
+    // `cannot get property "sessionQuery" without inject`; the mount must
+    // degrade to live-mirror-only, exactly like a missing backend.
+    const throwing = {
+      get sessionQuery(): never {
+        throw new Error('cannot get property "sessionQuery" without inject');
+      },
+    };
+    expect(historySourceFrom(throwing as unknown as Context)).toBeUndefined();
+  });
+
   it("is absent without the query backend and reads through it when mounted", async () => {
     const ctx = new Context();
     expect(historySourceFrom(ctx)).toBeUndefined();

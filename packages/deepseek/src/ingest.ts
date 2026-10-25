@@ -5,8 +5,9 @@ import { ingestEntries } from "lossless-core";
 import type { IngestStats, IngestibleEntry, LcmRole, LcmStore } from "lossless-core";
 
 /** Live projection state: derived message id to sidecar entry id. The engine
- * hook resolves its span through this map instead of matching text, so resume
- * without it fails closed rather than guessing rows. */
+ * hook resolves its span through this map instead of matching text; a cold
+ * map re-derives entries from the live log on first miss, and only a message
+ * with no live event fails closed rather than guessing rows. */
 export class MessageIndex {
   private readonly ids = new Map<string, string>();
 
@@ -109,7 +110,14 @@ function disposeObservation(observation: { [key: symbol]: unknown }): void {
  * the same `observeSession` call the host history controller pages from,
  * read optionally so the ctx surface does not widen. */
 export function historySourceFrom(ctx: Context): SessionHistorySource | undefined {
-  const query = (ctx as unknown as { sessionQuery?: SessionQueryLike }).sessionQuery;
+  let query: SessionQueryLike | undefined;
+  try {
+    // Live scopes reject undeclared service reads; treat that exactly like
+    // an unmounted backend so the mount degrades to live-mirror-only.
+    query = (ctx as unknown as { sessionQuery?: SessionQueryLike }).sessionQuery;
+  } catch {
+    return undefined;
+  }
   if (query === undefined) return undefined;
   return {
     observe: async (sessionId) => {
