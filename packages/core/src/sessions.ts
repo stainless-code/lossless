@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Compile } from "typebox/compile";
 
+import { ftsPhrase, scopedGrepAll, toolScopeMessageIds } from "./recall-view.ts";
 import { hashSessionPath } from "./retention.ts";
 import { LcmStore, StaleStoreError, type GrepHit } from "./store.ts";
 
@@ -212,6 +213,10 @@ export function searchSessions(
     deadlineMs?: number;
     perSession?: number;
     now?: () => number;
+    role?: "user" | "assistant" | "toolResult" | "custom";
+    dateStart?: number;
+    dateEnd?: number;
+    toolName?: string;
   },
 ): SessionSearchResult {
   const now = opts?.now ?? Date.now;
@@ -243,7 +248,12 @@ export function searchSessions(
     }
     const store = opened.store;
     try {
-      const found = searchStore(store, query, Math.min(perSession, limit - hits.length));
+      const found = searchStore(store, query, Math.min(perSession, limit - hits.length), {
+        ...(opts?.role === undefined ? {} : { role: opts.role }),
+        ...(opts?.dateStart === undefined ? {} : { dateStart: opts.dateStart }),
+        ...(opts?.dateEnd === undefined ? {} : { dateEnd: opts.dateEnd }),
+        ...(opts?.toolName === undefined ? {} : { toolName: opts.toolName }),
+      });
       scanned++;
       for (const hit of found) {
         hits.push({
@@ -331,14 +341,45 @@ export function sessionsForScope(opts: {
   });
 }
 
-function searchStore(store: LcmStore, query: string, limit: number): GrepHit[] {
-  try {
-    return store.grep(query, { limit });
-  } catch {
+function searchStore(
+  store: LcmStore,
+  query: string,
+  limit: number,
+  filters?: {
+    role?: "user" | "assistant" | "toolResult" | "custom";
+    dateStart?: number;
+    dateEnd?: number;
+    toolName?: string;
+  },
+): GrepHit[] {
+  const grepFilters = {
+    ...(filters?.role === undefined ? {} : { role: filters.role }),
+    ...(filters?.dateStart === undefined ? {} : { dateStart: filters.dateStart }),
+    ...(filters?.dateEnd === undefined ? {} : { dateEnd: filters.dateEnd }),
+  };
+  if (filters?.toolName === undefined) {
     try {
-      return store.grep(JSON.stringify(query), { limit });
+      return store.grep(query, { limit, ...grepFilters });
     } catch {
-      return [];
+      try {
+        return store.grep(ftsPhrase(query), { limit, ...grepFilters });
+      } catch {
+        return [];
+      }
     }
   }
+  const scopedIds = toolScopeMessageIds(store, filters.toolName, {});
+  const searchIn = (ids: ReadonlySet<number>, text: string) => {
+    try {
+      return scopedGrepAll(store, text, {
+        includeRemoved: false,
+        ...grepFilters,
+        scoped: ids,
+      }).slice(0, limit);
+    } catch {
+      return undefined;
+    }
+  };
+  const hits = searchIn(scopedIds, query) ?? searchIn(scopedIds, ftsPhrase(query));
+  return hits ?? [];
 }

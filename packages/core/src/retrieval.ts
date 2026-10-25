@@ -79,10 +79,15 @@ const LOOP_TOOLS: ReaderTool[] = [
   {
     name: "lcm_expand",
     description:
-      "Read the original messages a summary covers, or one named entry. Without entry_id, list `limit` messages from message index `offset`. With entry_id, read that one message from `char_offset` for up to `max_chars` characters; continue from the char_offset the result reports. `id` is the summary to list, or to check that the entry is covered; omit it to read an entry that no summary covers yet.",
+      "Read the original messages a summary covers, or one named entry. Without entry_id, list `limit` messages from message index `offset`, or centered on `anchor` when it names an entry id. With entry_id, read that one message from `char_offset` for up to `max_chars` characters; continue from the char_offset the result reports. `id` is the summary to list, or to check that the entry is covered; omit it to read an entry that no summary covers yet.",
     parameters: Type.Object({
       id: Type.Optional(Type.Integer({ description: "Summary id, the N in [lcm:summary #N ...]" })),
       entry_id: Type.Optional(Type.String({ description: "Read this one message by entry id" })),
+      anchor: Type.Optional(
+        Type.String({
+          description: "Center the listing window on this entry id (with id, without entry_id)",
+        }),
+      ),
       offset: Type.Optional(
         Type.Integer({ minimum: 0, description: "Message index to start listing from" }),
       ),
@@ -212,7 +217,7 @@ function brief(store: LcmStore, request: RetrievalRequest): string {
   ];
   const address = addressedLine(store, request.scope);
   if (address !== undefined) lines.push("", address);
-  lines.push("", historyManifest(store, MANIFEST_NODES));
+  lines.push("", historyManifest(store, MANIFEST_NODES, request.query));
   return lines.join("\n");
 }
 
@@ -296,6 +301,7 @@ function renderTool(
     case "lcm_expand": {
       const id = asInt(args["id"]);
       const entryId = asString(args["entry_id"]);
+      const anchor = asString(args["anchor"]);
       const maxChars = Math.min(asInt(args["max_chars"]) ?? MAX_EXPAND_CHARS, MAX_EXPAND_CHARS);
       const offset = asInt(args["offset"]) ?? 0;
       if (entryId === undefined) {
@@ -307,6 +313,7 @@ function renderTool(
               offset,
               limit: asInt(args["limit"]) ?? 25,
               maxChars,
+              ...(anchor === undefined ? {} : { anchor }),
             });
       }
       return expandView(store, redact, {

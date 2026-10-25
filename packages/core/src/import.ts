@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   EXPORT_VERSION,
   type ExportFileRow,
@@ -6,7 +8,7 @@ import {
   type ExportSummaryRow,
 } from "./export.ts";
 import { FILE_KINDS, isFileKind, type FileDescriptor } from "./files.ts";
-import { ingestEntries } from "./ingest.ts";
+import { ingestEntries, type IngestStats } from "./ingest.ts";
 import {
   isSummaryQuality,
   normalizeRole,
@@ -217,6 +219,73 @@ const REFUSED = (reason: string): ImportResult => ({
   refused: reason,
 });
 
+/** A repeated entry id must carry the same text every time. Ingest keeps the
+ * first row and skips the rest, so a conflict has no single reading to check
+ * a file against. Refuse before any write. */
+function duplicateEntryProblem(rows: readonly ExportRow[]): string | undefined {
+  const seen = new Map<string, string>();
+  for (const r of rows) {
+    if (r.rowType !== "message") continue;
+    const prev = seen.get(r.entryId);
+    if (prev === undefined) {
+      seen.set(r.entryId, r.text);
+    } else if (prev !== r.text) {
+      return `message entry ${r.entryId} repeats with different text`;
+    }
+  }
+  return undefined;
+}
+
+/** Runs before any write, so a corrupt file refuses without a partial import.
+ * Rows with no linked entries carry nothing to check. The first row wins,
+ * which is what ingest keeps when an entry id repeats. */
+function fileHashProblem(rows: readonly ExportRow[]): string | undefined {
+  const textByEntry = new Map<string, string>();
+  for (const r of rows) {
+    if (r.rowType !== "message") continue;
+    if (!textByEntry.has(r.entryId)) textByEntry.set(r.entryId, r.text);
+  }
+  for (const f of rows) {
+    if (f.rowType !== "file") continue;
+    for (const entryId of f.entryIds) {
+      const text = textByEntry.get(entryId);
+      if (text === undefined) continue;
+      if (text.length !== f.bytes) {
+        return `file ${f.fileId} claims ${f.bytes} chars but entry ${entryId} holds ${text.length}`;
+      }
+      const actual = createHash("sha256").update(text).digest("hex");
+      if (actual !== f.sha256) {
+        return `file ${f.fileId} carries sha256 ${f.sha256} but entry ${entryId} hashes to ${actual}`;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** A file row links to the stored message for its entry id, and ingest skips an
+ * entry id the target already holds. When the target holds different text, the
+ * file would link to bytes its hash was not checked against, so refuse before
+ * any write and leave the stored row alone. */
+function existingEntryProblem(store: LcmStore, rows: readonly ExportRow[]): string | undefined {
+  const textByEntry = new Map<string, string>();
+  for (const r of rows) {
+    if (r.rowType !== "message") continue;
+    if (!textByEntry.has(r.entryId)) textByEntry.set(r.entryId, r.text);
+  }
+  for (const f of rows) {
+    if (f.rowType !== "file") continue;
+    for (const entryId of f.entryIds) {
+      const supplied = textByEntry.get(entryId);
+      if (supplied === undefined) continue;
+      const existing = store.messageByEntryId(entryId);
+      if (existing !== undefined && existing.text !== supplied) {
+        return `file ${f.fileId} names entry ${entryId} whose text in this store differs from the file`;
+      }
+    }
+  }
+  return undefined;
+}
+
 function fileDescriptor(f: ExportFileRow): FileDescriptor {
   return {
     fileId: f.fileId,
@@ -245,33 +314,55 @@ export function importTranscript(store: LcmStore, rows: readonly ExportRow[]): I
   const problem = provenanceProblem(rows);
   if (problem) return REFUSED(problem);
 
-  const exported = new Set(messages.map((m) => m.entryId));
-  const foreign = store.allMessages().filter((m) => !exported.has(m.entryId));
-  if (foreign.length > 0) {
-    return REFUSED(
-      `this store already holds ${foreign.length} message(s) the file does not name; import into an empty store instead`,
-    );
-  }
+  const duplicateProblem = duplicateEntryProblem(rows);
+  if (duplicateProblem) return REFUSED(duplicateProblem);
 
-  const ingested = ingestEntries(
-    store,
-    messages.map((m) => ({
-      entryId: m.entryId,
-      role: m.role,
-      text: m.text,
-      timestamp: m.timestamp,
-      ...(m.payload === undefined ? {} : { payload: m.payload }),
-    })),
-  );
-  const idByEntry = new Map(store.allMessages().map((m) => [m.entryId, m.id]));
-  for (const f of rows) {
-    if (f.rowType !== "file") continue;
-    store.insertFile(fileDescriptor(f), f.entryIds[0] ?? "");
-    for (const entryId of f.entryIds) {
-      const messageId = idByEntry.get(entryId);
-      if (messageId !== undefined) store.linkMessageFile(messageId, f.fileId);
+  const hashProblem = fileHashProblem(rows);
+  if (hashProblem) return REFUSED(hashProblem);
+
+  // The stored-text check and everything it protects share one write
+  // transaction. BEGIN IMMEDIATE takes the write lock before the first read,
+  // so a second connection cannot insert a same-entry row with different text
+  // between the check and the file links; INSERT OR IGNORE then keeps the
+  // checked text. Same-process writers cannot interleave this synchronous
+  // function in any case.
+  const prepared = store.transaction<
+    ImportResult | { ingested: IngestStats; idByEntry: Map<string, number> }
+  >(() => {
+    const clashProblem = existingEntryProblem(store, rows);
+    if (clashProblem) return REFUSED(clashProblem);
+
+    const exported = new Set(messages.map((m) => m.entryId));
+    const foreign = store.allMessages().filter((m) => !exported.has(m.entryId));
+    if (foreign.length > 0) {
+      return REFUSED(
+        `this store already holds ${foreign.length} message(s) the file does not name; import into an empty store instead`,
+      );
     }
-  }
+
+    const ingested = ingestEntries(
+      store,
+      messages.map((m) => ({
+        entryId: m.entryId,
+        role: m.role,
+        text: m.text,
+        timestamp: m.timestamp,
+        ...(m.payload === undefined ? {} : { payload: m.payload }),
+      })),
+    );
+    const idByEntry = new Map(store.allMessages().map((m) => [m.entryId, m.id]));
+    for (const f of rows) {
+      if (f.rowType !== "file") continue;
+      store.insertFile(fileDescriptor(f), f.entryIds[0] ?? "");
+      for (const entryId of f.entryIds) {
+        const messageId = idByEntry.get(entryId);
+        if (messageId !== undefined) store.linkMessageFile(messageId, f.fileId);
+      }
+    }
+    return { ingested, idByEntry };
+  });
+  if (!("ingested" in prepared)) return prepared;
+  const { ingested, idByEntry } = prepared;
   const idByOrdinal = new Map<number, number>();
   let summariesInserted = 0;
   let summariesSkipped = 0;

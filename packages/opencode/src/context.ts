@@ -199,7 +199,12 @@ export function createContextProjector(deps: ProjectorDeps): Projector {
         targetTokens: deps.options.summaryTokens,
         stage: "async",
         ...(previousSummary === undefined ? {} : { previousSummary }),
-        summarizer: summarizerConfig(deps.options),
+        summarizer: {
+          ...summarizerConfig(deps.options),
+          ...(deps.options.mechanicalTools === undefined
+            ? {}
+            : { mechanicalTools: deps.options.mechanicalTools }),
+        },
       },
     )
       .then(() => undefined)

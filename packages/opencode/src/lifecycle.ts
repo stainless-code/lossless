@@ -9,12 +9,14 @@ import {
   chmodSync,
   existsSync,
   readFileSync,
+  renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
   type Stats,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import {
   LcmStore,
@@ -40,6 +42,7 @@ import {
 
 import type { CommandDefinition, ModelRef } from "./host.ts";
 import { readMetricRows } from "./metrics.ts";
+import { dumpSidecar } from "./sidecar-dump.ts";
 import type { SidecarRef, Sidecars } from "./sidecars.ts";
 import { summarizerConfig, type SummarizerOptions } from "./summarizer.ts";
 
@@ -111,6 +114,44 @@ function chmodFile(path: string): void {
   try {
     chmodSync(path, 0o600);
   } catch {}
+}
+
+function writeDumpTarget(target: string, text: string): void {
+  // Unique temp with exclusive creation, then an atomic rename: a planted
+  // predictable path is never touched and the destination swaps at once.
+  const dir = dirname(target);
+  const base = basename(target);
+  let tmp = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = join(
+      dir,
+      `.${base}.${process.pid}.${Date.now()}.${Math.floor(Math.random() * 1e9)}.tmp`,
+    );
+    try {
+      writeFileSync(candidate, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      tmp = candidate;
+      break;
+    } catch (error) {
+      if ((error as { code?: string })?.code === "EEXIST") continue;
+      // A write can create the private file and then fail (disk full), so
+      // remove the candidate before surfacing the error. EEXIST keeps its
+      // continue above and never unlinks a pre-existing collision.
+      try {
+        unlinkSync(candidate);
+      } catch {}
+      throw error;
+    }
+  }
+  if (tmp === "") throw new Error(`LCM dump: cannot create temp file beside ${target}.`);
+  try {
+    chmodFile(tmp);
+    renameSync(tmp, target);
+  } catch (error) {
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    throw error;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -242,7 +283,14 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
           }
         }
         const stats = store.stats();
-        const integrity = checkIntegrity(store);
+        const livePaths = deps.sidecars.ids().map((id) => deps.sidecars.pathFor(id));
+        const currentPath = deps.sidecars.pathFor(input.sessionID);
+        if (!livePaths.includes(currentPath)) livePaths.push(currentPath);
+        const integrity = checkIntegrity(store, {
+          sidecarDir: deps.sidecars.dir,
+          liveSidecarPaths: livePaths,
+          sidecarExtension: deps.sidecars.extension,
+        });
         // The bundle is a diagnostic, not a probe: a host model lookup that
         // fails says less, it does not fail the command.
         let model: ModelRef | undefined;
@@ -600,6 +648,64 @@ export function healCommand(deps: LifecycleDeps): CommandDefinition {
           `LCM heal failed: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
+    },
+  };
+}
+
+/** Read-only dump of this session's sidecar plus its metrics, opened with
+ * `queryOnly` so a dump never mutates the store. */
+export function dumpCommand(deps: LifecycleDeps): CommandDefinition {
+  const redact = makeRedactConfigAdapter(deps.options);
+  return {
+    name: "lossless-dump",
+    description:
+      "Print a read-only dump of this session's sidecar. It holds history, sampled summaries and messages, and metrics.",
+    execute: async (input) => {
+      const args = argsOf(input.prompt.text);
+      const includeRemoved = args.includes("--include-removed");
+      if (args.includes("--save") && valueOf(args, "--save") === undefined) {
+        await deps.prompt(
+          input.sessionID,
+          "LCM dump --save: name the file to write, e.g. `/lossless-dump --save lossless-dump.txt`.",
+        );
+        return;
+      }
+      const save = valueOf(args, "--save");
+      const query = args.filter((arg) => !arg.startsWith("--") && arg !== save).join(" ");
+      const result = dumpSidecar({
+        path: deps.sidecars.pathFor(input.sessionID),
+        sessionId: input.sessionID,
+        redact,
+        ...(includeRemoved ? { includeRemoved: true as const } : {}),
+        metricRows: readMetricRows(deps.sidecars.dir).filter(
+          (row): row is Record<string, unknown> => isRecord(row),
+        ),
+        ...(query.length > 0 ? { sampleQuery: query } : {}),
+      });
+      if (result.status === "skipped") {
+        await deps.prompt(
+          input.sessionID,
+          `LCM dump skipped: ${result.reason} (${result.detail}).`,
+        );
+        return;
+      }
+      if (save !== undefined) {
+        try {
+          const target = resolve(save);
+          writeDumpTarget(target, `${result.text}\n`);
+          await deps.prompt(
+            input.sessionID,
+            `LCM dump: wrote ${Buffer.byteLength(result.text, "utf8")} bytes to ${target} (mode 0600).`,
+          );
+        } catch (error) {
+          await deps.prompt(
+            input.sessionID,
+            `LCM dump failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        return;
+      }
+      await deps.prompt(input.sessionID, result.text);
     },
   };
 }

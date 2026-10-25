@@ -155,6 +155,51 @@ describe("lifecycle commands", () => {
     }
   });
 
+  it("diagnoses an orphan sidecar with its path and never reports a live one", async () => {
+    const h = harness();
+    try {
+      seed(h.sidecars, SESSION, "the current session");
+      seed(h.sidecars, "ses_live", "the live session");
+      seedDetached(h.sidecars, "ses_old", "the old session");
+      const oldPath = h.sidecars.pathFor("ses_old");
+      const livePath = h.sidecars.pathFor("ses_live");
+      const text = await run(diagnoseCommand, h, "/lossless-diagnose");
+      expect(text).toContain("orphan-sidecar");
+      expect(text).toContain("ses_old");
+      expect(text).toContain(oldPath);
+      expect(text).not.toContain(livePath);
+    } finally {
+      h.sidecars.close();
+    }
+  });
+
+  it("after a restart names a retained but unopened sidecar as unopened, not sessionless", async () => {
+    const h = harness();
+    try {
+      seed(h.sidecars, SESSION, "the current session");
+      seedDetached(h.sidecars, "ses_retained", "the retained session");
+      // Restart: drop every open handle, then diagnose through a fresh cache
+      // that holds only the diagnosing session open.
+      h.sidecars.close();
+      const fresh = new Sidecars(h.dir);
+      try {
+        const text = await run(
+          diagnoseCommand,
+          { ...h, deps: { ...h.deps, sidecars: fresh } },
+          "/lossless-diagnose",
+        );
+        expect(text).toContain("orphan-sidecar");
+        expect(text).toContain("ses_retained");
+        expect(text).toContain("not open in this process");
+        expect(text).not.toContain("no live session");
+      } finally {
+        fresh.close();
+      }
+    } finally {
+      h.sidecars.close();
+    }
+  });
+
   it("reports a current schema as nothing to migrate", async () => {
     const h = harness();
     try {

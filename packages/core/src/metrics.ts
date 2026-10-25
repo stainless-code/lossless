@@ -633,6 +633,13 @@ export type BranchRemovedRow = LcmRowBase & {
   restored: number;
 };
 
+/** A watermark miss forced a full rescan. Empty deltas never write one. */
+export type IngestRescanRow = LcmRowBase & {
+  kind: "ingest-rescan";
+  watermark: string;
+  entries: number;
+};
+
 export type FileExternalizedRow = LcmRowBase & {
   kind: "file-externalized";
   entryId: string;
@@ -747,6 +754,7 @@ export type LcmMetricRecord =
   | GcDeletedRow
   | StoreMigratedRow
   | BranchRemovedRow
+  | IngestRescanRow
   | FileExternalizedRow
   | LargeInlineRow
   | RecallRow

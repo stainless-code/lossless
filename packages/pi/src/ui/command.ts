@@ -4,11 +4,12 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { lcmHomePath } from "lossless-core";
@@ -42,6 +43,7 @@ import {
   type LcmConfig,
   lcmConfigPath,
 } from "./config-io.ts";
+import { dumpSidecar } from "./sidecar-dump.ts";
 
 export interface LcmCommandDeps {
   getStore(): LcmStore | undefined;
@@ -65,6 +67,7 @@ export const LCM_SUBCOMMANDS = [
   "export",
   "import",
   "report",
+  "dump",
   "doctor",
   "diagnose",
   "gc",
@@ -109,6 +112,46 @@ function parseMaxNodesFlag(flags: readonly string[]): MaxNodesFlag {
 function maxNodesValue(raw: string): MaxNodesFlag {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? { kind: "value", value } : { kind: "invalid" };
+}
+
+function writeDumpTarget(target: string, text: string): void {
+  // Unique temp with exclusive creation, then an atomic rename: a planted
+  // predictable path is never touched and the destination swaps at once.
+  const dir = dirname(target);
+  const base = basename(target);
+  let tmp = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = join(
+      dir,
+      `.${base}.${process.pid}.${Date.now()}.${Math.floor(Math.random() * 1e9)}.tmp`,
+    );
+    try {
+      writeFileSync(candidate, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      tmp = candidate;
+      break;
+    } catch (error) {
+      if ((error as { code?: string })?.code === "EEXIST") continue;
+      // A write can create the private file and then fail (disk full), so
+      // remove the candidate before surfacing the error. EEXIST keeps its
+      // continue above and never unlinks a pre-existing collision.
+      try {
+        unlinkSync(candidate);
+      } catch {}
+      throw error;
+    }
+  }
+  if (tmp === "") throw new Error(`LCM dump: cannot create temp file beside ${target}.`);
+  try {
+    try {
+      chmodSync(tmp, 0o600);
+    } catch {}
+    renameSync(tmp, target);
+  } catch (error) {
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    throw error;
+  }
 }
 
 /** A dry run reads the plan and makes no provider call. The type still carries
@@ -596,6 +639,61 @@ export function registerLcmCommand(
         return;
       }
 
+      if (sub === "dump") {
+        const flags = (args ?? "").trim().split(/\s+/).slice(1);
+        const save = parseSaveFlag(flags);
+        if (save.kind === "missing-path") {
+          ctx.ui.notify(
+            "LCM dump --save: name the file to write, e.g. `/lcm dump --save lcm-dump.txt`.",
+            "warning",
+          );
+          return;
+        }
+        const includeRemoved = flags.includes("--include-removed");
+        const savePath = save.kind === "path" ? save.path : undefined;
+        const query = flags
+          .filter((flag, index) => {
+            if (flag.startsWith("--")) return false;
+            if (save.kind === "path" && flags[index - 1] === "--save") return false;
+            if (save.kind === "path" && flag === save.path && flags.includes("--save")) {
+              return false;
+            }
+            return true;
+          })
+          .join(" ");
+        const tag = basename(db);
+        const result = dumpSidecar({
+          path: db,
+          sessionId: tag,
+          redact: makeRedact(deps.getConfig),
+          ...(includeRemoved ? { includeRemoved: true as const } : {}),
+          metricRows: collectMetricsEvents().filter((e) => e.session === tag),
+          ...(query.length > 0 ? { sampleQuery: query } : {}),
+        });
+        if (result.status === "skipped") {
+          ctx.ui.notify(`LCM dump skipped: ${result.reason} (${result.detail}).`, "warning");
+          return;
+        }
+        if (savePath !== undefined) {
+          try {
+            writeDumpTarget(savePath, `${result.text}\n`);
+          } catch (error) {
+            ctx.ui.notify(
+              `LCM dump: cannot write ${savePath} (${error instanceof Error ? error.message : String(error)}).`,
+              "warning",
+            );
+            return;
+          }
+          ctx.ui.notify(
+            `LCM dump: wrote ${Buffer.byteLength(result.text, "utf8")} bytes to ${savePath} (mode 0600).`,
+            "info",
+          );
+          return;
+        }
+        ctx.ui.notify(result.text, "info");
+        return;
+      }
+
       if (sub === "doctor") {
         const usage = ctx.getContextUsage();
         const window = usage?.contextWindow ?? 0;
@@ -604,7 +702,13 @@ export function registerLcmCommand(
         const pin = deps.getCommitState();
         const flags = (args ?? "").trim().split(/\s+/).slice(1);
         const repairs = flags.includes("--repair") ? repairIntegrity(store) : [];
-        const integrity = checkIntegrity(store);
+        // Pi sidecars are `.db` files under the lcm dir, which the default
+        // `.sqlite` scan would miss; the live store itself is never an orphan.
+        const integrity = checkIntegrity(store, {
+          sidecarDir: lcmHomePath("lcm"),
+          sidecarExtension: ".db",
+          liveSidecarPaths: [db],
+        });
         const violations = integrity.findings.filter((f) => f.severity === "violation");
         const chain = describeSummarizerChain(resolveModels(piModelHost(ctx), config));
         const lines = [
@@ -677,7 +781,12 @@ export function registerLcmCommand(
         const window = usage?.contextWindow ?? 0;
         const mk = piModelKey(ctx);
         const z = config.zones?.[mk];
-        const integrity = checkIntegrity(store);
+        // Same `.db` sidecar scope as doctor, so diagnose reports what doctor sees.
+        const integrity = checkIntegrity(store, {
+          sidecarDir: lcmHomePath("lcm"),
+          sidecarExtension: ".db",
+          liveSidecarPaths: [db],
+        });
         const chain = describeSummarizerChain(resolveModels(piModelHost(ctx), config));
         const effective = { ...DEFAULT_CONFIG, ...config };
         const tag = basename(db);

@@ -122,6 +122,21 @@ describe("setupOpencodeLossless", () => {
     }
   });
 
+  it("resolves mechanicalTools and keeps the default empty on invalid values", () => {
+    expect(
+      readOptions({ mechanicalTools: ["noisy-read", " noisy-read ", ""] }).mechanicalTools,
+    ).toEqual(["noisy-read"]);
+    expect(readOptions({ mechanicalTools: "noisy-read" }).mechanicalTools).toEqual(["noisy-read"]);
+    expect(readOptions({}).mechanicalTools).toBeUndefined();
+    for (const raw of [
+      { mechanicalTools: 42 },
+      { mechanicalTools: [""] },
+      { mechanicalTools: [] },
+    ]) {
+      expect(readOptions(raw).mechanicalTools).toBeUndefined();
+    }
+  });
+
   it("mounts the mirror, the recall tools, and the status command", async () => {
     const host = fakeHost({ sidecarDir: tempDir(), assembly: false });
     const cleanup = await setupOpencodeLossless(host.ctx, host.options);
@@ -141,6 +156,7 @@ describe("setupOpencodeLossless", () => {
       "lossless-export",
       "lossless-import",
       "lossless-diagnose",
+      "lossless-dump",
       "lossless-migrate",
       "lossless-gc",
       "lossless-heal",
@@ -278,6 +294,7 @@ describe("setupOpencodeLossless", () => {
       "lossless-export",
       "lossless-import",
       "lossless-diagnose",
+      "lossless-dump",
       "lossless-migrate",
       "lossless-gc",
       "lossless-heal",
@@ -296,6 +313,7 @@ describe("setupOpencodeLossless", () => {
       "lossless-export",
       "lossless-import",
       "lossless-diagnose",
+      "lossless-dump",
       "lossless-migrate",
       "lossless-gc",
       "lossless-heal",

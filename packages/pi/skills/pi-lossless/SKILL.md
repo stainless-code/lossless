@@ -1,6 +1,6 @@
 ---
 name: pi-lossless
-description: "Use when a Pi session has pi-lossless installed: search compacted history with lcm_grep, lcm_describe, or lcm_expand_query; run /lcm status, settings, backup, export, report, doctor, gc, migrate, heal, or diagnose; or tune compaction thresholds."
+description: "Use when a Pi session has pi-lossless installed: search compacted history with lcm_grep, lcm_describe, or lcm_expand_query; run /lcm status, settings, backup, export, report, doctor, gc, migrate, heal, dump, or diagnose; or tune compaction thresholds."
 license: MIT
 metadata:
   type: composition
@@ -35,6 +35,7 @@ soft threshold (default 70% of the model window).
 - `/lcm backup` — copy the live store to a timestamped file.
 - `/lcm export` — write the full store as JSONL (verbatim bytes, secrets included).
 - `/lcm report` — metrics summary for the current session.
+- `/lcm dump` prints a read-only dump of the session sidecar. `--include-removed` keeps removed-branch rows and `--save <path>` writes the file at mode 0600.
 - `/lcm doctor` — diagnostics: store checks, thresholds, summarizer chain, footprint; `--repair` rebuilds the index and drops unreachable rows.
 - `/lcm gc` — dry-run list of retired stores; `--apply` exports then DELETEs them (destructive; export lands beside the stores).
 - `/lcm migrate` — dry-run list of older-schema stores; `--apply` upgrades them in place for cross-session search.
@@ -43,7 +44,7 @@ soft threshold (default 70% of the model window).
 
 ## Recall tools
 
-- `lcm_grep` — search ALL history, including compacted-out content. `query` is full-text over the token index (words, quoted phrases, `AND`/`OR`, prefixes; first 100,000 chars per message). `pattern` is a case-insensitive regex over full text (up to 200,000 chars per message, 1s cap per call) — use it for pointers, calls, punctuation, or spans the index cannot hold. Hits page 20 at a time via `offset`; `query` reports a total, `pattern` reports whether more exist. `summary_id` scopes to one node; `scope: "sessions"` / `"all_sessions"` reaches past sessions.
+- `lcm_grep` searches ALL history, including compacted-out content. `query` is full-text over the token index (words, quoted phrases, `AND`/`OR`, prefixes; first 100,000 chars per message). `pattern` is a case-insensitive regex over full text (up to 200,000 chars per message, 1s cap per call). Use it for pointers, calls, punctuation, or spans the index cannot hold. Hits page 20 at a time via `offset`; `query` reports a total, `pattern` reports whether more exist. `summary_id` scopes to one node; `scope: "sessions"` / `"all_sessions"` reaches past sessions. `role` keeps only rows stored with that role, `date_start` and `date_end` bound rows by timestamp, and `tool_name` keeps only tool-result rows for that tool.
 - `lcm_describe` — inspect a summary: what reading its originals would cost and which files it covers.
 - `lcm_expand_query` — bounded reader over stored originals; returns findings without that text entering the main conversation. Default budget 10,000 tokens over at most 6 reader turns; `max_tokens` changes the per-call budget. `summary_id` reads one node, `entry_id` one message. Cross-session: `lcm_expand_query({ session: "<hash>", entry_id: "<id>" })` on a grep hit; findings are tagged as past-session history. Unknown ids are refused before any model call.
 

@@ -1,6 +1,6 @@
 ---
 name: opencode-lossless
-description: "Use when an OpenCode v2 session has opencode-lossless installed: read compacted history with lcm_grep, lcm_describe, lcm_expand, or lcm_expand_query; run /lossless-status, /lossless-report, /lossless-pass, /lossless-heal, /lossless-backup, /lossless-export, /lossless-import, /lossless-diagnose, /lossless-migrate, or /lossless-gc; or tune the swap point."
+description: "Use when an OpenCode v2 session has opencode-lossless installed: read compacted history with lcm_grep, lcm_describe, lcm_expand, or lcm_expand_query; run /lossless-status, /lossless-report, /lossless-pass, /lossless-heal, /lossless-backup, /lossless-export, /lossless-import, /lossless-diagnose, /lossless-migrate, /lossless-gc, or /lossless-dump; or tune the swap point."
 license: MIT
 metadata:
   type: composition
@@ -40,13 +40,14 @@ Equivalent `opencode.json` entry:
 - `/lossless-diagnose` — redacted, pasteable diagnostics block; `--save` writes it at mode 0600.
 - `/lossless-migrate` — upgrade older-schema sidecars in place (dry-run by default).
 - `/lossless-gc` — list old sidecars, or export and delete them (never the current session).
+- `/lossless-dump` prints a read-only dump of the session sidecar. `--include-removed` keeps removed-branch rows and `--save` writes the output to a file at mode 0600.
 
 ## Recall tools
 
-- `lcm_grep` — full-text search over this session; `scope` reaches past sessions.
-- `lcm_describe` — inspect one summary (kind, costs, children) without expanding it.
-- `lcm_expand` — read the verbatim originals a summary covers.
-- `lcm_expand_query` — a bounded child session reads and answers, so originals never enter the parent context.
+- `lcm_grep` searches full text over this session, and `scope` reaches past sessions. `role` keeps only rows stored with that role, `date_start` and `date_end` bound rows by timestamp, and `tool_name` keeps only tool-result rows for that tool.
+- `lcm_describe` inspects one summary (kind, costs, children) without expanding it.
+- `lcm_expand` reads the verbatim originals a summary covers, and `anchor` centers the listing on one entry.
+- `lcm_expand_query` runs a bounded child session that reads and answers, so originals never enter the parent context.
 
 ## Config essentials
 

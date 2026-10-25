@@ -170,7 +170,8 @@ async function tryLevel(
   }
 }
 
-const LEVEL3_TOKENS = 512;
+/** Same budget the ladder falls back to, so heal sees one shape. */
+export const LEVEL3_TOKENS = 512;
 
 export { TRUNCATED_SUMMARY_PREFIX } from "./store.ts";
 

@@ -105,6 +105,7 @@ const NUMBER_FIELDS = [
   "failed",
   "surfaceTokens",
   "turns",
+  "entries",
 ] as const;
 const STRING_FIELDS = [
   "event",
@@ -136,6 +137,7 @@ const STRING_FIELDS = [
   "quality",
   "qualityBefore",
   "qualityAfter",
+  "watermark",
 ] as const;
 const BOOLEAN_FIELDS = [
   "committed",

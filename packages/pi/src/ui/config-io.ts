@@ -14,6 +14,9 @@ import type { ZoneThresholds } from "lossless-core";
 
 export interface LcmConfig {
   summarizer?: string | string[];
+  /** Tool names whose spans compact without a model call. Empty keeps the
+   * LLM path; ingest still stores every message verbatim. */
+  mechanicalTools?: readonly string[];
   smartZone?: number;
   swapAtTokens?: number;
   recutAtTokens?: number;
@@ -166,6 +169,7 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set<keyof LcmConfig>([
   ...NUMBER_KEYS,
   ...BOOLEAN_KEYS,
   "summarizer",
+  "mechanicalTools",
   "zones",
 ]);
 
@@ -205,6 +209,8 @@ export function parseLcmConfig(raw: unknown): ParsedLcmConfig {
   }
   const summarizer = parseSummarizer(raw.summarizer, dropped, notes);
   if (summarizer !== undefined) config.summarizer = summarizer;
+  const mechanicalTools = parseMechanicalTools(raw.mechanicalTools, dropped);
+  if (mechanicalTools !== undefined) config.mechanicalTools = mechanicalTools;
   if (raw.zones !== undefined) {
     if (isPlainObject(raw.zones)) {
       const zones: Record<string, ZoneThresholds> = {};
@@ -282,6 +288,32 @@ function parseSummarizer(
     return undefined;
   }
   return entries.length === 1 ? entries[0] : entries;
+}
+
+/** Tool names that skip the model. Accepts one name or a list; blanks and
+ * repeats drop quietly and the engine normalizes the rest. */
+function parseMechanicalTools(raw: unknown, dropped: string[]): string[] | undefined {
+  if (raw === undefined) return undefined;
+  const list = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : undefined;
+  if (list === undefined) {
+    dropped.push("mechanicalTools (wrong type)");
+    return undefined;
+  }
+  const entries: string[] = [];
+  const seen = new Set<string>();
+  for (const [i, entry] of list.entries()) {
+    if (typeof entry !== "string") {
+      dropped.push(`mechanicalTools[${i}] (wrong type)`);
+      continue;
+    }
+    const name = entry.trim();
+    if (name.length === 0) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push(name);
+  }
+  return entries;
 }
 
 function copyAside(path: string, backup: string): string {

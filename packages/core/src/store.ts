@@ -1,5 +1,14 @@
-import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  chmodSync,
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import { estimateTokens } from "./estimate-tokens.ts";
@@ -104,6 +113,57 @@ export interface IntegritySnapshot {
   foreignKeyViolations: number;
   schemaVersion: number;
   uncoveredMessages: number;
+  /** Full paths, sorted, so doctor can name what a manual drop would remove. */
+  orphanSidecars: string[];
+}
+
+export interface IntegritySnapshotOptions {
+  /** Paths with an open store in this process; every other sidecar file in
+   * `sidecarDir` reports as unopened, even when its session still exists. */
+  liveSidecarPaths?: readonly string[];
+  sidecarDir?: string;
+  sidecarExtension?: string;
+}
+
+/** Files in `dir` with no open store in this process; missing dirs and non-files read as empty. */
+function findOrphanSidecars(
+  dir: string | undefined,
+  livePaths: readonly string[],
+  extension: string,
+): string[] {
+  if (dir === undefined) return [];
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const live = new Set(livePaths.map((p) => resolve(p)));
+  const out: string[] = [];
+  for (const name of names) {
+    const full = join(dir, name);
+    if (name.endsWith(extension)) {
+      if (live.has(resolve(full))) continue;
+      try {
+        if (!statSync(full).isFile()) continue;
+      } catch {
+        continue;
+      }
+      out.push(full);
+      continue;
+    }
+    if (name.endsWith(`${extension}-wal`) || name.endsWith(`${extension}-shm`)) {
+      const base = full.slice(0, -4);
+      if (live.has(resolve(base))) continue;
+      try {
+        if (!statSync(full).isFile()) continue;
+      } catch {
+        continue;
+      }
+      out.push(full);
+    }
+  }
+  return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** A fresh row, or the row that already owns the span; `existingTokens` comes
@@ -408,6 +468,17 @@ function createSpanIndex(db: DatabaseSync): void {
   db.exec(CREATE_SPAN_INDEX);
 }
 
+/** One covering index for the recall role and time filters. It lives outside
+ * `SCHEMA` on purpose: old stores gain it on their next writer open without a
+ * generation bump, and a read-only open never needs it because the predicates
+ * also run without it. */
+const CREATE_ROLE_TIME_INDEX =
+  "CREATE INDEX IF NOT EXISTS idx_messages_role_timestamp ON messages(role, timestamp)";
+
+function createRoleTimeIndex(db: DatabaseSync): void {
+  db.exec(CREATE_ROLE_TIME_INDEX);
+}
+
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -563,6 +634,9 @@ export class LcmStore {
       // `--repair` applies the index after dropping the losers.
       try {
         createSpanIndex(this.db);
+      } catch {}
+      try {
+        createRoleTimeIndex(this.db);
       } catch {}
     }
     this.generation = readVersion(this.db);
@@ -1191,17 +1265,25 @@ export class LcmStore {
       offset?: number;
       withinMessageIds?: ReadonlySet<number>;
       includeRemoved?: boolean;
+      role?: LcmRole;
+      dateStart?: number;
+      dateEnd?: number;
     },
   ): GrepHit[] {
     const limit = opts?.limit ?? 20;
     const offset = Math.max(0, opts?.offset ?? 0);
     const scope = opts?.withinMessageIds;
+    if (opts?.role !== undefined && !isLcmRole(opts.role)) return [];
     const want = limit + offset;
-    const rows = this.stmts.grep.all(
+    const { sql, args } = grepSql(
       pattern,
-      opts?.includeRemoved === true ? 1 : 0,
+      opts?.includeRemoved === true,
+      opts?.role,
+      opts?.dateStart,
+      opts?.dateEnd,
       scope ? Math.max(want, scope.size + want) : want,
-    ) as Array<{
+    );
+    const rows = this.db.prepare(sql).all(...args) as Array<{
       id: number;
       entry_id: string;
       role: string;
@@ -1232,7 +1314,13 @@ export class LcmStore {
 
   grepCount(
     pattern: string,
-    opts?: { withinMessageIds?: ReadonlySet<number>; includeRemoved?: boolean },
+    opts?: {
+      withinMessageIds?: ReadonlySet<number>;
+      includeRemoved?: boolean;
+      role?: LcmRole;
+      dateStart?: number;
+      dateEnd?: number;
+    },
   ): number | undefined {
     const scope = opts?.withinMessageIds;
     if (scope) {
@@ -1240,12 +1328,21 @@ export class LcmStore {
         limit: scope.size,
         withinMessageIds: scope,
         includeRemoved: opts?.includeRemoved === true,
+        ...(opts?.role === undefined ? {} : { role: opts.role }),
+        ...(opts?.dateStart === undefined ? {} : { dateStart: opts.dateStart }),
+        ...(opts?.dateEnd === undefined ? {} : { dateEnd: opts.dateEnd }),
       }).length;
     }
+    if (opts?.role !== undefined && !isLcmRole(opts.role)) return 0;
     try {
-      const row = this.stmts.grepCount.get(pattern, opts?.includeRemoved === true ? 1 : 0) as
-        | { c: number }
-        | undefined;
+      const { sql, args } = grepCountSql(
+        pattern,
+        opts?.includeRemoved === true,
+        opts?.role,
+        opts?.dateStart,
+        opts?.dateEnd,
+      );
+      const row = this.db.prepare(sql).get(...args) as { c: number } | undefined;
       if (!row) return undefined;
       return Number(row.c);
     } catch {
@@ -1256,15 +1353,26 @@ export class LcmStore {
   messagePage(
     afterRowId: number,
     limit: number,
-    opts?: { withinMessageIds?: ReadonlySet<number>; includeRemoved?: boolean },
+    opts?: {
+      withinMessageIds?: ReadonlySet<number>;
+      includeRemoved?: boolean;
+      role?: LcmRole;
+      dateStart?: number;
+      dateEnd?: number;
+    },
   ): ScannedRow[] {
+    if (opts?.role !== undefined && !isLcmRole(opts.role)) return [];
     const scope = opts?.withinMessageIds;
     const want = scope ? Math.max(limit, scope.size + limit) : limit;
-    const rows = this.stmts.messagePage.all(
+    const { sql, args } = messagePageSql(
       afterRowId,
-      opts?.includeRemoved === true ? 1 : 0,
+      opts?.includeRemoved === true,
+      opts?.role,
+      opts?.dateStart,
+      opts?.dateEnd,
       want,
-    ) as Array<{
+    );
+    const rows = this.db.prepare(sql).all(...args) as Array<{
       id: number;
       entry_id: string;
       role: string;
@@ -1369,7 +1477,7 @@ export class LcmStore {
     return out;
   }
 
-  integritySnapshot(): IntegritySnapshot {
+  integritySnapshot(opts?: IntegritySnapshotOptions): IntegritySnapshot {
     let ftsOk = true;
     // Structural damage is the one signal an external-content FTS5 table
     // reports: counts and rowid scans read the content table instead.
@@ -1428,6 +1536,11 @@ export class LcmStore {
       foreignKeyViolations: this.db.prepare("PRAGMA foreign_key_check").all().length,
       schemaVersion: readVersion(this.db),
       uncoveredMessages: num((this.stmts.uncoveredMessages.get(null) as { c: number }).c),
+      orphanSidecars: findOrphanSidecars(
+        opts?.sidecarDir ?? (this.dbPath === ":memory:" ? undefined : dirname(this.dbPath)),
+        opts?.liveSidecarPaths ?? (this.dbPath === ":memory:" ? [] : [this.dbPath]),
+        opts?.sidecarExtension ?? ".sqlite",
+      ),
     };
   }
 
@@ -1725,6 +1838,102 @@ function rToSummary(r: Record<string, unknown>): SummaryNode {
     ...(typeof r.thorough_text === "string"
       ? { thoroughText: r.thorough_text, thoroughTokens: Number(r.thorough_tokens) }
       : {}),
+  };
+}
+
+function isLcmRole(value: unknown): value is LcmRole {
+  return value === "user" || value === "assistant" || value === "toolResult" || value === "custom";
+}
+
+/** Empty means no filter; the FTS `MATCH` stays the rank and access path either way. */
+function recallPredicates(
+  role: LcmRole | undefined,
+  dateStart: number | undefined,
+  dateEnd: number | undefined,
+): { sql: string; args: Array<string | number> } {
+  const parts: string[] = [];
+  const args: Array<string | number> = [];
+  if (role !== undefined) {
+    parts.push("m.role = ?");
+    args.push(role);
+  }
+  if (dateStart !== undefined) {
+    parts.push("m.timestamp >= ?");
+    args.push(dateStart);
+  }
+  if (dateEnd !== undefined) {
+    parts.push("m.timestamp <= ?");
+    args.push(dateEnd);
+  }
+  return { sql: parts.length === 0 ? "" : ` AND ${parts.join(" AND ")}`, args };
+}
+
+function grepSql(
+  pattern: string,
+  includeRemoved: boolean,
+  role: LcmRole | undefined,
+  dateStart: number | undefined,
+  dateEnd: number | undefined,
+  limit: number,
+): { sql: string; args: Array<string | number> } {
+  const extra = recallPredicates(role, dateStart, dateEnd);
+  return {
+    sql:
+      `SELECT m.id, m.entry_id, m.role, m.text, m.removed_at` +
+      ` FROM messages_fts f JOIN messages m ON m.id = f.rowid` +
+      ` WHERE messages_fts MATCH ?` +
+      ` AND (? = 1 OR m.removed_at IS NULL)` +
+      `${extra.sql} ORDER BY rank LIMIT ?`,
+    args: [pattern, includeRemoved ? 1 : 0, ...extra.args, limit],
+  };
+}
+
+function grepCountSql(
+  pattern: string,
+  includeRemoved: boolean,
+  role: LcmRole | undefined,
+  dateStart: number | undefined,
+  dateEnd: number | undefined,
+): { sql: string; args: Array<string | number> } {
+  const extra = recallPredicates(role, dateStart, dateEnd);
+  return {
+    sql:
+      `SELECT COUNT(*) c FROM messages_fts f JOIN messages m ON m.id = f.rowid` +
+      ` WHERE messages_fts MATCH ?` +
+      ` AND (? = 1 OR m.removed_at IS NULL)` +
+      `${extra.sql}`,
+    args: [pattern, includeRemoved ? 1 : 0, ...extra.args],
+  };
+}
+
+function messagePageSql(
+  afterRowId: number,
+  includeRemoved: boolean,
+  role: LcmRole | undefined,
+  dateStart: number | undefined,
+  dateEnd: number | undefined,
+  limit: number,
+): { sql: string; args: Array<string | number> } {
+  const parts: string[] = ["m.rowid > ?"];
+  const args: Array<string | number> = [afterRowId];
+  if (!includeRemoved) parts.push("m.removed_at IS NULL");
+  if (role !== undefined) {
+    parts.push("m.role = ?");
+    args.push(role);
+  }
+  if (dateStart !== undefined) {
+    parts.push("m.timestamp >= ?");
+    args.push(dateStart);
+  }
+  if (dateEnd !== undefined) {
+    parts.push("m.timestamp <= ?");
+    args.push(dateEnd);
+  }
+  return {
+    sql:
+      `SELECT m.id, m.entry_id, m.role, m.text, m.removed_at FROM messages m` +
+      ` WHERE ${parts.join(" AND ")} ORDER BY m.rowid ASC LIMIT ?`,
+    args: [...args, limit],
   };
 }
 

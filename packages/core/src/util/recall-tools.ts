@@ -11,9 +11,10 @@ export const RECALL_SCOPES = ["session", "sessions", "all_sessions"] as const;
 /** One of `RECALL_SCOPES`; `sessions` and `all_sessions` are equivalent and both read past sidecars. */
 export type RecallScope = (typeof RECALL_SCOPES)[number];
 
-/** What `lcm_expand` reads: a summary listing by id, or one message by entry id with an optional summary check. */
+/** What `lcm_expand` reads: a summary listing by id (optionally centered on an
+ * anchor entry), or one message by entry id with an optional summary check. */
 export type Address =
-  | { readonly kind: "summary"; readonly id: number }
+  | { readonly kind: "summary"; readonly id: number; readonly anchor?: string }
   | { readonly kind: "entry"; readonly entryId: string; readonly id?: number };
 
 /** Past-search outcome: redacted text plus hit, scanned, and skipped session counts. */
@@ -45,6 +46,7 @@ export interface RecallToolDeps {
     query: string,
     scope: Exclude<RecallScope, "session">,
     limit: unknown,
+    filters?: GrepFilterArgs,
   ) => RecallPastSearchResult;
   readonly openPast?: (session: string, pastSession: string) => OpenPastResult;
   readonly pastSearchUnreachableText?: string;
@@ -65,6 +67,16 @@ export function grepAnswer(deps: RecallToolDeps, callerSessionID: string, input:
   const scope = rawScope === undefined ? "session" : asScope(rawScope);
   const query = typeof args.query === "string" ? args.query : undefined;
   const queryChars = query?.length ?? 0;
+  const filters = readGrepFilters(args);
+  if (typeof filters === "string") {
+    recordRecall(deps, session, {
+      tool: "lcm_grep",
+      outcome: "error",
+      queryChars,
+      durationMs: Date.now() - started,
+    });
+    return filters;
+  }
   if (scope === undefined) {
     recordRecall(deps, session, {
       tool: "lcm_grep",
@@ -96,7 +108,7 @@ export function grepAnswer(deps: RecallToolDeps, callerSessionID: string, input:
     return "LCM: the reader is session-scoped, so it cannot search past sessions.";
   }
   if (scope !== "session") {
-    return grepPastSessions(deps, session, query, scope, started, args.limit);
+    return grepPastSessions(deps, session, query, scope, started, args.limit, filters);
   }
   const store = deps.storeFor(callerSessionID);
   if (!store) {
@@ -112,6 +124,7 @@ export function grepAnswer(deps: RecallToolDeps, callerSessionID: string, input:
   const view = grepView(store, deps.redact, {
     query,
     ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+    ...filters,
     expandTool: "lcm_expand",
   });
   const hits = view.ok && typeof view.details.hits === "number" ? view.details.hits : 0;
@@ -125,6 +138,48 @@ export function grepAnswer(deps: RecallToolDeps, callerSessionID: string, input:
   return view.text;
 }
 
+/** Optional `lcm_grep` filters, shared by the session search and the past-session
+ * scan. Unknown roles and bad timestamps are caller errors; an empty tool name
+ * is too, while an unknown-but-well-formed tool name simply matches nothing. */
+export interface GrepFilterArgs {
+  role?: "user" | "assistant" | "toolResult" | "custom";
+  dateStart?: number;
+  dateEnd?: number;
+  toolName?: string;
+}
+
+function readGrepFilters(args: Record<string, unknown>): GrepFilterArgs | string {
+  const out: GrepFilterArgs = {};
+  if (args.role !== undefined) {
+    if (
+      args.role !== "user" &&
+      args.role !== "assistant" &&
+      args.role !== "toolResult" &&
+      args.role !== "custom"
+    ) {
+      return "lcm_grep role must be user, assistant, toolResult, or custom.";
+    }
+    out.role = args.role;
+  }
+  for (const key of ["date_start", "date_end"] as const) {
+    const value = args[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      return `lcm_grep ${key} must be a non-negative timestamp number.`;
+    }
+    if (key === "date_start") out.dateStart = value;
+    else out.dateEnd = value;
+  }
+  const toolKey = args.tool_name ?? args.toolName;
+  if (toolKey !== undefined) {
+    if (typeof toolKey !== "string" || toolKey.trim().length === 0) {
+      return "lcm_grep tool_name must be a non-empty tool name.";
+    }
+    out.toolName = toolKey;
+  }
+  return out;
+}
+
 function grepPastSessions(
   deps: RecallToolDeps,
   session: string,
@@ -132,6 +187,7 @@ function grepPastSessions(
   scope: Exclude<RecallScope, "session">,
   started: number,
   limit: unknown,
+  filters?: GrepFilterArgs,
 ): string {
   if (!deps.searchPast) {
     recordRecall(deps, session, {
@@ -143,7 +199,7 @@ function grepPastSessions(
     });
     return deps.pastSearchUnreachableText ?? DEFAULT_PAST_SEARCH_UNREACHABLE;
   }
-  const result = deps.searchPast(session, query, scope, limit);
+  const result = deps.searchPast(session, query, scope, limit, filters);
   recordRecall(deps, session, {
     tool: "lcm_grep",
     outcome: result.hits === 0 ? "miss" : "hit",
@@ -285,15 +341,25 @@ function expandPastSession(
   }
 }
 
-/** Parse `id`/`entry_id` args into an `Address`: error text when malformed, undefined when neither is present. */
+/** Parse `id`/`entry_id`/`anchor` args into an `Address`: error text when malformed, undefined when neither is present. */
 export function readAddress(args: Record<string, unknown>): Address | string | undefined {
   const hasId = args.id !== undefined;
   const hasEntry = args.entry_id !== undefined;
+  const hasAnchor = args.anchor !== undefined;
   if (hasId && (typeof args.id !== "number" || !Number.isInteger(args.id) || args.id <= 0)) {
     return "Nothing was read: id must be a positive integer.";
   }
   if (hasEntry && (typeof args.entry_id !== "string" || args.entry_id.trim() === "")) {
     return "Nothing was read: entry_id must be a non-empty string.";
+  }
+  if (hasAnchor && (typeof args.anchor !== "string" || args.anchor.trim() === "")) {
+    return "Nothing was read: anchor must be a non-empty entry id.";
+  }
+  if (hasAnchor && !hasId) {
+    return "Nothing was read: anchor centers a summary listing, so pass id with it.";
+  }
+  if (hasAnchor && hasEntry) {
+    return "Nothing was read: pass anchor or entry_id, not both.";
   }
   if (hasEntry) {
     const entryId = args.entry_id as string;
@@ -303,14 +369,24 @@ export function readAddress(args: Record<string, unknown>): Address | string | u
       ...(typeof args.id === "number" ? { id: args.id } : {}),
     };
   }
-  if (typeof args.id === "number") return { kind: "summary", id: args.id };
+  if (typeof args.id === "number") {
+    return {
+      kind: "summary",
+      id: args.id,
+      ...(typeof args.anchor === "string" ? { anchor: args.anchor } : {}),
+    };
+  }
   return undefined;
 }
 
 /** Refusal text when an address names no stored summary or message, else undefined. */
 export function addressProblem(store: LcmStore, address: Address): string | undefined {
   if (address.kind === "summary") {
-    return store.getSummary(address.id) ? undefined : `No summary with id ${address.id}.`;
+    if (!store.getSummary(address.id)) return `No summary with id ${address.id}.`;
+    if (address.anchor !== undefined && !store.hasEntry(address.anchor)) {
+      return `No stored message with entry id ${address.anchor}.`;
+    }
+    return undefined;
   }
   if (!store.hasEntry(address.entryId)) {
     return `No stored message with entry id ${address.entryId}.`;
@@ -344,6 +420,7 @@ export function readAddressed(
     offset: typeof args.offset === "number" ? args.offset : 0,
     limit: typeof args.limit === "number" ? args.limit : 25,
     maxChars,
+    ...(address.anchor === undefined ? {} : { anchor: address.anchor }),
   });
 }
 
@@ -386,6 +463,7 @@ function recordExpand(
     durationMs: Date.now() - started,
     ...(typeof args.id === "number" ? { summaryId: args.id } : {}),
     ...(typeof args.entry_id === "string" ? { entryId: args.entry_id } : {}),
+    ...(typeof args.anchor === "string" ? { anchor: args.anchor } : {}),
   });
 }
 

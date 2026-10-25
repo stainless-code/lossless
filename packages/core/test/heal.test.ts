@@ -873,3 +873,36 @@ test("heal: a leaf source uses the file handle and mask a compaction leaf would"
     store.close();
   }
 });
+
+test("heal: a mixed clipped leaf is repaired from its full provenance", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      { entryId: "e0", role: "user", text: `ORDINARY-0 ${"p".repeat(50)}`, timestamp: 0 },
+      {
+        entryId: "e1",
+        role: "toolResult",
+        text: `tool noisy-read {}\nNOISY-BODY ${"z".repeat(200)}`,
+        timestamp: 1,
+      },
+    ]);
+    const messages = store.messagesInSpan("e0", "e1");
+    const leaf = insertLeaf(store, messages, "ordinary only", undefined, "clipped");
+    const calls: string[] = [];
+    const llm = scripted(
+      (user) => (user.includes("NOISY-BODY") ? "healed full" : "missing noisy"),
+      calls,
+    );
+
+    const outcome = await runHeal(store, { targetTokens: 100 }, llm);
+
+    assert.deepEqual(outcome.repaired, [leaf]);
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0]!.includes("ORDINARY-0"));
+    assert.ok(calls[0]!.includes("NOISY-BODY"), "heal includes noisy text on explicit repair");
+    assert.equal(summary(store, leaf).quality, "clean");
+    assert.equal(summary(store, leaf).text, "healed full");
+  } finally {
+    store.close();
+  }
+});

@@ -298,6 +298,32 @@ test("diagnose: the bundle never names the home directory", () => {
   assert.ok(text.includes("~/.pi/agent/lcm/x.db"), text);
 });
 
+test("diagnose: the bundle carries an orphan sidecar finding within the caps", () => {
+  const text = bundle({
+    facts: facts({
+      integrity: {
+        checks: 10,
+        repairs: [],
+        findings: [
+          {
+            kind: "orphan-sidecar",
+            severity: "info",
+            count: 2,
+            detail: "2 sidecar(s) not open in this process. Deletion stays manual.",
+            sample: ["orphan.sqlite", "orphan.sqlite-wal"],
+          },
+        ],
+      },
+    }),
+  });
+  assert.ok(
+    text.includes("orphan-sidecar (info): 2 x 2 sidecar(s) not open in this process"),
+    text,
+  );
+  assert.ok(text.includes("orphan.sqlite"), text);
+  assert.ok(Buffer.byteLength(text, "utf8") <= MAX_BUNDLE_BYTES, String(text.length));
+});
+
 test("diagnose: the plugin version is this package's version, from src or dist", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
     name: string;

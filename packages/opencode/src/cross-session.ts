@@ -53,7 +53,14 @@ export function searchPastSessions(
   deps: PastSearchDeps,
   callingSessionId: string | undefined,
   query: string,
-  opts: { limit?: number; now?: () => number } = {},
+  opts: {
+    limit?: number;
+    now?: () => number;
+    role?: "user" | "assistant" | "toolResult" | "custom";
+    dateStart?: number;
+    dateEnd?: number;
+    toolName?: string;
+  } = {},
 ): PastSearchResult {
   const now = opts.now ?? deps.now ?? Date.now;
   const started = now();
@@ -89,6 +96,10 @@ export function searchPastSessions(
       const view = grepView(store, deps.redact, {
         query,
         limit: Math.min(CROSS_SESSION_PER_STORE_HITS, hitLimit - hits),
+        ...(opts.role === undefined ? {} : { role: opts.role }),
+        ...(opts.dateStart === undefined ? {} : { dateStart: opts.dateStart }),
+        ...(opts.dateEnd === undefined ? {} : { dateEnd: opts.dateEnd }),
+        ...(opts.toolName === undefined ? {} : { toolName: opts.toolName }),
         expandTool: "lcm_expand",
       });
       if (!view.ok) {
