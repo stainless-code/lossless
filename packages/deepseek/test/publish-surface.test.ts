@@ -18,16 +18,19 @@ interface Manifest {
 
 const manifest = JSON.parse(readFileSync(join(PACKAGE_DIR, "package.json"), "utf8")) as Manifest;
 
-test("publish surface: the tarball carries the build plus README and LICENSE", () => {
+test("publish surface: the tarball carries the build, the changelog, and the skill", () => {
   assert.equal(manifest.name, "deepseek-lossless");
-  // No CHANGELOG: nothing ships, so no changeset ever cuts one.
-  assert.deepEqual((manifest.files ?? []).toSorted(), ["LICENSE", "README.md", "dist"]);
+  // The changelog starts at the first published version: nothing ships yet,
+  // so no changeset has ever cut one. npm always includes README and LICENSE
+  // from the package directory, so files names only what npm must be told.
+  assert.deepEqual((manifest.files ?? []).toSorted(), ["CHANGELOG.md", "dist", "skills"]);
   assert.equal(manifest.exports?.["."]?.default, manifest.main);
   assert.equal(manifest.exports?.["."]?.types, manifest.main?.replace(/\.mjs$/, ".d.mts"));
   assert.equal(manifest.repository?.directory, "packages/deepseek");
-  for (const name of ["README.md", "LICENSE"]) {
+  for (const name of ["README.md", "LICENSE", "CHANGELOG.md"]) {
     assert.ok(existsSync(join(PACKAGE_DIR, name)), `${name} is not in the package`);
   }
+  assert.ok(existsSync(join(PACKAGE_DIR, "skills", "deepseek-lossless", "SKILL.md")));
   assert.deepEqual(
     readFileSync(join(PACKAGE_DIR, "LICENSE")),
     readFileSync(join(REPO_ROOT, "LICENSE")),
