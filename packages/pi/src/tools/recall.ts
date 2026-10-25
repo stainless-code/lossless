@@ -58,6 +58,27 @@ const GrepParams = Type.Object({
       description: "Include matches from a branch that left the active path (excluded by default)",
     }),
   ),
+  // Unsafe rather than a union of literals, for the same reason as `scope`
+  // above: an anyOf schema does not survive Google's API.
+  role: Type.Optional(
+    Type.Unsafe<"user" | "assistant" | "toolResult" | "custom">({
+      type: "string",
+      enum: ["user", "assistant", "toolResult", "custom"],
+      description: "Keep only rows stored with this role",
+    }),
+  ),
+  date_start: Type.Optional(
+    Type.Number({ description: "Keep only rows at or after this timestamp" }),
+  ),
+  date_end: Type.Optional(
+    Type.Number({ description: "Keep only rows at or before this timestamp" }),
+  ),
+  tool_name: Type.Optional(
+    Type.String({
+      description:
+        "Keep only tool-result rows for this tool (matches [tool:Name] markers); query searches only",
+    }),
+  ),
   // Unsafe rather than a union of literals: an anyOf schema does not survive
   // Google's API, and this parameter decides which store the call reads. Built
   // with this package's typebox so the emitted declaration names a portable
@@ -215,6 +236,10 @@ export function createGrepTool(deps: RecallDeps) {
         limit: params.limit,
         summaryId: params.summary_id,
         includeRemoved: params.include_removed,
+        ...(params.role === undefined ? {} : { role: params.role }),
+        ...(params.date_start === undefined ? {} : { dateStart: params.date_start }),
+        ...(params.date_end === undefined ? {} : { dateEnd: params.date_end }),
+        ...(params.tool_name === undefined ? {} : { toolName: params.tool_name }),
       });
       const hits = view.ok && typeof view.details.hits === "number" ? view.details.hits : undefined;
       recordRecall(
@@ -230,7 +255,15 @@ export function createGrepTool(deps: RecallDeps) {
 
 function searchPastSessions(
   deps: RecallDeps,
-  params: { query?: string; pattern?: string; limit?: number },
+  params: {
+    query?: string;
+    pattern?: string;
+    limit?: number;
+    role?: "user" | "assistant" | "toolResult" | "custom";
+    date_start?: number;
+    date_end?: number;
+    tool_name?: string;
+  },
   scope: "sessions" | "all_sessions",
 ): ToolResultShape {
   const roots = deps.sessions?.();
@@ -254,6 +287,10 @@ function searchPastSessions(
   });
   const result = searchSessions(refs, params.query, {
     limit: Math.min(params.limit ?? SESSION_HITS_LIMIT, SESSION_HITS_LIMIT),
+    ...(params.role === undefined ? {} : { role: params.role }),
+    ...(params.date_start === undefined ? {} : { dateStart: params.date_start }),
+    ...(params.date_end === undefined ? {} : { dateEnd: params.date_end }),
+    ...(params.tool_name === undefined ? {} : { toolName: params.tool_name }),
   });
   const skipped =
     result.skipped.missing + result.skipped.unreadable + result.skipped["older-generation"];

@@ -212,6 +212,10 @@ export function searchSessions(
     deadlineMs?: number;
     perSession?: number;
     now?: () => number;
+    role?: "user" | "assistant" | "toolResult" | "custom";
+    dateStart?: number;
+    dateEnd?: number;
+    toolName?: string;
   },
 ): SessionSearchResult {
   const now = opts?.now ?? Date.now;
@@ -243,7 +247,12 @@ export function searchSessions(
     }
     const store = opened.store;
     try {
-      const found = searchStore(store, query, Math.min(perSession, limit - hits.length));
+      const found = searchStore(store, query, Math.min(perSession, limit - hits.length), {
+        ...(opts?.role === undefined ? {} : { role: opts.role }),
+        ...(opts?.dateStart === undefined ? {} : { dateStart: opts.dateStart }),
+        ...(opts?.dateEnd === undefined ? {} : { dateEnd: opts.dateEnd }),
+        ...(opts?.toolName === undefined ? {} : { toolName: opts.toolName }),
+      });
       scanned++;
       for (const hit of found) {
         hits.push({
@@ -331,12 +340,37 @@ export function sessionsForScope(opts: {
   });
 }
 
-function searchStore(store: LcmStore, query: string, limit: number): GrepHit[] {
+function searchStore(
+  store: LcmStore,
+  query: string,
+  limit: number,
+  filters?: {
+    role?: "user" | "assistant" | "toolResult" | "custom";
+    dateStart?: number;
+    dateEnd?: number;
+    toolName?: string;
+  },
+): GrepHit[] {
+  // A tool scope rewrites the query against the `[tool:Name]` markers, so the
+  // store call stays a plain grep with no extra table or index.
+  const scoped =
+    filters?.toolName === undefined
+      ? query
+      : `(${query}) AND ${JSON.stringify(`[tool:${filters.toolName}]`)}`;
+  const grepFilters = {
+    ...(filters?.role === undefined ? {} : { role: filters.role }),
+    ...(filters?.dateStart === undefined ? {} : { dateStart: filters.dateStart }),
+    ...(filters?.dateEnd === undefined ? {} : { dateEnd: filters.dateEnd }),
+  };
   try {
-    return store.grep(query, { limit });
+    return store.grep(scoped, { limit, ...grepFilters });
   } catch {
     try {
-      return store.grep(JSON.stringify(query), { limit });
+      const fallback =
+        filters?.toolName === undefined
+          ? JSON.stringify(query)
+          : `(${JSON.stringify(query)}) AND ${JSON.stringify(`[tool:${filters.toolName}]`)}`;
+      return store.grep(fallback, { limit, ...grepFilters });
     } catch {
       return [];
     }
