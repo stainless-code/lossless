@@ -62,6 +62,7 @@ const stop = applyLossless(ctx, { enabled: true });
 | `summarizerTokensPerPass` | `250000`                                       |
 | `summarizerTokensPerHeal` | `120000`                                       |
 | `healSourceTokens`        | `8` x `summaryTokens`, clamped `3000`..`24000` |
+| `mechanicalTools`         | `[]` (empty keeps the LLM path)                |
 
 ## `/lcm`
 

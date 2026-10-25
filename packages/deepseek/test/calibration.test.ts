@@ -18,7 +18,7 @@ import { lcmCommandDefinition, type LcmCommandDeps } from "../src/command.ts";
 import { LosslessSummarizerEngine } from "../src/engine.ts";
 import type { LosslessEngineDeps } from "../src/engine.ts";
 import { MessageIndex, mirrorEvent } from "../src/ingest.ts";
-import { healLlmConfig, healRunBudgets, passLlmConfig } from "../src/ladder.ts";
+import { healLlmConfig, healRunBudgets, passLlmConfig, runLadder } from "../src/ladder.ts";
 import type { DshRoute } from "../src/model-host.ts";
 import { applyLossless } from "../src/plugin.ts";
 import { fakeAgent } from "./support/agent-fake.ts";
@@ -218,6 +218,133 @@ describe("summarizer budgets", () => {
       dispose();
     }
   });
+});
+
+describe("mechanical tools", () => {
+  const TOOL_TEXT = `tool noisy-read {"path":"/a"}\n${"x".repeat(2000)}`;
+
+  function toolSpan(
+    sessionId: string,
+  ): Array<{ entryId: string; role: "toolResult"; text: string }> {
+    return [
+      { entryId: `${sessionId}:1`, role: "toolResult", text: TOOL_TEXT },
+      { entryId: `${sessionId}:2`, role: "toolResult", text: TOOL_TEXT },
+    ];
+  }
+
+  it("compacts a listed tool-only span with zero model calls", async () => {
+    const { ctx, adapter } = setupContext(ROUTE, []);
+    const store = new LcmStore(":memory:");
+    try {
+      const outcome = await runLadder(
+        ctx,
+        {
+          store: () => store,
+          index: () => new MessageIndex(),
+          redact: identity,
+          mechanicalTools: ["noisy-read"],
+        },
+        ROUTE,
+        "mech-listed",
+        toolSpan("mech-listed"),
+      );
+      expect(adapter.requests).toHaveLength(0);
+      expect(outcome.leafSummaryIds.length).toBeGreaterThan(0);
+      for (const id of outcome.leafSummaryIds) {
+        expect(store.getSummary(id)?.quality).toBe("mechanical");
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it("still calls the model for unlisted tools", async () => {
+    const { ctx, adapter } = setupContext(ROUTE, [
+      textChunks("prose summary"),
+      textChunks("prose summary"),
+      textChunks("prose summary"),
+      textChunks("prose summary"),
+    ]);
+    const store = new LcmStore(":memory:");
+    try {
+      await runLadder(
+        ctx,
+        {
+          store: () => store,
+          index: () => new MessageIndex(),
+          redact: identity,
+          mechanicalTools: ["other-tool"],
+        },
+        ROUTE,
+        "mech-unlisted",
+        toolSpan("mech-unlisted"),
+      );
+      expect(adapter.requests.length).toBeGreaterThan(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps the LLM path when the list is empty or unset", async () => {
+    for (const mechanicalTools of [undefined, []] as const) {
+      const { ctx, adapter } = setupContext(ROUTE, [
+        textChunks("prose summary"),
+        textChunks("prose summary"),
+        textChunks("prose summary"),
+        textChunks("prose summary"),
+      ]);
+      const store = new LcmStore(":memory:");
+      try {
+        await runLadder(
+          ctx,
+          {
+            store: () => store,
+            index: () => new MessageIndex(),
+            redact: identity,
+            ...(mechanicalTools === undefined ? {} : { mechanicalTools }),
+          },
+          ROUTE,
+          "mech-default",
+          toolSpan("mech-default"),
+        );
+        expect(adapter.requests.length).toBeGreaterThan(0);
+      } finally {
+        store.close();
+      }
+    }
+  });
+
+  it("forwards the plugin list and drops an empty one", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dispose = applyLossless(ctx, {
+      enabled: true,
+      sidecarDir: tempDir(),
+      mechanicalTools: ["noisy-read", " noisy-read ", ""],
+    });
+    try {
+      expect(losslessDepsOf(ctx).mechanicalTools).toEqual(["noisy-read"]);
+    } finally {
+      dispose();
+    }
+    const again = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(again.ctx);
+    const disposeEmpty = applyLossless(again.ctx, {
+      enabled: true,
+      sidecarDir: tempDir(),
+      mechanicalTools: [],
+    });
+    try {
+      expect(losslessDepsOf(again.ctx).mechanicalTools).toBeUndefined();
+    } finally {
+      disposeEmpty();
+    }
+  });
+
+  function losslessDepsOf(ctx: Context): LosslessEngineDeps {
+    const engine = engineOf(ctx);
+    return (engine as unknown as { lossless: LosslessEngineDeps }).lossless;
+  }
 });
 
 describe("heal source default", () => {

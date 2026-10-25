@@ -56,6 +56,9 @@ export interface LosslessEngineDeps {
    * the seam. Default false: the seam stays the observable auto behavior
    * while the bracket proves itself on the manual path. */
   readonly bracketAuto?: boolean;
+  /** Tool names whose spans compact without a model call. Empty keeps the
+   * LLM path; ingest still stores every message verbatim. */
+  readonly mechanicalTools?: readonly string[];
 }
 
 /** Per-session checkpoint memory: the plugin owns one, the engine reads the
@@ -262,6 +265,11 @@ export async function runLadder(
         redact: lossless.redact,
         session: sessionId,
         stage: "blocking",
+        // The seam summarize and the DAG bracket both commit through here,
+        // so one forward covers both paths.
+        ...(lossless.mechanicalTools === undefined
+          ? {}
+          : { mechanicalTools: lossless.mechanicalTools }),
       },
     );
     store.commitRun(token);

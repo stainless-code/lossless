@@ -69,6 +69,10 @@ export interface LosslessPluginConfig {
    * Adapter-only.
    * @default 8 x summaryTokens, clamped 3000..24000 */
   readonly healSourceTokens?: number;
+  /** Tool names whose spans compact without a model call. Empty keeps the
+   * LLM path. Adapter-only: never rides the seam config.
+   * @default [] */
+  readonly mechanicalTools?: readonly string[];
 }
 
 const DEFAULT_SIDECAR_DIR = "./.lossless";
@@ -142,6 +146,25 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   // above, paged and capped so a huge log cannot stall mount. The query
   // backend is optional: without it only new events are mirrored. Contained
   // per session and never rejecting, so mount cannot fail over history.
+  // Tool names that skip the model. One name or a list; blanks and repeats
+  // drop, and an empty result keeps the LLM path.
+  const readMechanicalTools = (raw: unknown): string[] | undefined => {
+    const list = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : undefined;
+    if (list === undefined) return undefined;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const entry of list) {
+      if (typeof entry !== "string") continue;
+      const name = entry.trim();
+      if (name.length === 0) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+    }
+    return out.length === 0 ? undefined : out;
+  };
+  const mechanicalTools = readMechanicalTools(config.mechanicalTools);
   const history = historySourceFrom(ctx);
   if (history !== undefined) {
     const pending = ctx.sessions.list().map((session) => {
@@ -213,6 +236,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
       ...(config.healSourceTokens === undefined
         ? {}
         : { healSourceTokens: config.healSourceTokens }),
+      ...(mechanicalTools === undefined ? {} : { mechanicalTools }),
     },
   );
   const stopCommand = registerLcmCommand(ctx, {

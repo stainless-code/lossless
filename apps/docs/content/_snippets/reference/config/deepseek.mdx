@@ -20,7 +20,8 @@ The config is the capability's `config` object in the composition; there is no s
 | `summarizerTokensPerCall`  | number             | `60000`         | adapter-only         | Ceiling on one summarizer request, refused before the provider is called.                                            |
 | `summarizerTokensPerPass`  | number             | `250000`        | adapter-only         | Ceiling on one pass across its calls.                                                                                |
 | `summarizerTokensPerHeal`  | number             | `120000`        | adapter-only         | Ceiling on one `/lcm heal --apply` repair run.                                                                       |
-| `healSourceTokens`         | number             | derived         | adapter-only         | Source tokens one heal map window may read. Unset derives `8 x summaryTokens`, clamped to `3000` through `24000`.    |
+| `healSourceTokens`       | number             | derived         | adapter-only         | Source tokens one heal map window may read. Unset derives `8 x summaryTokens`, clamped to `3000` through `24000`.    |
+| `mechanicalTools`        | string[]           | `[]`            | adapter-only         | Tool names whose spans compact without a model call. Empty keeps the LLM path.                                       |
 
 The scope column names where each key takes effect. Seam keys reach the harness config, where unknown keys fail load. The rest take effect locally; mount gates the whole composition. The manual `/lcm compact` path ignores retain settings.
 
