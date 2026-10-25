@@ -28,7 +28,11 @@ import {
   type EscalationResult,
   type LlmComplete,
 } from "./summarize.ts";
-import { isMechanicalToolMessage, normalizeMechanicalTools } from "./util/summarizer-config.ts";
+import {
+  isMechanicalToolMessage,
+  mechanicalToolNameOf,
+  normalizeMechanicalTools,
+} from "./util/summarizer-config.ts";
 
 const LEAF_CHUNK_TOKENS = 3000;
 /** Deepest condensed node the DAG may grow. With MAX_DAG_FANOUT children this
@@ -62,6 +66,10 @@ export type CompactionOutcome =
       leafSummaryIds: number[];
       condensedSummaryIds: number[];
       ingested: number;
+      /** Leaves stored without a model call on the configured mechanical path. */
+      mechanicalLeaves?: number;
+      /** Condensed nodes built without a model call from mechanical children. */
+      mechanicalCondensed?: number;
     }
   /** No text, and why. A span another live run claimed, a span an existing node
    * already covers, and a span the store holds no row for are all states a pass
@@ -120,6 +128,8 @@ export async function runCompaction(
 
   const leafIds: number[] = [];
   const claimedLeaves: PlainSummary[] = [];
+  let mechanicalLeafCount = 0;
+  let mechanicalCondensedCount = 0;
   const mechanicalTools = normalizeMechanicalTools([
     ...(input.mechanicalTools ?? []),
     ...(opts?.mechanicalTools ?? []),
@@ -216,6 +226,7 @@ export async function runCompaction(
         )
       ) {
         leafIds.push(inserted.id);
+        mechanicalLeafCount++;
         reportFallbackStored(
           "leaf",
           3,
@@ -238,6 +249,7 @@ export async function runCompaction(
       emit,
     );
     leafIds.push(inserted.id);
+    mechanicalLeafCount++;
     emit({
       event: "lcm",
       kind: "summary-stored",
@@ -532,6 +544,7 @@ export async function runCompaction(
         )
       ) {
         condensedIds.push(inserted.id);
+        if (mechanicalGroup) mechanicalCondensedCount++;
         reportFallbackStored("condensed", level, session, span, sourceChars, inserted.id, emit);
       }
       frontier = store.frontier(from, bounds.lastEntryId);
@@ -539,6 +552,7 @@ export async function runCompaction(
       continue;
     }
     condensedIds.push(inserted.id);
+    if (mechanicalGroup) mechanicalCondensedCount++;
     reportFallbackStored("condensed", level, session, span, sourceChars, inserted.id, emit);
     if (!mechanicalGroup && answer && (tokens > targetTokens || answer.retried)) {
       reportOversize(
@@ -695,6 +709,8 @@ export async function runCompaction(
     leafSummaryIds: leafIds,
     condensedSummaryIds: condensedIds,
     ingested: ingestStats.inserted,
+    mechanicalLeaves: mechanicalLeafCount,
+    mechanicalCondensed: mechanicalCondensedCount,
   };
 }
 
@@ -942,9 +958,10 @@ function isMechanicalNode(node: SummaryNode): boolean {
   return node.quality === "mechanical" || node.text.startsWith(TRUNCATED_SUMMARY_PREFIX);
 }
 
-/** A direct tool-name hit, or a toolResult right after a listed call, which is
- * how Pi stores a result whose own text names no tool. Row order keeps a
- * covered call marking its uncovered result. */
+/** A direct tool-name hit, or an unnamed toolResult right after a listed row,
+ * which is how Pi stores a result whose own text names no tool. A result that
+ * names another tool closes the scope, the same rule toolScopeMessageIds uses,
+ * so only a result with no tool of its own follows the listed row. */
 function mechanicalMessageIds(
   messages: readonly StoredMessage[],
   tools: readonly string[],
@@ -962,6 +979,11 @@ function mechanicalMessageIds(
       continue;
     }
     if (m.role === "toolResult" && prevDirectListed) {
+      const own = mechanicalToolNameOf({ text: m.text, payload, role: m.role });
+      if (own !== undefined) {
+        prevDirectListed = false;
+        continue;
+      }
       ids.add(m.id);
       prevDirectListed = false;
       continue;

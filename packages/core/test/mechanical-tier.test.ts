@@ -499,3 +499,80 @@ test("mechanical tier: merged mixed leaves stay clipped and heal restores detail
     store.close();
   }
 });
+
+test("mechanical tier: a result naming another tool stays on the prose path", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const span = [
+      {
+        entryId: "e0",
+        role: "toolResult" as const,
+        text: `tool noisy-read {"n":1}\nNOISY-BODY ${"x".repeat(500)}`,
+      },
+      {
+        entryId: "e1",
+        role: "toolResult" as const,
+        text: `tool bash {"cmd":"ls"}\nBASH-BODY ${"y".repeat(500)}`,
+      },
+    ];
+    const calls: string[] = [];
+    const outcome = await storedPass(
+      store,
+      { span, targetTokens: 1500, mechanicalTools: ["noisy-read"] },
+      countingLlm(() => "prose summary", calls),
+      { leafChunkTokens: 100_000 },
+    );
+    assert.equal(calls.length, 1, "only the unlisted tool pays for a call");
+    assert.ok(calls[0]!.includes("BASH-BODY"), "the unlisted result reaches the model");
+    assert.ok(!calls[0]!.includes("NOISY-BODY"), "listed noisy body never reaches a model call");
+    const leaves = outcome.leafSummaryIds.map((id) => store.getSummary(id)!);
+    assert.equal(leaves.length, 2);
+    assert.deepEqual(
+      leaves.map((l) => [l.firstEntryId, l.quality]),
+      [
+        ["e0", "mechanical"],
+        ["e1", "clean"],
+      ],
+    );
+    const covered: number[] = [];
+    for (const id of outcome.leafSummaryIds) covered.push(...store.summarySources(id).messages);
+    const allIds = store
+      .allMessages()
+      .map((m) => m.id)
+      .sort((a, b) => a - b);
+    assert.deepEqual(
+      [...covered].sort((a, b) => a - b),
+      allIds,
+    );
+    assert.equal(new Set(covered).size, allIds.length, "no double summary");
+    assert.deepEqual(store.uncoveredMessagesInSpan("e0", "e1"), []);
+  } finally {
+    store.close();
+  }
+});
+
+test("mechanical tier: an unnamed result after a listed result stays mechanical", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const span = [
+      {
+        entryId: "e0",
+        role: "toolResult" as const,
+        text: `tool noisy-read {"n":1}\nNOISY-BODY ${"x".repeat(2000)}`,
+      },
+      { entryId: "e1", role: "toolResult" as const, text: `plain output ${"w".repeat(2000)}` },
+    ];
+    const calls: string[] = [];
+    const outcome = await storedPass(
+      store,
+      { span, targetTokens: 1500, mechanicalTools: ["noisy-read"] },
+      countingLlm(() => "must not run", calls),
+    );
+    assert.equal(calls.length, 0, "the unnamed follow-up needs no model call");
+    assert.equal(outcome.leafSummaryIds.length, 1);
+    assert.equal(store.getSummary(outcome.leafSummaryIds[0]!)?.quality, "mechanical");
+    assert.deepEqual(store.uncoveredMessagesInSpan("e0", "e1"), []);
+  } finally {
+    store.close();
+  }
+});

@@ -279,6 +279,65 @@ describe("runLosslessPass", () => {
     }
   });
 
+  it("commits a mechanical-only span without a model answer", async () => {
+    const session = "ses_pass_mechanical_only";
+    const path = sidecarPath();
+    const store = new LcmStore(path);
+    try {
+      const entries: AlignedEntry[] = [
+        {
+          entryId: `${session}:tool:msg_1:call_1`,
+          role: "toolResult",
+          text: `tool noisy-read {"path":"/a"}\n${"z".repeat(2000)}`,
+        },
+        {
+          entryId: `${session}:tool:msg_2:call_2`,
+          role: "toolResult",
+          text: `tool noisy-read {"path":"/b"}\n${"z".repeat(2000)}`,
+        },
+      ];
+      const ctx = ctxWith({
+        text: () => Promise.reject(new Error("model must not be called")),
+      });
+      const outcome = await runLosslessPass(
+        { store: () => store, ctx, model: MODEL },
+        session,
+        entries,
+        { targetTokens: 1500, summarizer: { mechanicalTools: ["noisy-read"] } },
+      );
+      expect(outcome.kind).toBe("stored");
+      if (outcome.kind !== "stored") return;
+      expect(outcome.leafSummaryIds.length).toBeGreaterThan(0);
+      expect(outcome.mechanicalLeaves).toBe(outcome.leafSummaryIds.length);
+      expect(outcome.mechanicalCondensed ?? 0).toBe(outcome.condensedSummaryIds.length);
+      for (const id of outcome.leafSummaryIds) {
+        expect(store.getSummary(id)?.quality).toBe("mechanical");
+      }
+      expect(countRows(path, "status = 'committed'")).toBeGreaterThan(0);
+      expect(countRows(path, "status = 'pending'")).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("still throws when a prose span fails with mechanicalTools configured", async () => {
+    const session = "ses_pass_mechanical_prose_fail";
+    const { store, path, entries } = seeded(session);
+    try {
+      const ctx = ctxWith({ text: () => Promise.reject(new Error("provider down")) });
+      await expect(
+        runLosslessPass({ store: () => store, ctx, model: MODEL }, session, entries, {
+          targetTokens: 200,
+          summarizer: { mechanicalTools: ["noisy-read"] },
+        }),
+      ).rejects.toThrow(/summarizer did not answer/);
+      expect(countRows(path, "status = 'committed'")).toBe(0);
+      expect(countRows(path, "status = 'pending'")).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
   it("returns a no-entries outcome without opening a run", async () => {
     const { store } = seeded();
     try {
