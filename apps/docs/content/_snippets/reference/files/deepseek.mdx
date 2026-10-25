@@ -10,9 +10,9 @@ The adapter writes under `sidecarDir`. Named export and backup paths are the exc
   - ses_0123456789abcdef.sqlite-shm
   - ses_0123456789abcdef.sqlite.backup-2026-10-25T12-00-00
   - metrics.jsonl
-  - metrics.jsonl.<Date.now()>
+  - metrics.jsonl.1730000000000
   - lcm-export-2026-10-25T12-00-00.jsonl
-  - lcm-export-gc-<id>-2026-10-25T12-00-00.jsonl
+  - lcm-export-gc-ses_0123456789abcdef-2026-10-25T12-00-00.jsonl
 
 </FileTree>
 
@@ -34,7 +34,7 @@ Sessions already live when the plugin mounts backfill through the same mirror pa
 | Recall      | `recall`                                   |
 | Reader      | `retrieval`                                |
 
-One `pass` row lands per ladder run with its outcome, leaf and condensed counts, and token usage; one `compaction-checkpoint` row lands per DAG bracket commit with condensed plus leaf seqs. `/lcm report` is a view over these rows. The log rotates at 5 MB, keeps three generations, and is created 0600.
+One `pass` row lands per ladder run with its outcome, leaf and condensed counts, and token usage; one `compaction-checkpoint` row lands per DAG bracket commit with condensed plus leaf seqs. `/lcm report` is a view over these rows. The log rotates at 5 MB into a millisecond-timestamped sibling, keeps three generations, and is created 0600.
 
 ## Exports, backups, and gc
 
