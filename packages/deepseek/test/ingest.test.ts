@@ -395,4 +395,19 @@ describe("ingest mirror", () => {
       expect(store.messageByEntryId(entryId)).toBeDefined();
     }
   });
+
+  it("skips a message with an unknown harness role instead of throwing", () => {
+    const session = {
+      id: "mirror-unknown-role",
+      deriveEventMessage: () => ({
+        id: "m-unknown",
+        role: "harness-new-role",
+        content: [{ type: "text", text: "future role text" }],
+      }),
+    } as unknown as Session;
+    const event = { seq: 1 } as unknown as Parameters<typeof entryFor>[1];
+    expect(entryFor(session, event)).toBeUndefined();
+    const store = new LcmStore(":memory:");
+    expect(mirrorEvent(session, event, store).inserted).toBe(0);
+  });
 });

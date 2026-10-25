@@ -25,6 +25,7 @@ import type {
 import type { DshRoute } from "./model-host.ts";
 import { usageOf } from "./model-host.ts";
 
+/** Reader options for one composition: route ref, abort, and session stamp. */
 export interface DshReaderOptions {
   /** Model the reader calls, as provider plus model on one route. */
   readonly ref: ModelRef<DshRoute>;

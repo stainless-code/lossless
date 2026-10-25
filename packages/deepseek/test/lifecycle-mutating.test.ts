@@ -662,6 +662,36 @@ describe("lcm mutating verbs", () => {
     expect(result.text).toContain("--session takes a session id");
   });
 
+  it("gc --older-than= with an inline value filters by age", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-inline-older";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    const result = await invoke(ctx, deps, liveId, "gc --older-than=1d");
+    expect(result.kind).toBe("success");
+  });
+
+  it("dump keeps a query term that matches the save filename", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("dump-query-save"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    seedMessages(deps.storeFor!("dump-query-save"), ["save-me query term save-me"]);
+    const target = join(tempDir(), "save-me.txt");
+    const result = await invoke(ctx, deps, "dump-query-save", `dump --save ${target} ${target}`);
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("wrote");
+    const { readFileSync } = await import("node:fs");
+    const written = readFileSync(target, "utf8");
+    expect(written).toContain(`search ${JSON.stringify(target)}`);
+  });
+
   it("dump lists each stored summary once from a single read", async () => {
     const { ctx } = setupContext(ROUTE, []);
     await mountBase(ctx);

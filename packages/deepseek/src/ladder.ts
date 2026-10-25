@@ -25,19 +25,24 @@ import { dshModelHost } from "./model-host.ts";
 import { agentRoute } from "./model-host.ts";
 import type { DshRoute } from "./model-host.ts";
 
+/** Engine dependencies for one composition: store, index, redact, and budgets. */
 export interface LosslessEngineDeps {
+  /** Store for one session id. Undefined when the session has no sidecar yet. */
   readonly store: (sessionId: string) => LcmStore | undefined;
   /** Live message-id to entry-id map, fed by the mirror. Spans resolve through it, never through text matching. */
   readonly index: (sessionId: string) => MessageIndex | undefined;
   /** Last checkpoint text per session, fed back as the next ladder's previous
    * summary. Absent until the engine stores its first checkpoint here. */
   readonly memory?: CheckpointMemory;
+  /** Redacts stored text before it reaches a model call. */
   readonly redact: (text: string) => string;
   /** Diagnostic sink: one run row per ladder run plus every engine row the
    * run causes. Optional so scripted tests can observe without a metrics
    * file; production passes the per-composition JSONL writer. */
   readonly record?: (row: Record<string, unknown>) => void;
+  /** Tokens one summary aims for. Unset keeps the core default. */
   readonly summaryTokens?: number;
+  /** Tokens one leaf chunk may hold before it splits. Unset keeps the core default. */
   readonly leafChunkTokens?: number;
   /** Tokens one summarizer request may cost before it is refused rather than
    * paid for. Unset keeps the core default (60,000). */

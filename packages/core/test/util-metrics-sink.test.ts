@@ -6,6 +6,12 @@ import { join } from "node:path";
 import { test } from "vite-plus/test";
 
 import { appendMetricRow, readMetricRows } from "../src/util/metrics-sink.ts";
+import {
+  addUsageTally,
+  createUsageTally,
+  tokenUsageOfTally,
+  zeroCostUsageOfTokens,
+} from "../src/util/metrics-sink.ts";
 
 function seedDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "metrics-sink-"));
@@ -35,4 +41,25 @@ test("metrics-sink: limit zero still returns no rows", () => {
   const dir = seedDir();
   assert.deepEqual(readMetricRows(dir, { limit: 0 }), []);
   assert.deepEqual(readMetricRows(dir, { session: "a", limit: 0 }), []);
+});
+
+test("metrics-sink: empty tally folds to undefined usage", () => {
+  const tally = createUsageTally();
+  assert.equal(tokenUsageOfTally(tally), undefined);
+});
+
+test("metrics-sink: tally adds one call and folds to provider names", () => {
+  const tally = createUsageTally();
+  addUsageTally(tally, { input: 10, output: 5, cacheRead: 2, cacheWrite: 1 });
+  const usage = tokenUsageOfTally(tally);
+  assert.deepEqual(usage, {
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+    cacheReadTokens: 2,
+    cacheWriteTokens: 1,
+  });
+  const zeroed = zeroCostUsageOfTokens(usage);
+  assert.equal(zeroed?.input, 10);
+  assert.equal(zeroed?.output, 5);
 });

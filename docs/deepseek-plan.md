@@ -530,9 +530,8 @@ Current pins: `dsh-*@0.2.1-rc.3`, `cordis@4.0.5`, against harness HEAD `22ddee37
 
 ## What this plan does not change
 
-No source, no config, and no version beyond what `feat/deepseek` already
-carries. The branch carries `.changeset/deepseek-lossless.md` plus docs site
-and package README edits. The B1-B3 bracket spike was proven on
+The branch carries the adapter source, config, version, `.changeset/deepseek-lossless.md`,
+plus docs site and package README edits. The B1-B3 bracket spike was proven on
 scripted models; roadmap item 10 stays a tracking item, so no spike log
 attaches to it beyond this plan.
 

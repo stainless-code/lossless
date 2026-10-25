@@ -11,7 +11,8 @@ import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 
 /** Composition options for `applyLossless`. Each field carries its own default. */
 export interface LosslessPluginConfig {
-  /** Master flag. Nothing registers, mirrors, or mounts until true. */
+  /** Master flag. Nothing registers, mirrors, or mounts until true.
+   * @default false */
   readonly enabled?: boolean;
   /** Automatic pressure compaction inside the turn.
    * @default false */

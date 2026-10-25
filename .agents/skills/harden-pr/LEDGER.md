@@ -29,3 +29,21 @@ without re-litigation.
   re-derive from the loop (same pass).
 - Test-rationale comments stay when they state fixture, divergence, or
   expectation rationale; pure assertion echoes go (same pass).
+- Negative metric limit reads all rows by design. `readMetricRows` treats a
+  negative limit as unbounded and zero as empty, pinned by
+  `util-metrics-sink.test.ts` (2026-10-25 gauntlet pass 1).
+- Root README names the host ports and bundling once. Day-1 architecture
+  needs the two-port contract and the inline-into-dist note; deeper internals
+  stay out (same pass).
+- Changesets describe behavior, not just the headline. This repo ships
+  detailed per-package entries; the deepseek entry stays behavior-complete
+  rather than trimmed to a headline (same pass).
+
+## Deferred
+
+- Recall scope closer (`toolScopeMessageIds` quoted-marker scan),
+  bare `tool <name>` matching, cross-session `offset`/`summary`/`include_removed`
+  forwarding, ghost-session read-only open for minimal deps, dispose-then-close
+  for live/healing stores, and `/lcm compact` error-code mapping tests: each
+  needs a design decision (sharded past-search semantics, scope state machine,
+  lifecycle close scheduling) beyond a polish pass. Recorded open, not fixed.

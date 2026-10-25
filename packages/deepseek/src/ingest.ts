@@ -220,12 +220,14 @@ function projectedEntry(
 ): { entry: IngestibleEntry; messageId: string } | undefined {
   const message = session.deriveEventMessage(event);
   if (message === null) return undefined;
+  const role = dshRole(message.role);
+  if (role === undefined) return undefined;
   const text = renderText(message);
   if (text === undefined) return undefined;
   return {
     entry: {
       entryId: `${session.id}:${event.seq}`,
-      role: dshRole(message.role),
+      role,
       text,
       timestamp: event.time,
     },
@@ -233,7 +235,7 @@ function projectedEntry(
   };
 }
 
-function dshRole(role: Message["role"]): LcmRole {
+function dshRole(role: Message["role"]): LcmRole | undefined {
   switch (role) {
     case "user":
       return "user";
@@ -244,10 +246,8 @@ function dshRole(role: Message["role"]): LcmRole {
     case "system":
     case "developer":
       return "custom";
-    default: {
-      const _exhaustive: never = role;
-      throw new Error(`unhandled message role: ${JSON.stringify(_exhaustive)}`);
-    }
+    default:
+      return undefined;
   }
 }
 

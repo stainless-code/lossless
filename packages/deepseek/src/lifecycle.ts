@@ -39,7 +39,9 @@ import { healLlmConfig, healRunBudgets } from "./ladder.ts";
 import { agentRoute, dshModelHost, type DshRoute } from "./model-host.ts";
 import { dumpSidecar } from "./sidecar-dump.ts";
 
+/** Command dependencies for one composition: stores, paths, and budgets. */
 export interface LcmCommandDeps {
+  /** Open stores by session id for status and report views. */
   readonly stores: () => ReadonlyMap<string, LcmStore>;
   /** Open-or-create the calling session sidecar. Import uses it so a fresh
    * session can restore history it has never mirrored. */
@@ -553,7 +555,13 @@ export function handleDump(
     };
   }
   const save = saveValue;
-  const query = args.filter((arg) => !arg.startsWith("--") && arg !== save).join(" ");
+  const saveIndex = args.findIndex((arg) => arg === "--save" || arg.startsWith("--save="));
+  const saveArgs = saveIndex === -1 ? new Set<number>() : new Set([saveIndex]);
+  if (saveIndex !== -1 && args[saveIndex] === "--save" && save !== undefined) {
+    const valueIndex = args.findIndex((arg, i) => i > saveIndex && arg === save);
+    if (valueIndex !== -1) saveArgs.add(valueIndex);
+  }
+  const query = args.filter((arg, i) => !arg.startsWith("--") && !saveArgs.has(i)).join(" ");
   const result = dumpSidecar({
     path: deps.storePathFor(sessionId),
     sessionId,
@@ -651,7 +659,9 @@ export function handleGc(
   if (hasSession && sessionValue === undefined) {
     return { kind: "error", text: "LCM gc: --session takes a session id." };
   }
-  if (args.includes("--older-than") && valueOf(args, "--older-than") === undefined) {
+  const hasOlderThan =
+    args.includes("--older-than") || args.some((arg) => arg.startsWith("--older-than="));
+  if (hasOlderThan && valueOf(args, "--older-than") === undefined) {
     return { kind: "error", text: "LCM gc: --older-than takes a number of days." };
   }
   const onlySession = sessionValue;

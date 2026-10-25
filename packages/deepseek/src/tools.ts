@@ -32,10 +32,12 @@ export interface PastSessions {
   readonly list: (excludeSessionId?: string) => readonly SidecarRef[];
 }
 
+/** Recall dependencies for one composition: store, redact, record, and past scope. */
 export interface RecallDeps {
   /** Sidecar by calling-agent session. Undefined answers the no-history
    * text, so a call outside any agent fails explained rather than empty. */
   readonly store: (sessionId: string | undefined) => LcmStore | undefined;
+  /** Redacts stored text before it reaches a model call. */
   readonly redact: (text: string) => string;
   /** Diagnostic sink for retrieval rows. Optional, so a test can observe
    * retrieval without a metrics file; production passes the per-composition

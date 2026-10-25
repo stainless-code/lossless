@@ -19,6 +19,7 @@ export interface DshRoute {
   readonly model: string;
 }
 
+/** Host options for one composition: default route, abort, and session stamp. */
 export interface DshHostOptions {
   /** The route `session()` answers with. Absent until the plugin wires config. */
   readonly defaultRoute?: DshRoute;

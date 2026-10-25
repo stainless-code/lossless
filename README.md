@@ -15,8 +15,8 @@ This repository holds the engine and the adapters that consume it:
 
 `lossless-core` is a workspace `devDependency` of the three adapters. The packs
 inline it into `dist/index.mjs`, so those packages ship with no runtime
-dependencies except the host SDKs each adapter value-imports: the DeepSeek
-bundle keeps `@deepseek-ai/*` in `dependencies`, resolved from the
+dependencies except the host SDKs each adapter peer-depends on: the DeepSeek
+bundle keeps `@deepseek-ai/*` in `peerDependencies`, resolved from the
 consumer's install. The Pi
 adapter implements both host ports. The OpenCode adapter implements `ModelHost`
 and runs retrieval in a host child session, because its plugin API has no
