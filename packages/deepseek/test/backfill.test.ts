@@ -93,7 +93,6 @@ function buildSession() {
   return session;
 }
 
-/** N closed single-exchange turns: user plus assistant per turn. */
 function buildLongSession(turns: number) {
   const session = Session.create(SessionId("backfill-long"));
   for (let turn = 1; turn <= turns; turn++) {
@@ -125,7 +124,6 @@ function buildLongSession(turns: number) {
   return session;
 }
 
-/** Scripted pagination source over a frozen fixture array. */
 function fakeSource(
   events: readonly SessionEvent[],
   seen?: { calls: number },

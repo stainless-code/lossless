@@ -160,9 +160,6 @@ export async function commitDagTransaction(
   try {
     const prepared = prepareDagCommit(deps, agent, session, validated);
     signal?.throwIfAborted();
-    // B1 runs one ladder attempt. The seam retries through its recover hook
-    // with a reprepared span; that loop is an auto-path production concern
-    // and arrives with the production wiring, not the spike.
     const ladder = await runLadder(
       deps.ctx,
       deps,

@@ -184,7 +184,6 @@ describe("applyLossless", () => {
       const texts = (sidecarMap(dir).get("live-4")?.allMessages() ?? [])
         .map((row) => row.text)
         .filter((text) => text.includes(SUMMARY));
-      // The sidecar rows carry the engine's frame tags; compare the bodies.
       const bodyOf = (text: string): string => {
         const open = "<compacted-summary>";
         const close = "</compacted-summary>";

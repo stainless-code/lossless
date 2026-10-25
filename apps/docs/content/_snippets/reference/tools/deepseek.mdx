@@ -93,7 +93,7 @@ Reads stored originals in process and answers from them.
 
 Pass `summary_id` or `entry_id`, not both. With neither, the reader searches. Findings come back wrapped in `<recovered_findings>`; the stored text does not enter this conversation. A past session's answer is labelled with its session id.
 
-The reader is one streaming call per step, at most 6 steps, over `lcm_grep`, `lcm_describe`, and `lcm_expand`; it cannot recurse. Each call stamps the calling session id so per-conversation transport attaches. Without a routed provider and model the run fails explained before reading anything.
+The reader is one streaming call per step, at most 6 steps, over `lcm_grep`, `lcm_describe`, and `lcm_expand`; it cannot recurse. Without a routed provider and model, the run refuses before reading anything.
 
 ## Failure modes
 

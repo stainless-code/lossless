@@ -22,7 +22,7 @@ The config is the capability's `config` object in the composition; there is no s
 | `summarizerTokensPerHeal`  | number             | `120000`        | adapter-only         | Ceiling on one `/lcm heal --apply` repair run.                                                                       |
 | `healSourceTokens`         | number             | derived         | adapter-only         | Source tokens one heal map window may read. Unset derives `8 x summaryTokens`, clamped to `3000` through `24000`.    |
 
-Seam keys ride the harness `BasicCompactionConfig`, whose resolver rejects unknown keys, so every adapter-only key stays on the adapter's own deps and never crosses the seam. `bracketAuto` rides the adapter deps for the same reason. The manual `/lcm compact` path keeps the seam's 0 retain: it forces one useful reduction, so `retainTokens` prices only the pressure path the seam owns.
+The scope column names where each key takes effect. Seam keys reach the harness config, where unknown keys fail load. The rest take effect locally; mount gates the whole composition. The manual `/lcm compact` path ignores retain settings.
 
 The summarizer follows the routed provider and model unless both summarizer fields are set. The reader calls the calling agent's model: the latest routed request first, agent options second. `reasoning` stays false on every adapter model call, so a reasoning model never silently spends the output cap.
 

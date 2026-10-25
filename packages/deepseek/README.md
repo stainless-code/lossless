@@ -14,8 +14,7 @@ ingests the history and builds the summaries.
 
 ## Pins
 
-The adapter compiles against these exact published versions, which match the
-pinned local checkout at `22ddee3792`:
+The adapter compiles against these exact published versions:
 
 - `@deepseek-ai/dsh-agent@0.2.1-rc.3`
 - `@deepseek-ai/dsh-commands@0.2.1-rc.3`
@@ -28,10 +27,6 @@ pinned local checkout at `22ddee3792`:
 - `@deepseek-ai/dsh-token-meter@0.2.1-rc.3` (tests only)
 - `@deepseek-ai/dsh-tools@0.2.1-rc.3`
 - `@deepseek-ai/cordis@4.0.5`
-
-The checkout lives outside this repo and is never vendored here. Every phase
-log names the commit it ran against, because the harness warns of breaking
-changes.
 
 ## Install
 
@@ -69,15 +64,15 @@ const stop = applyLossless(ctx, { enabled: true });
 ## `/lcm`
 
 - `status`: session counts plus the meter window and last pass outcome.
-- `report`: rolls up the metrics rows in the OpenCode vocabulary.
+- `report`: rolls up the metrics rows.
 - `backup [file]`: writes a `0600` store copy.
 - `export [file]`: writes a `0600` transcript copy.
-- `import <file>`: dedups the named file through `importTranscript`.
+- `import <file>`: dedups the named file.
 - `gc [--apply]`: dry-runs age-based sidecar collection; `--apply` deletes.
-- `migrate [--apply]`: dry-runs the generation gate; `--apply` migrates.
-- `heal [--apply] [--max-nodes N]`: dry-runs core `runHeal`; `--apply` repairs.
-- `diagnose [--save <file>]`: builds the redacted core bundle.
-- `compact`: one manual compaction through the DAG bracket.
+- `migrate [--apply]`: lists older-schema sidecars; `--apply` migrates.
+- `heal [--apply] [--max-nodes N]`: lists truncated summaries; `--apply` repairs.
+- `diagnose [--save <file>]`: builds the redacted diagnose bundle.
+- `compact`: one manual compaction.
 
 ## Tools
 
@@ -95,6 +90,8 @@ The model gets four recall tools:
   past session's history.
 - `lcm_expand_query`: a bounded reader expands the stored originals and returns
   findings only, so the raw transcript never enters the context.
+
+Full command, config, and file reference: [DeepSeek reference](https://stainless-code.com/lossless/reference/deepseek/tools).
 
 ## Credits
 

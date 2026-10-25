@@ -21,7 +21,6 @@ export type { LcmCommandDeps } from "./lifecycle.ts";
 const USAGE =
   "Usage: /lcm [status|report|backup [file]|export [file]|import <file>|gc [--apply]|migrate [--apply]|heal [--apply] [--max-nodes N]|diagnose [--save <file>]|compact]";
 
-/** Fail loudly if a locally closed union gains an unhandled member. */
 function assertNever(value: never): never {
   throw new Error(`unknown manual compaction error code: ${String(value)}`);
 }

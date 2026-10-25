@@ -22,7 +22,6 @@ const SUMMARY = "Checkpoint: engine work started and the config was read.";
 function buildSession(text: string): Session {
   const session = Session.create(SessionId("dag-commit-1"));
   appendConversation(session, ROUTE, text);
-  // The bracket commits into an open turn, like the seam's auto path.
   session.append("turn/start", { turn: 3 });
   return session;
 }
@@ -32,7 +31,6 @@ function mountMeter(ctx: Context): void {
   void new TokenMeter(ctx);
 }
 
-/** Filtered events keep their payload types, so data access typechecks. */
 function ofType<T extends SessionEvent["type"]>(
   events: readonly SessionEvent[],
   type: T,
@@ -137,7 +135,6 @@ describe("commitDagTransaction", () => {
     );
     expect(checkpoints).toHaveLength(1);
     expect(session.deriveMessages().length).toBeLessThan(before);
-    // No unmatched start remains: the lock is released.
     let depth = 0;
     for (const event of events) {
       if (event.type === "compaction/start") depth += 1;
@@ -199,8 +196,6 @@ describe("commitDagTransaction", () => {
     const ends = ofType(events, "compaction/end");
     expect(ends).toHaveLength(1);
     expect(typeof ends[0]?.data.error).toBe("string");
-    // The lock is released: a second attempt opens a new bracket instead of
-    // reporting busy. Scripts are exhausted, so it fails past the lock.
     await expect(
       commitDagTransaction(
         deps(ctx, store, index),

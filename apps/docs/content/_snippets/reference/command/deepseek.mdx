@@ -11,11 +11,11 @@
 /lcm compact
 ```
 
-Ten verbs on one `/lcm` command. Subcommand routing is manual dispatch inside the one handler: the command registry rejects a second registration under the same name, so `/lcm report` and friends arrive as raw input.
+Ten verbs on one `/lcm` command.
 
 ## Settings
 
-There is no interactive settings panel in scope; the harness exposes no custom-render seam on the composition context, so a settings overlay stays blocked. Edit the capability `config` in the composition and restart it. [Config](/reference/deepseek/config) lists every key.
+There is no settings panel. Edit the capability `config` in the composition and restart it. [Config](/reference/deepseek/config) lists every key.
 
 ## status
 
@@ -23,7 +23,7 @@ There is no interactive settings panel in scope; the harness exposes no custom-r
 /lcm status
 ```
 
-Message and compaction-summary counts for the live sidecars, plus the meter window with thresholds and the last pass outcome for this session. The counts lines stay additive to the older shape.
+Message and compaction-summary counts for the live sidecars, plus the meter window with thresholds and the last pass outcome for this session.
 
 ## report
 
@@ -31,7 +31,7 @@ Message and compaction-summary counts for the live sidecars, plus the meter wind
 /lcm report
 ```
 
-Pass, checkpoint, backfill, recall, and retrieval rows for this session, in the OpenCode vocabulary. It says so when the session has no rows.
+Pass, checkpoint, backfill, recall, and retrieval rows for this session. With no rows, it reports that the session has none.
 
 ## backup
 
@@ -39,7 +39,7 @@ Pass, checkpoint, backfill, recall, and retrieval rows for this session, in the 
 /lcm backup [file]
 ```
 
-Copies this session's sidecar to `<sidecar>.backup-<timestamp>`, or to the path you name, at mode 0600.
+Copies this session's sidecar to `<sidecar>.backup-<timestamp>`, or to a named path, at mode 0600.
 
 ## export
 
@@ -64,7 +64,7 @@ Restores rows from a file written by `/lcm export`. Re-importing the same file i
 /lcm gc --apply          # export each transcript, then delete
 ```
 
-Collects sidecars older than 30 days that no live session holds. It never touches a live stem and exports each transcript before deleting it. A no-op apply writes no export file.
+Collects sidecars older than 30 days that no live session holds. It never touches a live session's sidecar and exports each transcript before deleting it. A no-op apply writes no export file.
 
 ## migrate
 
@@ -73,7 +73,7 @@ Collects sidecars older than 30 days that no live session holds. It never touche
 /lcm migrate --apply     # upgrade them in place
 ```
 
-Generation-gated: sidecars older than the current schema version are listed, then upgraded in place. Live stems are excluded because a second writer would race the live session.
+Generation-gated: sidecars older than the current schema version are listed, then upgraded in place. Sidecars of live sessions are excluded.
 
 ## heal
 
@@ -100,7 +100,7 @@ One redacted, pasteable block: versions, store facts, the effective options, and
 /lcm compact
 ```
 
-One manual compaction through the DAG bracket: idle-agent admission, range selection with retain 0, one condensed replace plus log-only leaf records under one compaction id, then the durability flush. Returns null with "No compactable history yet" when no safe useful range exists. Automatic pressure compaction stays on the harness seam unless `bracketAuto` routes it through the bracket too.
+Runs one manual compaction immediately. Returns null with "No compactable history yet" when no safe useful range exists. Automatic pressure stays on the harness seam unless `bracketAuto` is set.
 
 ## Related
 

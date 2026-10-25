@@ -1,4 +1,4 @@
-The adapter writes under `sidecarDir`. The exception is an export or backup path you name yourself.
+The adapter writes under `sidecarDir`. Named export and backup paths are the exception.
 
 ## Store
 
@@ -16,7 +16,7 @@ The adapter writes under `sidecarDir`. The exception is an export or backup path
 
 </FileTree>
 
-One sidecar per session holds the verbatim mirror, the DAG, and the checkpoint marker. The `.sqlite-wal` and `.sqlite-shm` files belong to it. Disk stems are sanitized session ids, which is what the gc live-stem guard compares. The directory is created 0700; the database, WAL, and shared-memory files are 0600.
+One sidecar per session holds the verbatim mirror, the DAG, and the checkpoint marker. The `.sqlite-wal` and `.sqlite-shm` files belong to it. Disk stems are sanitized session ids. The directory is created 0700; the database, WAL, and shared-memory files are 0600.
 
 The live session log remains the source of truth for the conversation. The adapter does not backfill a deleted sidecar, so deleting one forgets that session's recall. `/lcm export` keeps a portable copy; `/lcm backup` keeps a byte copy.
 
@@ -34,7 +34,7 @@ Sessions already live when the plugin mounts backfill through the same mirror pa
 | Recall      | `recall`                                   |
 | Reader      | `retrieval`                                |
 
-One `pass` row lands per ladder run with its outcome plus leaf and condensed counts and tracker usage; one `compaction-checkpoint` row lands per DAG bracket commit with condensed plus leaf seqs. `/lcm report` is a view over these rows. The log rotates at 5 MB, keeps three generations, and is created 0600.
+One `pass` row lands per ladder run with its outcome, leaf and condensed counts, and token usage; one `compaction-checkpoint` row lands per DAG bracket commit with condensed plus leaf seqs. `/lcm report` is a view over these rows. The log rotates at 5 MB, keeps three generations, and is created 0600.
 
 ## Exports, backups, and gc
 

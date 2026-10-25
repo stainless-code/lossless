@@ -13,12 +13,11 @@ This repository holds the engine and the adapters that consume it:
 | [`deepseek-lossless`](packages/deepseek/README.md) | `packages/deepseek` | The DeepSeek composition: recall tools, `/lcm` verbs, DAG bracket, per-session sidecars.                     |
 | [`lossless-core`](packages/core/README.md)         | `packages/core`     | The engine: ingest, compaction, and retrieval behind a two-port host contract, with no agent SDK dependency. |
 
-`lossless-core` is a workspace `devDependency` of the three adapters. The Pi and
-OpenCode packs inline it into `dist/index.mjs`, so those packages ship with no
-runtime dependencies. The DeepSeek bundle keeps its imports external: the
-composition value-imports the `@deepseek-ai/*` host packages, which ride
-`dependencies`, and the engine currently resolves externally too, so the
-DeepSeek tarball is not yet self-contained. The Pi
+`lossless-core` is a workspace `devDependency` of the three adapters. The packs
+inline it into `dist/index.mjs`, so those packages ship with no runtime
+dependencies except the host SDKs each adapter value-imports: the DeepSeek
+bundle keeps `@deepseek-ai/*` in `dependencies`, resolved from the
+consumer's install. The Pi
 adapter implements both host ports. The OpenCode adapter implements `ModelHost`
 and runs retrieval in a host child session, because its plugin API has no
 in-process tool-calling completion. The DeepSeek adapter implements `ModelHost`

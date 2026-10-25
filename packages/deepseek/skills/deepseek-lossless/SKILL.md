@@ -17,9 +17,8 @@ sources:
 mirrors into its own SQLite sidecar, the summarizer engine mounts as the
 compaction backend, and the composition registers four recall tools plus `/lcm`.
 Nothing registers, mirrors, or mounts until `enabled` is true. Past the
-pressure point the engine compacts through the host seam; `/lcm compact`
-commits through the DAG bracket instead, and `bracketAuto` routes automatic
-pressure compaction through the bracket too.
+pressure point the engine compacts automatically when `auto` is on; `/lcm
+compact` compacts on demand.
 
 ## Install
 
@@ -35,15 +34,15 @@ the tools, and the command.
 ## Commands
 
 - `/lcm status`: session counts plus the meter window and last pass outcome.
-- `/lcm report`: this session's metrics rows in the OpenCode vocabulary.
+- `/lcm report`: this session's metrics rows.
 - `/lcm backup [file]`: copy this session's sidecar (mode 0600).
 - `/lcm export [file]`: write the verbatim transcript and summaries as JSONL (mode 0600).
 - `/lcm import <file>`: restore rows from an export.
 - `/lcm gc [--apply]`: dry-run age-based sidecar collection; `--apply` deletes.
-- `/lcm migrate [--apply]`: dry-run the generation gate; `--apply` migrates.
-- `/lcm heal [--apply] [--max-nodes N]`: dry-run repair of tainted summaries; `--apply` spends model calls.
+- `/lcm migrate [--apply]`: dry-run the older-schema list; `--apply` migrates.
+- `/lcm heal [--apply] [--max-nodes N]`: dry-run the truncated list; `--apply` spends model calls.
 - `/lcm diagnose [--save <file>]`: redacted, pasteable diagnostics bundle.
-- `/lcm compact`: one manual compaction through the DAG bracket.
+- `/lcm compact`: one manual compaction on demand.
 
 ## Recall tools
 
@@ -59,7 +58,7 @@ the tools, and the command.
 ```
 
 - `sidecarDir` holds one SQLite file per session; delete one to forget that session.
-- `auto: false` (default) runs no automatic pressure compaction; `/lcm compact` works regardless. `bracketAuto: true` routes automatic compaction through the DAG bracket instead of the seam.
+- `auto: false` (default) runs no automatic pressure compaction; `/lcm compact` works regardless. `bracketAuto: true` routes automatic compaction through the DAG bracket.
 - `summarizationProvider` / `summarizationModel` unset follow the routed model.
 - Budgets: `summarizerTokensPerCall`, `summarizerTokensPerPass`, `summarizerTokensPerHeal`; `healSourceTokens` unset derives 8x `summaryTokens`, clamped to 3000 through 24000.
 

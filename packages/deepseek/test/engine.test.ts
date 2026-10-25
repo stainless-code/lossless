@@ -129,8 +129,6 @@ describe("LosslessSummarizerEngine", () => {
     const result = await engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent);
     expect(result.summary).toHaveLength(1);
     expect(result.shadowedSeqs.length).toBeGreaterThan(0);
-    // The fallback repopulates the map for later spans in this process:
-    // at least one derived id resolves now, while an unknown id does not.
     const mapped = session.deriveMessages().filter((message) => coldIndex.entryId(message.id));
     expect(mapped.length).toBeGreaterThan(0);
     expect(coldIndex.entryId("never-derived")).toBeUndefined();
@@ -253,8 +251,6 @@ describe("LosslessSummarizerEngine", () => {
       { store: () => store, index: () => new MessageIndex(), redact: identity },
     );
     const nodes = session.surface.nodes;
-    // Nothing was ever mirrored, so live re-derivation resolves the ids but
-    // the store holds no rows: still fail closed, at the precise gate.
     await expect(engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent)).rejects.toThrow(
       "sidecar holds no row",
     );
