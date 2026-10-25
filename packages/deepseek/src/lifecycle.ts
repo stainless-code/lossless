@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -495,10 +495,11 @@ export function handleGc(
       text: `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lcm gc --apply\` to export then delete them. Backups are never touched.`,
     };
   }
-  const exportTarget = join(deps.sidecarDir, `lcm-export-gc-${STAMP()}.jsonl`);
+  const stamp = STAMP();
   let removed = 0;
   let exported = 0;
   let failed = 0;
+  const written: string[] = [];
   for (const candidate of candidates) {
     try {
       const probe = new LcmStore(candidate.path, { queryOnly: true });
@@ -509,7 +510,13 @@ export function handleGc(
         probe.close();
       }
       if (rows.length > 0) {
-        appendFileSync(exportTarget, `${rows}\n`, { encoding: "utf8", mode: 0o600 });
+        // One file per sidecar: ordinals restart at 0 per store.
+        const target = join(deps.sidecarDir, `lcm-export-gc-${candidate.id}-${stamp}.jsonl`);
+        writeFileSync(target, `${rows}\n`, { encoding: "utf8", mode: 0o600 });
+        try {
+          chmodSync(target, 0o600);
+        } catch {}
+        written.push(target);
         exported++;
       }
       dropSidecarFiles(candidate.path);
@@ -519,12 +526,9 @@ export function handleGc(
     }
   }
   if (exported > 0) {
-    try {
-      chmodSync(exportTarget, 0o600);
-    } catch {}
     return {
       kind: "success",
-      text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
+      text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${written.join(", ")}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
     };
   }
   return {

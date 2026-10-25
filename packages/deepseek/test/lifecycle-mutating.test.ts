@@ -159,6 +159,71 @@ describe("lcm mutating verbs", () => {
     expect(gcExports.length).toBe(1);
   });
 
+  it("gc apply writes one export per sidecar so each restores", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "live-gc-split";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-split"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    const seedStale = (stem: string, texts: string[]): string => {
+      const path = join(dir, `${stem}.sqlite`);
+      const stale = new LcmStore(path);
+      try {
+        seedMessages(stale, texts);
+        const ids = stale.messagesInSpan("e00", "e01").map((message) => message.id);
+        stale.insertSummary({
+          kind: "leaf",
+          text: `leaf for ${stem}`,
+          tokens: 4,
+          depth: 0,
+          firstEntryId: "e00",
+          lastEntryId: "e01",
+          messageIds: ids,
+        });
+      } finally {
+        stale.close();
+      }
+      ageFile(path, 31);
+      return path;
+    };
+    const staleA = seedStale("stale-a", ["stale a one", "stale a two"]);
+    const staleB = seedStale("stale-b", ["stale b one", "stale b two"]);
+    ageFile(join(dir, `${sanitizeSidecarId(liveId)}.sqlite`), 31);
+    const applied = await invoke(ctx, deps, liveId, "gc --apply");
+    expect(applied.kind).toBe("success");
+    expect(applied.text).toContain("removed 2 of 2");
+    const gcExports = readdirSync(dir)
+      .filter((name) => name.startsWith("lcm-export-gc-"))
+      .sort();
+    expect(gcExports.length).toBe(2);
+    expect(applied.text).toContain(gcExports[0]!);
+    expect(applied.text).toContain(gcExports[1]!);
+    expect(existsSync(staleA)).toBe(false);
+    expect(existsSync(staleB)).toBe(false);
+    ctx.sessions.create(SessionId("restore-a"), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("restore-b"), { meta: { cwd: dir } });
+    const fileA = gcExports.find((name) => name.includes("stale-a"))!;
+    const fileB = gcExports.find((name) => name.includes("stale-b"))!;
+    expect(fileA).toBeDefined();
+    expect(fileB).toBeDefined();
+    const impA = await invoke(ctx, deps, "restore-a", `import ${join(dir, fileA)}`);
+    expect(impA.kind).toBe("success");
+    expect(deps.storeFor!("restore-a").allMessages().length).toBe(2);
+    expect(deps.storeFor!("restore-a").allSummaries().length).toBe(1);
+    const impB = await invoke(ctx, deps, "restore-b", `import ${join(dir, fileB)}`);
+    expect(impB.kind).toBe("success");
+    expect(deps.storeFor!("restore-b").allMessages().length).toBe(2);
+    expect(deps.storeFor!("restore-b").allSummaries().length).toBe(1);
+    const againA = await invoke(ctx, deps, "restore-a", `import ${join(dir, fileA)}`);
+    expect(againA.kind).toBe("success");
+    expect(againA.text).toContain("already present");
+    expect(deps.storeFor!("restore-a").allMessages().length).toBe(2);
+  });
+
   it("gc apply on an empty stale sidecar removes it without naming an export file", async () => {
     const { ctx } = setupContext(ROUTE, []);
     await mountBase(ctx);
