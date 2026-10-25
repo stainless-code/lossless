@@ -21,6 +21,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   BACKFILL_MAX_EVENTS,
+  BACKFILL_MAX_VISITED,
   backfillSession,
   historySourceFrom,
   mirrorEvent,
@@ -232,8 +233,12 @@ describe("pre-mount backfill", () => {
     });
     expect(seen.calls).toBe(1);
     expect(result.capped).toBe(true);
-    expect(result.ingested + result.skipped).toBe(25);
-    expect(result.throughSeq).toBe(Number(events[24]?.seq));
+    // Skips never burn budget: 25 inserts need 50 visits here.
+    expect(result.ingested).toBe(25);
+    expect(result.skipped).toBe(25);
+    expect(result.ingested + result.skipped).toBe(50);
+    expect(result.fromSeq).toBe(Number(events[0]?.seq));
+    expect(result.throughSeq).toBe(Number(events[49]?.seq));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       kind: "backfill",
@@ -242,14 +247,70 @@ describe("pre-mount backfill", () => {
     });
   });
 
+  it("dedup skips do not burn the inserted budget", async () => {
+    const session = buildLongSession(30);
+    const events = session.snapshotEvents();
+    const store = new LcmStore(":memory:");
+    // Seed the first five turns so their replays dedup.
+    for (const event of events.slice(0, 20)) mirrorEvent(session, event, store);
+    expect(store.allMessages()).toHaveLength(10);
+    const result = await backfillSession(session, store, fakeSource(events), undefined, {
+      pageSize: 10,
+      maxEvents: 10,
+    });
+    expect(result.capped).toBe(true);
+    expect(result.ingested).toBe(10);
+    // 20 dedup and non-message skips plus 10 fresh inserts need 39 visits.
+    expect(result.ingested + result.skipped).toBe(39);
+    expect(result.throughSeq).toBe(Number(events[38]?.seq));
+    expect(store.allMessages()).toHaveLength(20);
+  });
+
+  it("ceiling stops the scan when visits outrun inserts", async () => {
+    const session = buildLongSession(30);
+    const events = session.snapshotEvents();
+    const store = new LcmStore(":memory:");
+    const result = await backfillSession(session, store, fakeSource(events), undefined, {
+      pageSize: 10,
+      maxEvents: 1000,
+      maxVisited: 20,
+    });
+    expect(result.capped).toBe(true);
+    expect(result.ingested).toBe(10);
+    expect(result.skipped).toBe(10);
+    expect(result.ingested + result.skipped).toBe(20);
+    expect(result.throughSeq).toBe(Number(events[19]?.seq));
+  });
+
   it("honors the default cap on a log larger than BACKFILL_MAX_EVENTS", async () => {
-    const session = buildLongSession(200);
+    const session = buildLongSession(350);
     const events = session.snapshotEvents();
     expect(events.length).toBeGreaterThan(BACKFILL_MAX_EVENTS);
+    expect(session.deriveMessages().length).toBeGreaterThan(BACKFILL_MAX_EVENTS);
     const store = new LcmStore(":memory:");
     const result = await backfillSession(session, store, fakeSource(events));
     expect(result.capped).toBe(true);
-    expect(result.ingested + result.skipped).toBe(BACKFILL_MAX_EVENTS);
+    expect(result.ingested).toBe(BACKFILL_MAX_EVENTS);
+    // 500 inserts need 999 visits here, still under the visit ceiling.
+    expect(result.ingested + result.skipped).toBe(999);
+    expect(result.ingested + result.skipped).toBeLessThan(BACKFILL_MAX_VISITED);
+    expect(store.allMessages()).toHaveLength(BACKFILL_MAX_EVENTS);
+  });
+
+  it("mirrors a 600-event session across one call and inserts nothing on repeat", async () => {
+    const session = buildLongSession(150);
+    const events = session.snapshotEvents();
+    expect(events).toHaveLength(600);
+    const store = new LcmStore(":memory:");
+    const first = await backfillSession(session, store, fakeSource(events));
+    expect(first.capped).toBe(false);
+    expect(first.ingested).toBe(session.deriveMessages().length);
+    expect(first.ingested + first.skipped).toBe(600);
+    expect(store.allMessages()).toHaveLength(session.deriveMessages().length);
+    const second = await backfillSession(session, store, fakeSource(events));
+    expect(second.ingested).toBe(0);
+    expect(second.skipped).toBe(600);
+    expect(store.allMessages()).toHaveLength(session.deriveMessages().length);
   });
 });
 

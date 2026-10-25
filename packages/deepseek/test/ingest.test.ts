@@ -295,4 +295,38 @@ describe("ingest mirror", () => {
     expect(mirrorEvent(session, event, store).inserted).toBe(0);
     expect(store.allMessages()).toHaveLength(0);
   });
+
+  it("keeps leading indentation, trailing spaces, and outer blank lines verbatim", () => {
+    const session = Session.create(SessionId("mirror-ws"));
+    const original = "\n\n  indented line\nsecond line  \n\n";
+    const event = session.append(
+      "user/message",
+      createUserMessage({
+        content: [{ type: "text", text: original }],
+        source: { kind: "user" },
+      }),
+      { surfaceOp: "append" },
+    );
+    const store = new LcmStore(":memory:");
+    expect(mirrorEvent(session, event, store).inserted).toBe(1);
+    const rows = store.allMessages();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.text).toBe(original);
+  });
+
+  it("keeps no row for whitespace-only text", () => {
+    const session = Session.create(SessionId("mirror-ws-empty"));
+    const event = session.append(
+      "user/message",
+      createUserMessage({
+        content: [{ type: "text", text: "   \n  " }],
+        source: { kind: "user" },
+      }),
+      { surfaceOp: "append" },
+    );
+    expect(entryFor(session, event)).toBeUndefined();
+    const store = new LcmStore(":memory:");
+    expect(mirrorEvent(session, event, store).inserted).toBe(0);
+    expect(store.allMessages()).toHaveLength(0);
+  });
 });

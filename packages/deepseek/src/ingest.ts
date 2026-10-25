@@ -68,9 +68,14 @@ export function observeSession(
  * module), so one seam means one paging vocabulary. */
 export const BACKFILL_PAGE_SIZE = 50;
 
-/** Per-session ceiling on backfilled events. A huge pre-mount log stops here
- * instead of stalling mount; live events keep mirroring past the cap. */
+/** Per-session ceiling on backfilled rows. Counts INSERTED rows only, so
+ * dedup and non-message skips never burn budget; live events keep mirroring
+ * past the cap. */
 export const BACKFILL_MAX_EVENTS = 500;
+
+/** Ceiling on total visited events per backfill. Bounds the scan when skips
+ * dominate; defaults to four times the effective inserted cap. */
+export const BACKFILL_MAX_VISITED = BACKFILL_MAX_EVENTS * 4;
 
 /** One frozen pre-mount cut for a session, read through the async observation
  * seam. The harness materializes it behind its own migration waiver, so this
@@ -135,8 +140,10 @@ export function historySourceFrom(ctx: Context): SessionHistorySource | undefine
 export interface BackfillOptions {
   /** Mirror slice size. Default BACKFILL_PAGE_SIZE. */
   pageSize?: number;
-  /** Absolute per-session event ceiling. Default BACKFILL_MAX_EVENTS. */
+  /** Per-session inserted-row ceiling. Default BACKFILL_MAX_EVENTS. */
   maxEvents?: number;
+  /** Per-session visited-event ceiling. Default 4x the effective maxEvents. */
+  maxVisited?: number;
   /** Metrics recorder; receives one `backfill` row per session. */
   record?: (row: Record<string, unknown>) => void;
 }
@@ -166,16 +173,21 @@ export async function backfillSession(
 ): Promise<BackfillResult> {
   const pageSize = Math.max(1, Math.floor(options.pageSize ?? BACKFILL_PAGE_SIZE));
   const maxEvents = Math.max(0, Math.floor(options.maxEvents ?? BACKFILL_MAX_EVENTS));
+  const maxVisited = Math.max(0, Math.floor(options.maxVisited ?? maxEvents * 4));
   const { events } = await source.observe(session.id);
   let ingested = 0;
   let skipped = 0;
-  let mirrored = 0;
+  let visited = 0;
   let fromSeq = -1;
   let throughSeq = -1;
-  for (let start = 0; start < events.length && mirrored < maxEvents; start += pageSize) {
+  for (
+    let start = 0;
+    start < events.length && ingested < maxEvents && visited < maxVisited;
+    start += pageSize
+  ) {
     for (const event of events.slice(start, start + pageSize)) {
-      if (mirrored >= maxEvents) break;
-      mirrored += 1;
+      if (ingested >= maxEvents || visited >= maxVisited) break;
+      visited += 1;
       const seq = Number(event.seq);
       if (fromSeq === -1) fromSeq = seq;
       throughSeq = seq;
@@ -183,11 +195,11 @@ export async function backfillSession(
       ingested += stats.inserted;
       skipped += stats.skipped;
     }
-    if (start + pageSize < events.length && mirrored < maxEvents) {
+    if (start + pageSize < events.length && ingested < maxEvents && visited < maxVisited) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
   }
-  const capped = mirrored >= maxEvents && mirrored < events.length;
+  const capped = (ingested >= maxEvents || visited >= maxVisited) && visited < events.length;
   options.record?.({
     ts: Date.now(),
     event: "lcm",
@@ -248,9 +260,13 @@ function renderText(message: Message): string | undefined {
     if (block.type === "text") parts.push(block.text);
     else if (block.type === "tool-call") parts.push(`tool-call: ${block.name} ${block.arguments}`);
   }
-  const text = parts.join("\n").trim();
-  if (text.length > 0) return text;
+  const text = parts.join("\n");
+  if (text.trim().length > 0) return text;
   if (message.content.length === 0) return undefined;
+  // Whitespace-only text carries no replay value.
+  if (parts.length > 0 && message.content.every((block) => block.type === "text")) {
+    return undefined;
+  }
   return describeNonText(message);
 }
 
