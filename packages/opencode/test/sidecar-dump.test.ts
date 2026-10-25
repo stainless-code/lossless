@@ -351,4 +351,53 @@ describe("sidecar dump", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("leaves a planted predictable temp untouched", async () => {
+    const dir = tempDir();
+    const sidecars = new Sidecars(dir);
+    const texts: string[] = [];
+    const deps: LifecycleDeps = {
+      sidecars,
+      options: {
+        assembly: true,
+        swapAtRatio: 0.7,
+        recutAtRatio: 0.85,
+        keepRecentTokens: 20_000,
+      },
+      version: () => "opencode-lossless test",
+      host: () => "opencode v2",
+      prompt: (_sessionID, text) => {
+        texts.push(text);
+        return Promise.resolve(undefined);
+      },
+      record: () => {},
+      heal: async () => {
+        throw new Error("heal is not scripted in this harness");
+      },
+    };
+    try {
+      const store = sidecars.for(SESSION);
+      ingestEntries(store, [
+        { entryId: `${SESSION}:prompt:msg_1`, role: "user", text: "saved dump note", timestamp: 1 },
+      ]);
+      const target = join(dir, "lossless-dump-plant.txt");
+      const decoy = `${target}.tmp`;
+      writeFileSync(decoy, "decoy bytes", { mode: 0o644 });
+      await dumpCommand(deps).execute({
+        sessionID: SESSION,
+        prompt: { text: `/lossless-dump --save ${target}` },
+        delivery: {},
+      } as CommandInvocation);
+      expect(readFileSync(decoy, "utf8")).toBe("decoy bytes");
+      const written = readFileSync(target, "utf8");
+      expect(written).toContain("LCM sidecar dump");
+      expect(statSync(target).mode & 0o777).toBe(0o600);
+      expect(readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([
+        "lossless-dump-plant.txt.tmp",
+      ]);
+    } finally {
+      sidecars.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { lcmHomePath } from "lossless-core";
@@ -112,6 +112,40 @@ function parseMaxNodesFlag(flags: readonly string[]): MaxNodesFlag {
 function maxNodesValue(raw: string): MaxNodesFlag {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? { kind: "value", value } : { kind: "invalid" };
+}
+
+function writeDumpTarget(target: string, text: string): void {
+  // Unique temp with exclusive creation, then an atomic rename: a planted
+  // predictable path is never touched and the destination swaps at once.
+  const dir = dirname(target);
+  const base = basename(target);
+  let tmp = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = join(
+      dir,
+      `.${base}.${process.pid}.${Date.now()}.${Math.floor(Math.random() * 1e9)}.tmp`,
+    );
+    try {
+      writeFileSync(candidate, text, { encoding: "utf8", mode: 0o600, flag: "wx" });
+      tmp = candidate;
+      break;
+    } catch (error) {
+      if ((error as { code?: string })?.code === "EEXIST") continue;
+      throw error;
+    }
+  }
+  if (tmp === "") throw new Error(`LCM dump: cannot create temp file beside ${target}.`);
+  try {
+    try {
+      chmodSync(tmp, 0o600);
+    } catch {}
+    renameSync(tmp, target);
+  } catch (error) {
+    try {
+      unlinkSync(tmp);
+    } catch {}
+    throw error;
+  }
 }
 
 /** A dry run reads the plan and makes no provider call. The type still carries
@@ -636,19 +670,8 @@ export function registerLcmCommand(
         }
         if (savePath !== undefined) {
           try {
-            // A private temp beside the destination, then an atomic rename:
-            // the bytes never sit at a readable path, and an existing file
-            // keeps its old bytes and mode until the swap.
-            const tmpPath = `${savePath}.tmp`;
-            writeFileSync(tmpPath, `${result.text}\n`, { encoding: "utf8", mode: 0o600 });
-            try {
-              chmodSync(tmpPath, 0o600);
-            } catch {}
-            renameSync(tmpPath, savePath);
+            writeDumpTarget(savePath, `${result.text}\n`);
           } catch (error) {
-            try {
-              unlinkSync(`${savePath}.tmp`);
-            } catch {}
             ctx.ui.notify(
               `LCM dump: cannot write ${savePath} (${error instanceof Error ? error.message : String(error)}).`,
               "warning",

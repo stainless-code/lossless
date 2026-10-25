@@ -362,3 +362,70 @@ test("dump --save: writes through a private temp at mode 0600", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("dump --save: leaves a planted predictable temp untouched", async () => {
+  const dir = tempDir();
+  const origHome = process.env.HOME;
+  process.env.HOME = dir;
+  try {
+    const dbPath = join(dir, "save-plant.sqlite");
+    const liveStore = new LcmStore(dbPath);
+    try {
+      ingestEntries(liveStore, [
+        { entryId: "m1", role: "user", text: "saved dump note", timestamp: 1 },
+      ]);
+      const notifications: string[] = [];
+      const commands = new Map<
+        string,
+        { handler: (args: string | undefined, ctx: unknown) => Promise<unknown> }
+      >();
+      const fakePi = {
+        registerCommand: (name: string, def: never) => {
+          commands.set(name, def);
+        },
+      };
+      const deps: LcmCommandDeps = {
+        getStore: () => liveStore,
+        openStore: () => liveStore,
+        getConfig: () => ({}),
+        patchConfig: () => {},
+        resetConfig: () => {},
+        clearCommitState: () => {},
+        getCommitState: () => null,
+        getDbPath: () => dbPath,
+        keepRecentTokens: () => 20_000,
+      };
+      registerLcmCommand(fakePi as never, deps);
+      const ctx = {
+        mode: "tui",
+        sessionManager: {
+          getSessionFile: () => join(dir, "sess.jsonl"),
+          getSessionId: () => "pi-dump-save",
+        },
+        getContextUsage: () => undefined,
+        ui: {
+          notify: (msg: string) => {
+            notifications.push(msg);
+          },
+        },
+      };
+      const target = join(dir, "lcm-dump-plant.txt");
+      const decoy = `${target}.tmp`;
+      writeFileSync(decoy, "decoy bytes", { mode: 0o644 });
+      await commands.get("lcm")!.handler(`dump --save ${target}`, ctx);
+      assert.equal(readFileSync(decoy, "utf8"), "decoy bytes");
+      const written = readFileSync(target, "utf8");
+      assert.ok(written.includes("LCM sidecar dump"), written);
+      assert.equal(statSync(target).mode & 0o777, 0o600);
+      assert.deepEqual(
+        readdirSync(dir).filter((f) => f.endsWith(".tmp")),
+        ["lcm-dump-plant.txt.tmp"],
+      );
+    } finally {
+      liveStore.close();
+    }
+  } finally {
+    process.env.HOME = origHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
