@@ -256,6 +256,96 @@ describe("LosslessSummarizerEngine", () => {
     );
   });
 
+  it("heals a partial mirror through one backfill catch-up", async () => {
+    const session = buildSession("catchup notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    const events = session.snapshotEvents();
+    for (const event of events.slice(0, 3)) mirrorEvent(session, event, store, index);
+    expect(store.allMessages().length).toBeGreaterThan(0);
+    expect(store.allMessages().length).toBeLessThan(session.deriveMessages().length);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const liveEvents = session.snapshotEvents();
+    (ctx as unknown as Record<string, unknown>).sessionQuery = {
+      observeSession: async () => ({ events: liveEvents }),
+    };
+    const rows: Record<string, unknown>[] = [];
+    const agent = fakeAgent(session, ROUTE);
+    const engine = new LosslessSummarizerEngine(
+      ctx,
+      { auto: false },
+      { store: () => store, index: () => index, redact: identity, record: (row) => rows.push(row) },
+    );
+    const nodes = session.surface.nodes;
+    const expected = session.deriveMessages().length;
+    const result = await engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent);
+    expect(result.summary).toHaveLength(1);
+    expect(result.shadowedSeqs.length).toBeGreaterThan(0);
+    expect(rows.some((row) => row.kind === "backfill")).toBe(true);
+    expect(store.allMessages().length).toBe(expected);
+  });
+
+  it("rethrows the original span error when no history source exists", async () => {
+    const session = buildSession("gap notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    const events = session.snapshotEvents();
+    for (const event of events.slice(0, 3)) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [textChunks(SUMMARY)]);
+    mountMeter(ctx);
+    const rows: Record<string, unknown>[] = [];
+    const agent = fakeAgent(session, ROUTE);
+    const engine = new LosslessSummarizerEngine(
+      ctx,
+      { auto: false },
+      { store: () => store, index: () => index, redact: identity, record: (row) => rows.push(row) },
+    );
+    const nodes = session.surface.nodes;
+    await expect(engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent)).rejects.toThrow(
+      "sidecar holds no row",
+    );
+    expect(rows.some((row) => row.kind === "backfill")).toBe(false);
+  });
+
+  it("leaves non-span failures alone without a backfill call", async () => {
+    const session = buildSession("hi");
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    let backfillCalls = 0;
+    const liveEvents = session.snapshotEvents();
+    (ctx as unknown as Record<string, unknown>).sessionQuery = {
+      observeSession: async () => {
+        backfillCalls += 1;
+        return { events: liveEvents };
+      },
+    };
+    const rows: Record<string, unknown>[] = [];
+    const agent = fakeAgent(session, ROUTE);
+    const engine = new LosslessSummarizerEngine(
+      ctx,
+      { auto: false },
+      { store: () => store, index: () => index, redact: identity, record: (row) => rows.push(row) },
+    );
+    const nodes = session.surface.nodes;
+    await expect(engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent)).rejects.toThrow(
+      "not smaller than the shadowed content",
+    );
+    expect(backfillCalls).toBe(0);
+    expect(rows.some((row) => row.kind === "backfill")).toBe(false);
+  });
+
   describe("compactNow", () => {
     // The durability flush needs a live session, so these build on
     // ctx.sessions instead of the detached buildSession helper.

@@ -10,7 +10,7 @@ import type { CompactionSpanEntry, LcmStore } from "lossless-core";
 
 import { commitDagTransaction, selectDagRange } from "./dag-commit.ts";
 import type { DagCommitResult } from "./dag-commit.ts";
-import { MessageIndex } from "./ingest.ts";
+import { backfillSession, historySourceFrom, MessageIndex } from "./ingest.ts";
 import type { CheckpointMemory, LadderOutcome, LosslessEngineDeps } from "./ladder.ts";
 import {
   SpanAlreadyMemoryError,
@@ -175,7 +175,23 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
         "lossless compaction: no provider/model available for summarization: set both engine summarization fields, route one request, or set both agent options fields",
       );
     }
-    const span = this.spanOf(input, store, index, agent.session);
+    let span: CompactionSpanEntry[];
+    try {
+      span = this.spanOf(input, store, index, agent.session);
+    } catch (error) {
+      // A dead mirror heals on retry; anything else must stay fail-closed.
+      if (!isUnmappedSpanError(error)) throw error;
+      const source = historySourceFrom(this.ctx);
+      if (source === undefined) throw error;
+      await backfillSession(
+        agent.session,
+        store,
+        source,
+        index,
+        this.lossless.record === undefined ? {} : { record: this.lossless.record },
+      );
+      span = this.spanOf(input, store, index, agent.session);
+    }
     const ladder = await runLadder(this.ctx, this.lossless, target, sessionId, span, signal);
     const checkpoint = withSummaryRefs(ladder.summaryText, [
       ...ladder.leafSummaryIds,
@@ -253,6 +269,15 @@ function toSummaryResult(
     maxTokens,
     ...(ladder.usage === undefined ? {} : { usage: ladder.usage }),
   };
+}
+
+/** A gapped mirror is worth one live reread; every other failure keeps its path. */
+function isUnmappedSpanError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.includes("has no sidecar row; the span is not fully mirrored") ||
+      error.message.includes("sidecar holds no row for "))
+  );
 }
 
 /** True for the seam's generic summary failure, which wraps whatever
