@@ -202,20 +202,21 @@ describe("recall tools", () => {
     }
   });
 
-  it("counts a rejected past query as skipped", () => {
+  it("treats a quoted query as a phrase miss and still counts unreadable stores", () => {
     const dir = mkdtempSync(join(tmpdir(), "deepseek-lossless-rejected-"));
     seedPast(dir, "ses_past", ["hello world"]);
     const sidecars = new SidecarStores({ dir });
     try {
       const past = { list: (exclude?: string) => sidecars.list(exclude) };
+      // Embedded quotes phrase-escape instead of failing: a miss, scanned.
       const result = searchPastSessions(
         { past, redact: identity, now: () => 0 },
         "ses_current",
         `foo"bar`,
       );
-      expect(result.skipped).toBe(1);
-      expect(result.scanned).toBe(0);
-      expect(result.text).toContain("Invalid search query");
+      expect(result.scanned).toBe(1);
+      expect(result.skipped).toBe(0);
+      expect(result.text).toContain("No matches");
       const rows: Record<string, unknown>[] = [];
       const text = answerGrep(
         {
@@ -227,9 +228,21 @@ describe("recall tools", () => {
         "ses_current",
         { query: `foo"bar`, scope: "sessions" },
       );
-      expect(text).toContain("Invalid search query");
+      expect(text).toContain("No matches");
       expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ tool: "lcm_grep", sessionsSkipped: 1 });
+      expect(rows[0]).toMatchObject({ tool: "lcm_grep", outcome: "miss", sessionsScanned: 1 });
+      // A sidecar that cannot be opened still counts skipped, not scanned.
+      const ghost = searchPastSessions(
+        {
+          past: { list: () => [{ id: "ghost", path: join(dir, "no-such-dir", "ghost.sqlite") }] },
+          redact: identity,
+          now: () => 0,
+        },
+        "ses_current",
+        "hello",
+      );
+      expect(ghost.skipped).toBe(1);
+      expect(ghost.scanned).toBe(0);
     } finally {
       sidecars.close();
     }
@@ -302,17 +315,17 @@ describe("recall tools", () => {
       expect(bothRows).toHaveLength(1);
       expect(bothRows[0]).toMatchObject({ tool: "lcm_grep", outcome: "error", hits: 0 });
 
-      const invalidRows: Record<string, unknown>[] = [];
+      const phraseRows: Record<string, unknown>[] = [];
       expect(
         grepAnswer(
           store,
           identity,
           { query: `foo"bar` },
-          { record: (row) => invalidRows.push(row) },
+          { record: (row) => phraseRows.push(row) },
         ),
-      ).toContain("Invalid search query");
-      expect(invalidRows).toHaveLength(1);
-      expect(invalidRows[0]).toMatchObject({ tool: "lcm_grep", outcome: "error", hits: 0 });
+      ).toContain("No matches");
+      expect(phraseRows).toHaveLength(1);
+      expect(phraseRows[0]).toMatchObject({ tool: "lcm_grep", outcome: "miss", hits: 0 });
     } finally {
       store.close();
     }
