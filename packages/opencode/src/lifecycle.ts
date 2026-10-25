@@ -242,7 +242,14 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
           }
         }
         const stats = store.stats();
-        const integrity = checkIntegrity(store);
+        const livePaths = deps.sidecars.ids().map((id) => deps.sidecars.pathFor(id));
+        const currentPath = deps.sidecars.pathFor(input.sessionID);
+        if (!livePaths.includes(currentPath)) livePaths.push(currentPath);
+        const integrity = checkIntegrity(store, {
+          sidecarDir: deps.sidecars.dir,
+          liveSidecarPaths: livePaths,
+          sidecarExtension: deps.sidecars.extension,
+        });
         // The bundle is a diagnostic, not a probe: a host model lookup that
         // fails says less, it does not fail the command.
         let model: ModelRef | undefined;

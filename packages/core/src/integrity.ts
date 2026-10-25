@@ -1,4 +1,9 @@
-import { SCHEMA_VERSION, type IntegritySnapshot, type LcmStore } from "./store.ts";
+import {
+  SCHEMA_VERSION,
+  type IntegritySnapshot,
+  type IntegritySnapshotOptions,
+  type LcmStore,
+} from "./store.ts";
 
 const SAMPLE = 10;
 
@@ -11,6 +16,7 @@ export type FindingKind =
   | "foreign-key"
   | "schema-version"
   | "dead-run"
+  | "orphan-sidecar"
   | "coverage";
 
 export interface Finding {
@@ -159,6 +165,19 @@ const CHECKS: { readonly [K in FindingKind]: Check<K> } = {
             .map((d) => `${d.first}..${d.last} (${d.kind}) x${d.count}`),
         },
 
+  // A sidecar file outlives its session, so a file with no live session is
+  // work to clear rather than a broken invariant. Deletion stays manual.
+  "orphan-sidecar": (snap) =>
+    snap.orphanSidecars.length === 0
+      ? undefined
+      : {
+          kind: "orphan-sidecar",
+          severity: "info",
+          count: snap.orphanSidecars.length,
+          detail: `${snap.orphanSidecars.length} sidecar(s) with no live session (manual drop removes them)`,
+          sample: snap.orphanSidecars.slice(0, SAMPLE),
+        },
+
   "foreign-key": (snap) =>
     snap.foreignKeyViolations === 0
       ? undefined
@@ -195,8 +214,8 @@ const CHECKS: { readonly [K in FindingKind]: Check<K> } = {
         },
 };
 
-export function checkIntegrity(store: LcmStore): IntegrityReport {
-  const snap = store.integritySnapshot();
+export function checkIntegrity(store: LcmStore, opts?: IntegritySnapshotOptions): IntegrityReport {
+  const snap = store.integritySnapshot(opts);
   const findings: Finding[] = [];
   for (const check of Object.values(CHECKS)) {
     const finding = check(snap);

@@ -439,7 +439,7 @@ test("command: doctor with no summaries prints no depth rows", async () => {
     assert.ok(doctor);
     assert.match(
       doctor,
-      /^messages: 0, summaries: 0, size: \d+ KB\nintegrity: 9 checks, no findings\npinned projection: none$/m,
+      /^messages: 0, summaries: 0, size: \d+ KB\nintegrity: 10 checks, no findings\npinned projection: none$/m,
     );
     liveStore.close();
   } finally {
@@ -578,7 +578,7 @@ test("command: doctor reports integrity, and --repair fixes what it can", async 
     });
     await handler("doctor");
     const before = notifications.find((n) => n.startsWith("LCM doctor"))!;
-    assert.ok(before.includes("integrity: 9 checks, 2 finding(s)"), before);
+    assert.ok(before.includes("integrity: 10 checks, 2 finding(s)"), before);
     assert.ok(before.includes("summary-span: 1 x these summaries name an entry"), before);
     assert.ok(before.includes("    #1"), before);
     assert.ok(before.includes("summary-shape: 1 x 1 with a depth or provenance"), before);
@@ -592,7 +592,7 @@ test("command: doctor reports integrity, and --repair fixes what it can", async 
       after,
     );
     assert.ok(after.includes("repair: dropped 1 summar(y|ies) with an unresolvable span"), after);
-    assert.ok(after.includes("integrity: 9 checks, no findings"), after);
+    assert.ok(after.includes("integrity: 10 checks, no findings"), after);
     assert.equal(levels.at(-1), "info");
     liveStore.close();
   } finally {

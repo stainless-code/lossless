@@ -1,5 +1,14 @@
-import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync } from "node:fs";
-import { dirname } from "node:path";
+import {
+  chmodSync,
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
 
 import { estimateTokens } from "./estimate-tokens.ts";
@@ -104,6 +113,61 @@ export interface IntegritySnapshot {
   foreignKeyViolations: number;
   schemaVersion: number;
   uncoveredMessages: number;
+  /** Sidecar database files plus stale WAL and SHM files with no live session.
+   * Full paths, sorted, so doctor can name what a manual drop would remove. */
+  orphanSidecars: string[];
+}
+
+/** What `integritySnapshot` scans for orphan sidecars. Defaults cover the
+ * common call: the store's own directory, the `.sqlite` suffix, and the store
+ * itself as the only live session. */
+export interface IntegritySnapshotOptions {
+  liveSidecarPaths?: readonly string[];
+  sidecarDir?: string;
+  sidecarExtension?: string;
+}
+
+/** Sidecar files in `dir` with no live session: every `extension` file whose
+ * path is not live, plus every `extension-wal` and `extension-shm` file whose
+ * base database is not live. Missing dirs and non-files read as empty. */
+function findOrphanSidecars(
+  dir: string | undefined,
+  livePaths: readonly string[],
+  extension: string,
+): string[] {
+  if (dir === undefined) return [];
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const live = new Set(livePaths.map((p) => resolve(p)));
+  const out: string[] = [];
+  for (const name of names) {
+    const full = join(dir, name);
+    if (name.endsWith(extension)) {
+      if (live.has(resolve(full))) continue;
+      try {
+        if (!statSync(full).isFile()) continue;
+      } catch {
+        continue;
+      }
+      out.push(full);
+      continue;
+    }
+    if (name.endsWith(`${extension}-wal`) || name.endsWith(`${extension}-shm`)) {
+      const base = full.slice(0, -4);
+      if (live.has(resolve(base))) continue;
+      try {
+        if (!statSync(full).isFile()) continue;
+      } catch {
+        continue;
+      }
+      out.push(full);
+    }
+  }
+  return out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** A fresh row, or the row that already owns the span; `existingTokens` comes
@@ -1369,7 +1433,7 @@ export class LcmStore {
     return out;
   }
 
-  integritySnapshot(): IntegritySnapshot {
+  integritySnapshot(opts?: IntegritySnapshotOptions): IntegritySnapshot {
     let ftsOk = true;
     // Structural damage is the one signal an external-content FTS5 table
     // reports: counts and rowid scans read the content table instead.
@@ -1428,6 +1492,11 @@ export class LcmStore {
       foreignKeyViolations: this.db.prepare("PRAGMA foreign_key_check").all().length,
       schemaVersion: readVersion(this.db),
       uncoveredMessages: num((this.stmts.uncoveredMessages.get(null) as { c: number }).c),
+      orphanSidecars: findOrphanSidecars(
+        opts?.sidecarDir ?? (this.dbPath === ":memory:" ? undefined : dirname(this.dbPath)),
+        opts?.liveSidecarPaths ?? (this.dbPath === ":memory:" ? [] : [this.dbPath]),
+        opts?.sidecarExtension ?? ".sqlite",
+      ),
     };
   }
 
