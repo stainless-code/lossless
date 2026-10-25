@@ -128,6 +128,90 @@ describe("applyLossless", () => {
     }
   });
 
+  it("dispose skips a store with a live run and still closes idle stores", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+    const originalClose = Reflect.get(LcmStore.prototype, "close") as (this: LcmStore) => void;
+    const originalHasLiveRun = Reflect.get(LcmStore.prototype, "hasLiveRun") as (
+      this: LcmStore,
+    ) => boolean;
+    const liveByStore = new Map<LcmStore, boolean>();
+    const closedStores = new Set<LcmStore>();
+    LcmStore.prototype.hasLiveRun = function (this: LcmStore): boolean {
+      const live = Reflect.apply(originalHasLiveRun, this, []) as boolean;
+      liveByStore.set(this, live);
+      return live;
+    };
+    LcmStore.prototype.close = function (this: LcmStore): void {
+      closedStores.add(this);
+      Reflect.apply(originalClose, this, []);
+    };
+    let holder: LcmStore | undefined;
+    let token = "";
+    try {
+      const live = ctx.sessions.create(SessionId("live-run"), { meta: { cwd: dir } });
+      appendConversation(live, ROUTE, "live run ".repeat(20));
+      live.append("turn/start", { turn: 3 });
+      const idle = ctx.sessions.create(SessionId("idle-run"), { meta: { cwd: dir } });
+      appendConversation(idle, ROUTE, "idle notes ".repeat(20));
+      idle.append("turn/start", { turn: 3 });
+      holder = new LcmStore(join(dir, "live-run.sqlite"));
+      token = holder.openRun({ session: "live-run" }).token;
+      dispose();
+      expect(liveByStore.size).toBe(2);
+      expect([...liveByStore.values()].filter(Boolean).length).toBe(1);
+      expect(closedStores.size).toBe(1);
+      for (const [store, isLive] of liveByStore) {
+        expect(closedStores.has(store)).toBe(!isLive);
+      }
+    } finally {
+      LcmStore.prototype.hasLiveRun = originalHasLiveRun;
+      LcmStore.prototype.close = originalClose;
+      if (holder !== undefined) {
+        if (token !== "") holder.abandonRun(token);
+        holder.close();
+      }
+      dispose();
+    }
+  });
+
+  it("dispose stays safe to run twice and reopens after a live run drains", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+    const holderPath = join(dir, "drain-run.sqlite");
+    let holder: LcmStore | undefined;
+    let token = "";
+    try {
+      const session = ctx.sessions.create(SessionId("drain-run"), { meta: { cwd: dir } });
+      appendConversation(session, ROUTE, "drain me ".repeat(20));
+      session.append("turn/start", { turn: 3 });
+      const mirrored = session.deriveMessages().length;
+      expect(mirrored).toBeGreaterThan(0);
+      holder = new LcmStore(holderPath);
+      token = holder.openRun({ session: "drain-run" }).token;
+      dispose();
+      holder.abandonRun(token);
+      token = "";
+      expect(() => dispose()).not.toThrow();
+      const reopened = new LcmStore(holderPath);
+      try {
+        expect(reopened.allMessages().length).toBe(session.deriveMessages().length);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      if (holder !== undefined) {
+        if (token !== "") holder.abandonRun(token);
+        holder.close();
+      }
+      dispose();
+    }
+  });
+
   it("forces a manual compaction through /lcm compact", async () => {
     const { ctx } = setupContext(
       ROUTE,

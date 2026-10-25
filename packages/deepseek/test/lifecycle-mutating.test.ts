@@ -22,7 +22,9 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import { lcmCommandDefinition, type LcmCommandDeps } from "../src/command.ts";
+import { healInFlightSessions } from "../src/lifecycle.ts";
 import type { DshRoute } from "../src/model-host.ts";
+import { applyLossless } from "../src/plugin.ts";
 import { fakeAgent } from "./support/agent-fake.ts";
 import { appendConversation } from "./support/conversation.ts";
 import { setupContext, textChunks } from "./support/script-adapter.ts";
@@ -377,6 +379,56 @@ describe("lcm mutating verbs", () => {
     expect(applied.text).toContain("repaired 1 clean");
     expect(adapter.requests.length).toBeGreaterThan(0);
     expect(adapter.requests[0]?.model).toBe(ROUTE.model);
+  });
+
+  it("dispose leaves the healing session's store open", async () => {
+    const scripts = [[...textChunks("a repaired leaf summary")]];
+    const { ctx } = setupContext(ROUTE, scripts);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+    const originalClose = Reflect.get(LcmStore.prototype, "close") as (this: LcmStore) => void;
+    let closes = 0;
+    LcmStore.prototype.close = function (this: LcmStore): void {
+      closes += 1;
+      Reflect.apply(originalClose, this, []);
+    };
+    const stores = new Map<string, LcmStore>();
+    try {
+      ctx.sessions.create(SessionId("heal-live"), { meta: { cwd: dir } });
+      const session = ctx.sessions.get(SessionId("heal-live"))!;
+      appendConversation(session, ROUTE, "heal live history ".repeat(20));
+      const deps = depsFor(dir, stores);
+      const store = deps.storeFor!("heal-live");
+      const rows = store.allMessages();
+      expect(rows.length).toBeGreaterThan(0);
+      store.insertSummary({
+        kind: "leaf",
+        text: `${TRUNCATED_SUMMARY_PREFIX}\nmechanical`,
+        tokens: 5,
+        depth: 0,
+        firstEntryId: rows[0]!.entryId,
+        lastEntryId: rows[rows.length - 1]!.entryId,
+        messageIds: rows.map((row) => row.id),
+        quality: "mechanical",
+      });
+      const pending = invoke(ctx, deps, "heal-live", "heal --apply");
+      expect(healInFlightSessions()).toContain("heal-live");
+      dispose();
+      expect(closes).toBe(0);
+      const applied = await pending;
+      expect(applied.kind).toBe("success");
+      expect(healInFlightSessions()).toHaveLength(0);
+      dispose();
+      expect(closes).toBeGreaterThan(0);
+    } finally {
+      LcmStore.prototype.close = originalClose;
+      for (const store of stores.values()) {
+        try {
+          store.close();
+        } catch {}
+      }
+    }
   });
 
   it("heal dry-run lists a truncated node and apply repairs it on a scripted model", async () => {

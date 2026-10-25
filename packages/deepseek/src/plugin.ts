@@ -5,6 +5,7 @@ import { SidecarStores, redactSecrets, type LcmStore } from "lossless-core";
 import { registerLcmCommand } from "./command.ts";
 import { LosslessSummarizerEngine, checkpointMemory } from "./engine.ts";
 import { MessageIndex, backfillSession, historySourceFrom, mirrorEvent } from "./ingest.ts";
+import { healInFlightSessions } from "./lifecycle.ts";
 import { createRecord } from "./metrics.ts";
 import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 
@@ -237,11 +238,11 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
     stopTools();
     stopExpandQuery();
     stopCommand();
-    // Every held sidecar closes here so no handle survives dispose. Each
-    // close is guarded so one failure cannot block the rest, and nothing
-    // awaits in-flight compactions: dispose stays prompt.
-    for (const store of sidecars.storesMap().values()) {
+    // Dispose-then-use is an error: a live run keeps its store open so the commit can land, and a session under heal repair keeps its store for the same reason.
+    const healing = new Set(healInFlightSessions());
+    for (const [id, store] of sidecars.storesMap()) {
       try {
+        if (store.hasLiveRun() || healing.has(id)) continue;
         store.close();
       } catch {}
     }

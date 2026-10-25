@@ -782,7 +782,7 @@ export function gcDryRunDefaultDays(): number {
   return GC_DEFAULT_DAYS;
 }
 
-/** Session-less lookup for tests: the ids of sessions with a heal in flight. */
+/** Session-less lookup for tests, consulted by dispose: the ids of sessions with a heal in flight. */
 export function healInFlightSessions(): readonly string[] {
   return [...healInFlight];
 }
