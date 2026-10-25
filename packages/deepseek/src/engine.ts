@@ -5,6 +5,7 @@ import { ManualCompactionError } from "@deepseek-ai/dsh-compaction";
 import BasicCompactionEngine from "@deepseek-ai/dsh-compaction-basic";
 import type { BasicCompactionConfig } from "@deepseek-ai/dsh-compaction-basic";
 import type { ContentBlock, Message, TokenUsage, ToolSchema } from "@deepseek-ai/dsh-llm";
+import type { Session } from "@deepseek-ai/dsh-session";
 import type { CompactionSpanEntry, LcmStore } from "lossless-core";
 
 import { commitDagTransaction, selectDagRange } from "./dag-commit.ts";
@@ -174,7 +175,7 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
         "lossless compaction: no provider/model available for summarization: set both engine summarization fields, route one request, or set both agent options fields",
       );
     }
-    const span = this.spanOf(input, store, index);
+    const span = this.spanOf(input, store, index, agent.session);
     const ladder = await runLadder(this.ctx, this.lossless, target, sessionId, span, signal);
     const checkpoint = withSummaryRefs(ladder.summaryText, [
       ...ladder.leafSummaryIds,
@@ -184,12 +185,17 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
     return toSummaryResult(checkpoint, ladder, this.config.maxTokens);
   }
 
-  private spanOf(input: SpanInput, store: LcmStore, index: MessageIndex): CompactionSpanEntry[] {
+  private spanOf(
+    input: SpanInput,
+    store: LcmStore,
+    index: MessageIndex,
+    session: Session,
+  ): CompactionSpanEntry[] {
     // A leading system message is the retained head, not shadowed content.
     const startAt = input.messages[0]?.role === "system" ? 1 : 0;
     const items: Array<{ rowId: number; entry: CompactionSpanEntry }> = [];
     for (const message of input.messages.slice(startAt)) {
-      const entryId = index.entryId(message.id);
+      const entryId = index.entryId(message.id) ?? this.resolveEntryId(session, index, message.id);
       if (entryId === undefined) {
         throw new Error(
           `lossless compaction: message ${message.id} has no sidecar row; the span is not fully mirrored`,
@@ -208,6 +214,26 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
     // replace (the checkpoint row is newest), so order by rowid here.
     items.sort((a, b) => a.rowId - b.rowId);
     return items.map((item) => item.entry);
+  }
+
+  /** Re-derive message ids to sidecar entries from the live log. The map dies
+   * with the process; one scan repopulates every derived id it finds, so a
+   * cold map heals on first miss and later spans stay on the fast path. A
+   * message with no live event stays unmapped and the caller fails closed. */
+  private resolveEntryId(
+    session: Session,
+    index: MessageIndex,
+    messageId: string,
+  ): string | undefined {
+    let found: string | undefined;
+    for (const event of session.snapshotEvents()) {
+      const message = session.deriveEventMessage(event);
+      if (message === null) continue;
+      const entryId = `${session.id}:${event.seq}`;
+      index.record(message.id, entryId);
+      if (message.id === messageId) found = entryId;
+    }
+    return found;
   }
 }
 

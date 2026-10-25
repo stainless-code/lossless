@@ -104,6 +104,38 @@ describe("LosslessSummarizerEngine", () => {
     }
   });
 
+  it("resolves span messages without the live index after a restart", async () => {
+    // Live every headless round is a new process: the in-memory map is gone
+    // but the sidecar and the live log remain. The span must re-derive from
+    // the live session instead of failing closed.
+    const session = buildSession("resume notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const liveIndex = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, liveIndex);
+    const coldIndex = new MessageIndex();
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const agent = fakeAgent(session, ROUTE);
+    const engine = new LosslessSummarizerEngine(
+      ctx,
+      { auto: false },
+      { store: () => store, index: () => coldIndex, redact: identity },
+    );
+    const nodes = session.surface.nodes;
+    const result = await engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent);
+    expect(result.summary).toHaveLength(1);
+    expect(result.shadowedSeqs.length).toBeGreaterThan(0);
+    // The fallback repopulates the map for later spans in this process:
+    // at least one derived id resolves now, while an unknown id does not.
+    const mapped = session.deriveMessages().filter((message) => coldIndex.entryId(message.id));
+    expect(mapped.length).toBeGreaterThan(0);
+    expect(coldIndex.entryId("never-derived")).toBeUndefined();
+  });
+
   it("carries the previous checkpoint into the next ladder", async () => {
     const session = buildSession("carryover notes ".repeat(20));
     const store = new LcmStore(":memory:");
@@ -221,8 +253,10 @@ describe("LosslessSummarizerEngine", () => {
       { store: () => store, index: () => new MessageIndex(), redact: identity },
     );
     const nodes = session.surface.nodes;
+    // Nothing was ever mirrored, so live re-derivation resolves the ids but
+    // the store holds no rows: still fail closed, at the precise gate.
     await expect(engine.compactRegion(nodes[1]!, nodes[nodes.length - 1]!, agent)).rejects.toThrow(
-      "has no sidecar row",
+      "sidecar holds no row",
     );
   });
 
