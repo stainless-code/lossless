@@ -2,6 +2,8 @@
 
 **Lossless Context Management (LCM) for the DeepSeek harness. Long sessions keep working past the point where the model would forget, and every verbatim message stays searchable and readable.**
 
+Mount backfill mirrors at most 500 pre-mount events per session by default, while live events keep mirroring past the cap.
+
 Apply it, and the adapter mirrors every session into its own SQLite sidecar.
 The model reads that history back through `lcm_grep`, `lcm_describe`,
 `lcm_expand`, and `lcm_expand_query`. The summarizer engine mounts as the

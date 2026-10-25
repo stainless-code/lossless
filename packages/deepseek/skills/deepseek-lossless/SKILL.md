@@ -57,7 +57,7 @@ the tools, and the command.
 { "enabled": true, "sidecarDir": "./.lossless", "auto": false }
 ```
 
-- `sidecarDir` holds one SQLite file per session; delete one to forget that session.
+- `sidecarDir` holds one SQLite file per session; deleting one removes LCM recall only. WAL and shared-memory companions, exports, backups, and the live session log keep their text. Stop the session first, then remove the sidecar plus its companions and any exports or backups.
 - `auto: false` (default) runs no automatic pressure compaction; `/lcm compact` works regardless. `bracketAuto: true` routes automatic compaction through the DAG bracket.
 - `summarizationProvider` / `summarizationModel` unset follow the routed model.
 - `thresholdRatio` (default `0.8`) sets the window fraction where pressure compacts; `retainRatio` (default `0.16`) keeps that fraction of recent context verbatim. `retainTokens` replaces the fraction with an absolute budget; the two are mutually exclusive.
@@ -69,4 +69,4 @@ the tools, and the command.
 - **Expecting automatic compaction by default.** `auto` defaults false; past the pressure point nothing compacts until `auto` is on or `/lcm compact` runs.
 - **Forgetting the `scope` equivalence.** `scope: "sessions"` and `"all_sessions"` read the same global sidecar directory; neither reaches outside it.
 - **Expecting the raw transcript from the reader.** `lcm_expand_query` returns answers from the stored originals, never the transcript; ask for verbatim quotes when the exact words matter.
-- **Looking for a delete command.** Forgetting is file deletion: remove that session's sidecar file; there is no delete tool.
+- **Looking for a delete command.** There is no delete tool. Removing that session sidecar file removes LCM recall only; WAL and shared-memory companions, exports, backups, and the live session log keep their text. Stop the session first, then remove the sidecar plus its companions and any exports or backups.
