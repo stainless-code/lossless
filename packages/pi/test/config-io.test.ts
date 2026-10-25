@@ -38,6 +38,23 @@ test("config-io: the values the cockpit writes all survive the parse", () => {
   assert.deepEqual(config, COCKPIT_CONFIG);
 });
 
+test("config-io: mechanicalTools survive the parse and stay opt-in", () => {
+  const { config, dropped, notes } = parseLcmConfig({ mechanicalTools: ["noisy-read", " grep "] });
+  assert.deepEqual(dropped, []);
+  assert.deepEqual(notes, []);
+  assert.deepEqual(config, { mechanicalTools: ["noisy-read", "grep"] });
+  assert.deepEqual(parseLcmConfig({}).config, {});
+  assert.deepEqual(parseLcmConfig({ mechanicalTools: "noisy-read" }).config, {
+    mechanicalTools: ["noisy-read"],
+  });
+  const bad = parseLcmConfig({ mechanicalTools: [42, ""] });
+  assert.deepEqual(bad.dropped, ["mechanicalTools[0] (wrong type)"]);
+  assert.deepEqual(bad.config, { mechanicalTools: [] });
+  assert.deepEqual(parseLcmConfig({ mechanicalTools: 42 }).dropped, [
+    "mechanicalTools (wrong type)",
+  ]);
+});
+
 test("config-io: the heal budget defaults to 120k", () => {
   assert.equal(DEFAULT_CONFIG.summarizerTokensPerHeal, 120_000);
 });

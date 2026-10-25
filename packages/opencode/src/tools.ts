@@ -52,6 +52,17 @@ export function registerRecallTools(editor: ToolEditor, deps: RecallDeps): void 
           description: "FTS5 query: quoted phrases, AND/OR, prefix*",
         },
         limit: { type: "integer", description: "Hits to return" },
+        role: {
+          type: "string",
+          enum: ["user", "assistant", "toolResult", "custom"],
+          description: "Keep only rows stored with this role",
+        },
+        date_start: { type: "number", description: "Keep only rows at or after this timestamp" },
+        date_end: { type: "number", description: "Keep only rows at or before this timestamp" },
+        tool_name: {
+          type: "string",
+          description: "Keep only tool-result rows for this tool. It matches [tool:Name] markers.",
+        },
         scope: {
           type: "string",
           enum: [...RECALL_SCOPES],
@@ -84,12 +95,16 @@ export function registerRecallTools(editor: ToolEditor, deps: RecallDeps): void 
     name: "lcm_expand",
     options: { codemode: false },
     description:
-      "Read the original messages a summary covers, or one named entry. Without entry_id, list `limit` messages from message index `offset`. With entry_id, read that one message from `char_offset` for up to `max_chars` characters; continue from the char_offset the result reports. `id` is the summary to list, or to check that the entry is covered; omit it to read an entry that no summary covers yet. Pass `session` with the id from an [lcm:session <id>] hit to read that past session's sidecar; the text is labelled as a past session's history and the read is read-only.",
+      "Read the original messages a summary covers, or one named entry. Without entry_id, list `limit` messages from message index `offset`, or centered on `anchor` when it names an entry id. With entry_id, read that one message from `char_offset` for up to `max_chars` characters; continue from the char_offset the result reports. `id` is the summary to list, or to check that the entry is covered; omit it to read an entry that no summary covers yet. Pass `session` with the id from an [lcm:session <id>] hit to read that past session's sidecar; the text is labelled as a past session's history and the read is read-only.",
     input: {
       type: "object",
       properties: {
         id: { type: "integer", description: "Summary id, the N in [lcm:summary #N ...]" },
         entry_id: { type: "string", description: "Read this one message by entry id" },
+        anchor: {
+          type: "string",
+          description: "Center the listing window on this entry id (with id, without entry_id)",
+        },
         session: {
           type: "string",
           description:
@@ -215,13 +230,14 @@ function toCoreDeps(deps: RecallDeps): CoreRecallDeps {
     record: deps.record,
     sessionOf: deps.sessionOf,
     isReader: deps.isReader,
-    searchPast: (session, query, scope, limit) => {
-      const result = searchPastSessions(
-        { past, redact: deps.redact },
-        session,
-        query,
-        typeof limit === "number" ? { limit } : {},
-      );
+    searchPast: (session, query, scope, limit, filters) => {
+      const result = searchPastSessions({ past, redact: deps.redact }, session, query, {
+        ...(typeof limit === "number" ? { limit } : {}),
+        ...(filters?.role === undefined ? {} : { role: filters.role }),
+        ...(filters?.dateStart === undefined ? {} : { dateStart: filters.dateStart }),
+        ...(filters?.dateEnd === undefined ? {} : { dateEnd: filters.dateEnd }),
+        ...(filters?.toolName === undefined ? {} : { toolName: filters.toolName }),
+      });
       return {
         text: result.text,
         hits: result.hits,

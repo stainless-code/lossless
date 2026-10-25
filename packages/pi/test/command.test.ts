@@ -439,7 +439,7 @@ test("command: doctor with no summaries prints no depth rows", async () => {
     assert.ok(doctor);
     assert.match(
       doctor,
-      /^messages: 0, summaries: 0, size: \d+ KB\nintegrity: 9 checks, no findings\npinned projection: none$/m,
+      /^messages: 0, summaries: 0, size: \d+ KB\nintegrity: 10 checks, no findings\npinned projection: none$/m,
     );
     liveStore.close();
   } finally {
@@ -578,7 +578,7 @@ test("command: doctor reports integrity, and --repair fixes what it can", async 
     });
     await handler("doctor");
     const before = notifications.find((n) => n.startsWith("LCM doctor"))!;
-    assert.ok(before.includes("integrity: 9 checks, 2 finding(s)"), before);
+    assert.ok(before.includes("integrity: 10 checks, 2 finding(s)"), before);
     assert.ok(before.includes("summary-span: 1 x these summaries name an entry"), before);
     assert.ok(before.includes("    #1"), before);
     assert.ok(before.includes("summary-shape: 1 x 1 with a depth or provenance"), before);
@@ -592,8 +592,60 @@ test("command: doctor reports integrity, and --repair fixes what it can", async 
       after,
     );
     assert.ok(after.includes("repair: dropped 1 summar(y|ies) with an unresolvable span"), after);
-    assert.ok(after.includes("integrity: 9 checks, no findings"), after);
+    assert.ok(after.includes("integrity: 10 checks, no findings"), after);
     assert.equal(levels.at(-1), "info");
+    liveStore.close();
+  } finally {
+    env.restore();
+  }
+});
+
+test("command: doctor reports an orphan Pi sidecar but never the live store", async () => {
+  const { env, liveStore, livePath, handler, notifications } = bootstrap();
+  try {
+    const liveName = `${hashPath(livePath)}.db`;
+    const orphanDb = join(env.lcmDir, "deadbeefdeadbeef.db");
+    const orphan = makeStoreWithMessage(orphanDb, "o1", "history from a gone session");
+    orphan.close();
+    await handler("doctor");
+    const doctor = notifications.find((n) => n.startsWith("LCM doctor"))!;
+    assert.ok(doctor.includes("orphan-sidecar (info)"), doctor);
+    assert.ok(doctor.includes("sidecar(s) not open in this process"), doctor);
+    const sample = doctor
+      .split("\n")
+      .find((line) => line.startsWith("    ") && line.includes(orphanDb));
+    assert.ok(sample, `the finding names the orphan path: ${doctor}`);
+    assert.ok(!sample.includes(liveName), `the live store never reports: ${sample}`);
+    liveStore.close();
+  } finally {
+    env.restore();
+  }
+});
+
+test("command: diagnose carries the orphan Pi sidecar finding", async () => {
+  const { env, liveStore, livePath, handler, notifications } = bootstrap({
+    usage: { tokens: 60_000, contextWindow: 200_000 },
+  });
+  try {
+    const orphanStem = "deadbeefdeadbeef";
+    const orphan = makeStoreWithMessage(
+      join(env.lcmDir, `${orphanStem}.db`),
+      "o1",
+      "history from a gone session",
+    );
+    orphan.close();
+    await handler("diagnose");
+    const bundle = notifications.find((n) => n.startsWith("LCM diagnose bundle"))!;
+    assert.ok(bundle, notifications.join(" | "));
+    assert.ok(bundle.includes("orphan-sidecar (info)"), bundle.slice(0, 2000));
+    const sample = bundle
+      .split("\n")
+      .find((line) => line.includes(`${orphanStem}.db`) && line.includes("~/.pi/agent/lcm"));
+    assert.ok(sample, `the finding names the orphan path: ${bundle.slice(0, 2000)}`);
+    assert.ok(
+      !sample.includes(`${hashPath(livePath)}.db`),
+      `the live store never reports: ${sample}`,
+    );
     liveStore.close();
   } finally {
     env.restore();

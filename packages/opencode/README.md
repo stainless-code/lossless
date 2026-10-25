@@ -27,7 +27,7 @@ The equivalent entry in `opencode.json`:
 ## Quick start
 
 Zero config required: passive mirroring starts immediately, and swaps begin
-once context crosses the swap point. Ten commands, all `lossless-*`:
+once context crosses the swap point. Eleven commands, all `lossless-*`:
 
 ```sh
 /lossless-status    # message and compaction summary counts per live sidecar
@@ -40,11 +40,14 @@ once context crosses the swap point. Ten commands, all `lossless-*`:
 /lossless-diagnose  # redacted, pasteable diagnostics block; --save writes it at mode 0600
 /lossless-migrate   # upgrade older-schema sidecars in place (dry-run by default)
 /lossless-gc        # list old sidecars, or export and delete them (never the current session)
+/lossless-dump      # read-only dump of this session's sidecar; --include-removed keeps removed rows, --save writes mode 0600
 ```
 
 The model gets four recall tools: `lcm_grep` (search this session, `scope`
-reaches past sessions), `lcm_describe` (inspect one summary without expanding
-it), `lcm_expand` (read the originals a summary covers), and
+reaches past sessions, `role`, `date_start`, `date_end`, and `tool_name`
+filter rows), `lcm_describe` (inspect one summary without expanding
+it), `lcm_expand` (read the originals a summary covers, `anchor` centers
+the listing on one entry), and
 `lcm_expand_query` (a bounded child session reads and answers, so the
 originals never enter the parent's context).
 

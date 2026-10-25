@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -52,12 +52,12 @@ function messagesOnly(): { dir: string; path: string; store: LcmStore } {
   return { dir, path, store };
 }
 
-test("integrity: a healthy store reports nine checks and no violation", () => {
+test("integrity: a healthy store reports ten checks and no violation", () => {
   const { store } = fixture();
   const report = checkIntegrity(store);
   assert.equal(
     report.checks,
-    9,
+    10,
     "one per FindingKind; the check table is exhaustive at compile time",
   );
   assert.deepEqual(report.findings, [], "a leaf covers every message");
@@ -288,4 +288,60 @@ test("integrity: repair leaves a reversed span alone, because the fix needs the 
   assert.deepEqual(kindsOf(after.findings), ["summary-shape"]);
   assert.equal(f.store.allSummaries().length, 2, "the row is retained and reported");
   f.store.close();
+});
+
+test("integrity: an orphan sidecar reports the finding with its path", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lcm-orphan-"));
+  const livePath = join(dir, "live.sqlite");
+  const live = new LcmStore(livePath);
+  const orphanPath = join(dir, "orphan.sqlite");
+  const orphan = new LcmStore(orphanPath);
+  orphan.close();
+  writeFileSync(`${orphanPath}-wal`, "stale write-ahead log");
+  writeFileSync(`${orphanPath}-shm`, "stale shared memory");
+  try {
+    const snap = live.integritySnapshot();
+    assert.deepEqual(snap.orphanSidecars, [orphanPath, `${orphanPath}-shm`, `${orphanPath}-wal`]);
+    const report = checkIntegrity(live);
+    const finding = report.findings.find((x) => x.kind === "orphan-sidecar");
+    assert.ok(finding, JSON.stringify(report.findings));
+    assert.equal(finding.severity, "info", "a file with no session is work, not a violation");
+    assert.equal(finding.count, 3);
+    assert.ok(
+      finding.detail.includes("not open in this process"),
+      `the finding names unopened files, not gone sessions: ${finding.detail}`,
+    );
+    assert.ok(
+      !finding.detail.includes("no live session"),
+      `the finding must not claim the session is gone: ${finding.detail}`,
+    );
+    assert.ok(finding.sample.includes(orphanPath), finding.sample.join(", "));
+    assert.ok(
+      !finding.sample.some((p) => p === livePath || p === `${livePath}-wal`),
+      "the live session never reports",
+    );
+  } finally {
+    live.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integrity: a live session sidecar never reports", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lcm-orphan-"));
+  const firstPath = join(dir, "first.sqlite");
+  const secondPath = join(dir, "second.sqlite");
+  const first = new LcmStore(firstPath);
+  const second = new LcmStore(secondPath);
+  try {
+    const report = checkIntegrity(first, { liveSidecarPaths: [firstPath, secondPath] });
+    assert.deepEqual(
+      report.findings.filter((x) => x.kind === "orphan-sidecar"),
+      [],
+      JSON.stringify(report.findings),
+    );
+  } finally {
+    first.close();
+    second.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

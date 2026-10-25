@@ -429,7 +429,23 @@ export default function (pi: ExtensionAPI) {
     const probe = computeRawIngestDelta(raw, ingestWatermark);
     const delta = collectMessageEntries(probe.reset ? raw : raw.slice(probe.startIndex));
     const ingestible = delta.map(toIngestible);
-    const opened = ingestible.some(isIngestible) ? openStore() : undefined;
+    const hasIngestible = ingestible.some(isIngestible);
+    if (ingestWatermark !== null && probe.reset && hasIngestible) {
+      appendMetric({
+        event: "lcm",
+        kind: "ingest-rescan",
+        session: sessionTag,
+        watermark: ingestWatermark.id,
+        entries: raw.length,
+      });
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `LCM: watermark ${ingestWatermark.id} not found, rescanned ${raw.length} entries`,
+          "warning",
+        );
+      }
+    }
+    const opened = hasIngestible ? openStore() : undefined;
     if (opened) {
       const stats = ingestEntries(opened, ingestible, {
         externalize: externalizePolicy(),
@@ -617,6 +633,9 @@ export default function (pi: ExtensionAPI) {
               redact,
               session: sessionTag,
               stage: "blocking",
+              ...(config.mechanicalTools === undefined
+                ? {}
+                : { mechanicalTools: config.mechanicalTools }),
             },
           );
           const closed = store.commitRun(token);
@@ -765,6 +784,9 @@ export default function (pi: ExtensionAPI) {
         redact,
         session: sessionTag,
         stage: "async",
+        ...(config.mechanicalTools === undefined
+          ? {}
+          : { mechanicalTools: config.mechanicalTools }),
       },
     )
       .then((outcome) => {

@@ -328,7 +328,7 @@ test("grep tool: natural-language queries never throw raw sqlite errors", async 
     ["AND", 'No matches for "AND" in session history.'],
     ["(", 'No matches for "(" in session history.'],
     ["a OR", 'No matches for "a OR" in session history.'],
-    ['unbalanced"', 'Invalid search query "unbalanced\\""; try simpler keywords.'],
+    ['unbalanced"', 'No matches for "unbalanced\\"" in session history.'],
   ];
   for (const [q, message] of expected) {
     const r = await tool.execute("t", { query: q });

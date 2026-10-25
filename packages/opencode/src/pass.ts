@@ -132,15 +132,24 @@ export async function runLosslessPass(
         ...(opts.targetTokens === undefined ? {} : { targetTokens: opts.targetTokens }),
       },
       llm,
-      // The pass stage is the engine's own vocabulary, so a direct pass labels
-      // its completer rows and its engine rows alike.
-      { redact: makeRedactConfigAdapter({}), session: sessionID, stage },
+      {
+        // The pass stage is the engine's own vocabulary, so a direct pass labels
+        // its completer rows and its engine rows alike.
+        redact: makeRedactConfigAdapter({}),
+        session: sessionID,
+        stage,
+        ...(opts.summarizer?.mechanicalTools === undefined
+          ? {}
+          : { mechanicalTools: opts.summarizer.mechanicalTools }),
+      },
     );
     if (outcome.kind === "stored") {
-      // A stored outcome with no model answer is the ladder's mechanical
-      // truncate. Committing it would report success for a summarizer that
-      // never worked, so a manual pass abandons it and says so.
-      if (tally.answers === 0) {
+      // A stored outcome with no model answer is usually the ladder's
+      // mechanical truncate. Committing it would report success for a
+      // summarizer that never worked, so a pass abandons it and says so.
+      // A span whose every node came from the configured mechanical path
+      // needs no model call, so it commits without an answer.
+      if (tally.answers === 0 && !isAllMechanical(outcome)) {
         throw new Error("lcm: the summarizer did not answer, so nothing was stored");
       }
       store.commitRun(token);
@@ -170,6 +179,20 @@ export async function runLosslessPass(
   } finally {
     store.abandonRun(token);
   }
+}
+
+/** Every stored node came from the configured mechanical path, so zero
+ * model answers is the expected shape, not a failed summarizer. Level-3
+ * fallback leaves carry mechanical quality but are not counted in the
+ * engine totals, so they still throw. */
+function isAllMechanical(outcome: CompactionOutcome): boolean {
+  if (outcome.kind !== "stored") return false;
+  const leaves = outcome.leafSummaryIds.length;
+  const condensed = outcome.condensedSummaryIds.length;
+  if (leaves + condensed === 0) return false;
+  return (
+    leaves === (outcome.mechanicalLeaves ?? 0) && condensed === (outcome.mechanicalCondensed ?? 0)
+  );
 }
 
 function messageOf(error: unknown): string {

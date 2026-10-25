@@ -282,6 +282,7 @@ test("adapter: turn_end falls back to a full rescan when the watermark id is gon
     msgEntry("e5", "user", "five"),
     msgEntry("e6", "assistant", "six"),
   ];
+  const mark = metricsMark();
   await fake.handlers.get("turn_end")!(
     {} as never,
     { hasUI: false, sessionManager: sessionManagerOf(branch) } as never,
@@ -289,6 +290,57 @@ test("adapter: turn_end falls back to a full rescan when the watermark id is gon
   const reader = new LcmStore(lcmDbPath(sessionFile));
   assert.equal(reader.stats().messages, 4, "e1 kept (idempotent), e5 + e6 added, e2 retained");
   assert.equal(reader.messagesInSpan("e5", "e6").length, 2);
+  reader.close();
+  const rescans = metricsSince(basename(lcmDbPath(sessionFile)), mark).filter(
+    (m) => m.kind === "ingest-rescan",
+  );
+  assert.equal(rescans.length, 1, "the fallback rescan writes one metric row");
+  assert.equal(rescans[0]!.watermark, "e2");
+  assert.equal(rescans[0]!.entries, 3);
+});
+
+test("adapter: watermark rescan warns the UI once and stays silent on empty turns", async () => {
+  const fake = makeFakePi();
+  mod(fake.pi as never);
+  const sessionFile = uniqueSessionFile();
+  const tag = basename(lcmDbPath(sessionFile));
+  const entries = [msgEntry("e1", "user", "one"), msgEntry("e2", "assistant", "two")];
+  await startSession(fake.handlers, entries, sessionFile);
+
+  const notified: Array<[string, string]> = [];
+  const uiCtx = (list: FakeEntry[]) =>
+    ({
+      hasUI: true,
+      ui: {
+        notify: (message: string, level: string) => void notified.push([message, level]),
+        setWidget: () => {},
+      },
+      sessionManager: sessionManagerOf(list),
+    }) as never;
+
+  const branch = [msgEntry("e1", "user", "one"), msgEntry("e5", "user", "five")];
+  const mark = metricsMark();
+  await fake.handlers.get("turn_end")!({} as never, uiCtx(branch));
+  assert.equal(notified.length, 1, "one warning for the rescan");
+  assert.match(notified[0]![0], /watermark e2 not found/);
+  assert.equal(notified[0]![1], "warning");
+  const rescans = metricsSince(tag, mark).filter((m) => m.kind === "ingest-rescan");
+  assert.equal(rescans.length, 1, "one metric row for the rescan");
+  assert.equal(rescans[0]!.watermark, "e2");
+  assert.equal(rescans[0]!.entries, 2);
+
+  notified.length = 0;
+  const quiet = [msgEntry("w1", "assistant", "   ")];
+  const mark2 = metricsMark();
+  await fake.handlers.get("turn_end")!({} as never, uiCtx(quiet));
+  assert.equal(notified.length, 0, "whitespace alone warns nothing");
+  assert.deepEqual(
+    metricsSince(tag, mark2).filter((m) => m.kind === "ingest-rescan"),
+    [],
+    "whitespace alone writes no rescan row",
+  );
+  const reader = new LcmStore(lcmDbPath(sessionFile));
+  assert.equal(reader.stats().messages, 3, "e1, e2, e5 stored; whitespace added nothing");
   reader.close();
 });
 
