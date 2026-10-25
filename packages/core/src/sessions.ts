@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Compile } from "typebox/compile";
 
-import { toolScopeMessageIds } from "./recall-view.ts";
+import { scopedGrepAll, toolScopeMessageIds } from "./recall-view.ts";
 import { hashSessionPath } from "./retention.ts";
 import { LcmStore, StaleStoreError, type GrepHit } from "./store.ts";
 
@@ -371,7 +371,11 @@ function searchStore(
   const scopedIds = toolScopeMessageIds(store, filters.toolName, {});
   const searchIn = (ids: ReadonlySet<number>, text: string) => {
     try {
-      return store.grep(text, { limit, ...grepFilters, withinMessageIds: ids });
+      return scopedGrepAll(store, text, {
+        includeRemoved: false,
+        ...grepFilters,
+        scoped: ids,
+      }).slice(0, limit);
     } catch {
       return undefined;
     }

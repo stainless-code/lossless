@@ -291,6 +291,40 @@ export function grepView(
   };
 }
 
+/** A scoped FTS search that stays complete. `store.grep` applies its SQL
+ * LIMIT before it intersects the id set, so one bounded call can miss rows
+ * that rank past the window. The unscoped count bounds the rank order, so one
+ * fetch of that size holds every in-scope match and the caller pages the
+ * filtered set. Rank order is preserved. Throws on invalid FTS5 syntax, like
+ * `store.grep`, so callers keep their quoted-phrase fallback. */
+export function scopedGrepAll(
+  store: LcmStore,
+  pattern: string,
+  opts: {
+    includeRemoved: boolean;
+    role?: GrepFilter["role"];
+    dateStart?: number;
+    dateEnd?: number;
+    scoped: ReadonlySet<number>;
+  },
+): ReturnType<LcmStore["grep"]> {
+  if (opts.scoped.size === 0) return [];
+  const unscoped = {
+    includeRemoved: opts.includeRemoved,
+    ...(opts.role === undefined ? {} : { role: opts.role }),
+    ...(opts.dateStart === undefined ? {} : { dateStart: opts.dateStart }),
+    ...(opts.dateEnd === undefined ? {} : { dateEnd: opts.dateEnd }),
+  };
+  const totalRaw = store.grepCount(pattern, unscoped);
+  if (totalRaw === 0) return [];
+  return store.grep(pattern, {
+    limit: totalRaw ?? opts.scoped.size,
+    offset: 0,
+    ...unscoped,
+    withinMessageIds: opts.scoped,
+  });
+}
+
 /** A tool-scoped query search: the FTS query runs inside the rows the tool
  * owns (its call rows plus the toolResult rows after them), so a word found
  * only in a Pi result still matches. Paging and totals come from that row
@@ -322,42 +356,47 @@ function toolScopedView(
     withinMessageIds: params.withinMessageIds,
   });
   let pattern = query;
-  const searchIn = (scoped: ReadonlySet<number>, text: string, removed: boolean, off: number) => {
-    try {
-      return store.grep(text, {
-        limit,
-        offset: off,
-        includeRemoved: removed,
-        ...roleOpts,
-        withinMessageIds: scoped,
-      });
-    } catch {
-      return undefined;
-    }
-  };
-  let hits = searchIn(visibleIds, pattern, includeRemoved, offset);
-  if (hits === undefined) {
-    pattern = JSON.stringify(query);
-    hits = searchIn(visibleIds, pattern, includeRemoved, offset);
+  const runAll = (text: string, ids: ReadonlySet<number>, removed: boolean) =>
+    scopedGrepAll(store, text, { includeRemoved: removed, ...roleOpts, scoped: ids });
+  let all: ReturnType<LcmStore["grep"]> | undefined;
+  try {
+    all = runAll(pattern, visibleIds, includeRemoved);
+  } catch {
+    all = undefined;
   }
-  if (hits === undefined) {
+  if (all === undefined) {
+    pattern = JSON.stringify(query);
+    try {
+      all = runAll(pattern, visibleIds, includeRemoved);
+    } catch {
+      all = undefined;
+    }
+  }
+  if (all === undefined) {
     return {
       ok: false,
       text: `Invalid search query ${JSON.stringify(query)}; try simpler keywords.`,
     };
   }
+  const total = all.length;
+  const hits = all.slice(offset, offset + limit);
   if (hits.length === 0) {
     if (!includeRemoved) {
       const allIds = toolScopeMessageIds(store, toolName, {
         includeRemoved: true,
         withinMessageIds: params.withinMessageIds,
       });
-      const hidden = searchIn(allIds, pattern, true, offset) ?? [];
-      if (hidden.length > 0) {
+      let hidden: ReturnType<LcmStore["grep"]> = [];
+      try {
+        hidden = runAll(pattern, allIds, true);
+      } catch {
+        hidden = [];
+      }
+      if (hidden.slice(offset, offset + limit).length > 0) {
         return {
           ok: true,
           text: `Match(es) for ${JSON.stringify(query)} exist on a branch that left the active path; pass include_removed to read them.`,
-          details: { hits: 0, removed: hidden.length },
+          details: { hits: 0, removed: hidden.slice(offset, offset + limit).length },
         };
       }
     }
@@ -368,13 +407,8 @@ function toolScopedView(
     };
   }
   let budget = RESULT_BUDGET_CHARS;
-  const total = store.grepCount(pattern, {
-    includeRemoved,
-    ...roleOpts,
-    withinMessageIds: visibleIds,
-  });
   const lines: string[] = [
-    total === undefined || total <= limit
+    total <= limit
       ? `Found ${hits.length} match(es):`
       : `Match(es) ${offset + 1}..${offset + hits.length} of ${total}:`,
   ];
@@ -396,13 +430,13 @@ function toolScopedView(
     lines.push(line);
   }
   const seen = offset + hits.length;
-  if (total !== undefined && seen < total) {
+  if (seen < total) {
     lines.push(`… ${total - seen} more; pass offset ${seen} for the next page.`);
   }
   return {
     ok: true,
     text: lines.join("\n"),
-    details: { hits: hits.length, offset, ...(total === undefined ? {} : { total }) },
+    details: { hits: hits.length, offset, total },
   };
 }
 

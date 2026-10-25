@@ -585,6 +585,48 @@ test("grepView: a tool scope finds a Pi result row after its call row", () => {
   }
 });
 
+test("grepView: a tool scope keeps fetching until the filtered page is complete", () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      ...Array.from({ length: 22 }, (_, i) => ({
+        entryId: `u${String(i).padStart(2, "0")}`,
+        role: "user" as const,
+        text: Array(10).fill("targetword").join(" "),
+        timestamp: i + 1,
+      })),
+      {
+        entryId: "c00",
+        role: "assistant" as const,
+        text: '[tool:read] {"path": "/a"}',
+        timestamp: 100,
+      },
+      {
+        entryId: "r00",
+        role: "toolResult" as const,
+        text: `targetword ${"filler prose ".repeat(20)}`,
+        timestamp: 101,
+      },
+      {
+        entryId: "r01",
+        role: "toolResult" as const,
+        text: `targetword ${"filler prose ".repeat(20)}`,
+        timestamp: 102,
+      },
+    ]);
+    const view = grepView(store, redactSecrets, {
+      query: "targetword",
+      toolName: "read",
+      limit: 20,
+    });
+    assert.equal(view.ok, true);
+    assert.deepEqual(view.details, { hits: 2, offset: 0, total: 2 });
+    assert.ok(view.text.includes("[r00]") && view.text.includes("[r01]"), view.text);
+  } finally {
+    store.close();
+  }
+});
+
 test("searchSessions: a tool scope finds a Pi result row after its call row", () => {
   const dir = mkdtempSync(join(tmpdir(), "lcm-session-pi-"));
   const storePath = join(dir, "store.db");
