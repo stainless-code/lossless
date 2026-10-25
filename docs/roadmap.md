@@ -4,8 +4,9 @@ Forward-looking work only. What the current release does is in the
 [README](../README.md) and on the
 [docs site](https://stainless-code.com/lossless/); behavior lives in the code,
 and the peer comparisons with their verified cells are in
-[`pi/comparison.mdx`](../apps/docs/content/reference/pi/comparison.mdx) for Pi and
-[`opencode/comparison.mdx`](../apps/docs/content/reference/opencode/comparison.mdx) for OpenCode v2. Each item below names the evidence
+[`pi/comparison.mdx`](../apps/docs/content/reference/pi/comparison.mdx) for Pi,
+[`opencode/comparison.mdx`](../apps/docs/content/reference/opencode/comparison.mdx) for OpenCode v2, and
+[`deepseek/comparison.mdx`](../apps/docs/content/reference/deepseek/comparison.mdx) for DeepSeek. Each item below names the evidence
 that would close it and what it costs. Nothing here is built before it has a
 measurement or a defect behind it.
 

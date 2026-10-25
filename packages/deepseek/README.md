@@ -95,6 +95,27 @@ The model gets four recall tools:
 
 Full command, config, and file reference: [DeepSeek reference](https://stainless-code.com/lossless/reference/deepseek/tools).
 
+## Verify
+
+From a checkout of this repo:
+
+```sh
+bun -e "await import('./packages/deepseek/dist/index.mjs')" # plugin loads from its build
+vp test packages/deepseek/test/plugin.test.ts packages/deepseek/test/tools.test.ts # mount, /lcm status, recall tools; fakes only, no model calls
+```
+
+In a live session with the plugin mounted, `/lcm status` is the read-only
+check and `lcm_grep` searches the mirrored history.
+
+## Documentation
+
+|                                                                                 |                                                           |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| [The docs site](https://stainless-code.com/lossless/)                           | How LCM behaves in a session, the config keys, the limits |
+| [Command](https://stainless-code.com/lossless/reference/deepseek/command)       | What each `/lcm` verb does                                |
+| [Comparison](https://stainless-code.com/lossless/reference/deepseek/comparison) | The competing engines on one set of axes, verified cells  |
+| [CHANGELOG.md](./CHANGELOG.md)                                                  | Version history (changesets)                              |
+
 ## Credits
 
 - **Lossless Context Management (LCM)**, the algorithmic specification this
