@@ -36,3 +36,15 @@ test("publish surface: the tarball carries the build, the changelog, and the ski
     readFileSync(join(REPO_ROOT, "LICENSE")),
   );
 });
+
+test("publish surface: peer ranges admit the pinned prerelease hosts", () => {
+  // npm rejects prereleases under "*", so the dsh peers name the rc floor instead.
+  const peers = (manifest as { peerDependencies?: Record<string, string> }).peerDependencies ?? {};
+  for (const [name, range] of Object.entries(peers)) {
+    if (name === "@deepseek-ai/cordis") {
+      assert.equal(range, "*");
+    } else {
+      assert.equal(range, "^0.2.1-rc.3");
+    }
+  }
+});
