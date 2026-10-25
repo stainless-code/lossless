@@ -4,6 +4,7 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
+  renameSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -635,9 +636,19 @@ export function registerLcmCommand(
         }
         if (savePath !== undefined) {
           try {
-            writeFileSync(savePath, `${result.text}\n`, "utf8");
-            chmodSync(savePath, 0o600);
+            // A private temp beside the destination, then an atomic rename:
+            // the bytes never sit at a readable path, and an existing file
+            // keeps its old bytes and mode until the swap.
+            const tmpPath = `${savePath}.tmp`;
+            writeFileSync(tmpPath, `${result.text}\n`, { encoding: "utf8", mode: 0o600 });
+            try {
+              chmodSync(tmpPath, 0o600);
+            } catch {}
+            renameSync(tmpPath, savePath);
           } catch (error) {
+            try {
+              unlinkSync(`${savePath}.tmp`);
+            } catch {}
             ctx.ui.notify(
               `LCM dump: cannot write ${savePath} (${error instanceof Error ? error.message : String(error)}).`,
               "warning",
@@ -662,7 +673,13 @@ export function registerLcmCommand(
         const pin = deps.getCommitState();
         const flags = (args ?? "").trim().split(/\s+/).slice(1);
         const repairs = flags.includes("--repair") ? repairIntegrity(store) : [];
-        const integrity = checkIntegrity(store);
+        // Pi sidecars are `.db` files under the lcm dir, which the default
+        // `.sqlite` scan would miss; the live store itself is never an orphan.
+        const integrity = checkIntegrity(store, {
+          sidecarDir: lcmHomePath("lcm"),
+          sidecarExtension: ".db",
+          liveSidecarPaths: [db],
+        });
         const violations = integrity.findings.filter((f) => f.severity === "violation");
         const chain = describeSummarizerChain(resolveModels(piModelHost(ctx), config));
         const lines = [
@@ -735,7 +752,12 @@ export function registerLcmCommand(
         const window = usage?.contextWindow ?? 0;
         const mk = piModelKey(ctx);
         const z = config.zones?.[mk];
-        const integrity = checkIntegrity(store);
+        // Same `.db` sidecar scope as doctor, so diagnose reports what doctor sees.
+        const integrity = checkIntegrity(store, {
+          sidecarDir: lcmHomePath("lcm"),
+          sidecarExtension: ".db",
+          liveSidecarPaths: [db],
+        });
         const chain = describeSummarizerChain(resolveModels(piModelHost(ctx), config));
         const effective = { ...DEFAULT_CONFIG, ...config };
         const tag = basename(db);

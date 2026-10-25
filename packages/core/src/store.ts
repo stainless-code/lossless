@@ -118,12 +118,14 @@ export interface IntegritySnapshot {
 }
 
 export interface IntegritySnapshotOptions {
+  /** Paths with an open store in this process; every other sidecar file in
+   * `sidecarDir` reports as unopened, even when its session still exists. */
   liveSidecarPaths?: readonly string[];
   sidecarDir?: string;
   sidecarExtension?: string;
 }
 
-/** Files in `dir` with no live session; missing dirs and non-files read as empty. */
+/** Files in `dir` with no open store in this process; missing dirs and non-files read as empty. */
 function findOrphanSidecars(
   dir: string | undefined,
   livePaths: readonly string[],

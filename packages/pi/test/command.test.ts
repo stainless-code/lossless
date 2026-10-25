@@ -600,6 +600,58 @@ test("command: doctor reports integrity, and --repair fixes what it can", async 
   }
 });
 
+test("command: doctor reports an orphan Pi sidecar but never the live store", async () => {
+  const { env, liveStore, livePath, handler, notifications } = bootstrap();
+  try {
+    const liveName = `${hashPath(livePath)}.db`;
+    const orphanDb = join(env.lcmDir, "deadbeefdeadbeef.db");
+    const orphan = makeStoreWithMessage(orphanDb, "o1", "history from a gone session");
+    orphan.close();
+    await handler("doctor");
+    const doctor = notifications.find((n) => n.startsWith("LCM doctor"))!;
+    assert.ok(doctor.includes("orphan-sidecar (info)"), doctor);
+    assert.ok(doctor.includes("sidecar(s) not open in this process"), doctor);
+    const sample = doctor
+      .split("\n")
+      .find((line) => line.startsWith("    ") && line.includes(orphanDb));
+    assert.ok(sample, `the finding names the orphan path: ${doctor}`);
+    assert.ok(!sample.includes(liveName), `the live store never reports: ${sample}`);
+    liveStore.close();
+  } finally {
+    env.restore();
+  }
+});
+
+test("command: diagnose carries the orphan Pi sidecar finding", async () => {
+  const { env, liveStore, livePath, handler, notifications } = bootstrap({
+    usage: { tokens: 60_000, contextWindow: 200_000 },
+  });
+  try {
+    const orphanStem = "deadbeefdeadbeef";
+    const orphan = makeStoreWithMessage(
+      join(env.lcmDir, `${orphanStem}.db`),
+      "o1",
+      "history from a gone session",
+    );
+    orphan.close();
+    await handler("diagnose");
+    const bundle = notifications.find((n) => n.startsWith("LCM diagnose bundle"))!;
+    assert.ok(bundle, notifications.join(" | "));
+    assert.ok(bundle.includes("orphan-sidecar (info)"), bundle.slice(0, 2000));
+    const sample = bundle
+      .split("\n")
+      .find((line) => line.includes(`${orphanStem}.db`) && line.includes("~/.pi/agent/lcm"));
+    assert.ok(sample, `the finding names the orphan path: ${bundle.slice(0, 2000)}`);
+    assert.ok(
+      !sample.includes(`${hashPath(livePath)}.db`),
+      `the live store never reports: ${sample}`,
+    );
+    liveStore.close();
+  } finally {
+    env.restore();
+  }
+});
+
 test("command: diagnose pastes one bundle, with no stored text and no home path", async () => {
   const { env, liveStore, livePath, handler, notifications, levels } = bootstrap({
     usage: { tokens: 60_000, contextWindow: 200_000 },

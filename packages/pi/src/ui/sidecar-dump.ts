@@ -22,6 +22,8 @@ export const DUMP_MAX_HISTORY = 20;
 export const DUMP_MAX_SAMPLE_MESSAGES = 3;
 /** Chars one sampled message window holds. */
 export const DUMP_SAMPLE_CHARS = 400;
+/** Chars kept from each described summary; the tail names the cut. */
+export const DUMP_MAX_SUMMARY_CHARS = 1_200;
 
 /** Why a sidecar could not be dumped. Each reason is a count the caller
  * reports, never an error it raises. */
@@ -110,9 +112,18 @@ function buildDump(store: LcmStore, options: SidecarDumpOptions): string {
     sections.push(`summaries: ${summaries.length} shown of ${totalSummaries}`);
     for (const summary of summaries) {
       const view = describeView(store, options.redact, summary.id);
-      sections.push(view.ok ? view.text : `Summary #${summary.id}: unreadable.`);
+      sections.push(view.ok ? capSummaryText(view.text) : `Summary #${summary.id}: unreadable.`);
     }
     const first = summaries[0]!;
+    const coveredIds = store.coveredMessageIds(first.id);
+    const coveredMsgs = store.messagesByIds(coveredIds);
+    const coveredIdSet = new Set(coveredMsgs.map((m) => m.entryId));
+    const removedIds = new Set(
+      coveredMsgs.filter((m) => m.removedAt !== undefined).map((m) => m.entryId),
+    );
+    const visibleMsgs = includeRemoved
+      ? coveredMsgs
+      : coveredMsgs.filter((m) => m.removedAt === undefined);
     const list = expandView(store, options.redact, {
       mode: "list",
       id: first.id,
@@ -120,10 +131,20 @@ function buildDump(store: LcmStore, options: SidecarDumpOptions): string {
       limit: DUMP_MAX_SAMPLE_MESSAGES,
       maxChars: DUMP_SAMPLE_CHARS,
     });
-    sections.push(`messages (summary #${first.id}):`, list.ok ? list.text : "No messages.");
-    const covered = store.coveredMessageIds(first.id);
-    const sampled = store.messagesByIds(covered.slice(0, DUMP_MAX_SAMPLE_MESSAGES));
-    for (const message of sampled) {
+    sections.push(
+      `messages (summary #${first.id}):`,
+      list.ok
+        ? shapeSampleList(
+            list.text,
+            first.id,
+            coveredIdSet,
+            removedIds,
+            includeRemoved,
+            visibleMsgs.length,
+          )
+        : "No messages.",
+    );
+    for (const message of visibleMsgs.slice(0, DUMP_MAX_SAMPLE_MESSAGES)) {
       const window = expandView(store, options.redact, {
         mode: "message",
         entryId: message.entryId,
@@ -151,13 +172,65 @@ function buildDump(store: LcmStore, options: SidecarDumpOptions): string {
   sections.push(`metrics: ${rows.length} row(s) for this session, ${shown.length} shown`);
   for (const row of shown) sections.push(`  ${JSON.stringify(sanitizeRow(row, options.redact))}`);
   sections.push(
-    `omitted: no absolute paths, message bodies past ${DUMP_SAMPLE_CHARS} chars per sample, ` +
+    `omitted: summary text past ${DUMP_MAX_SUMMARY_CHARS} chars each, message bodies past ${DUMP_SAMPLE_CHARS} chars per sample, ` +
       `summaries past ${DUMP_MAX_SUMMARIES}, metric rows past ${DUMP_MAX_METRIC_ROWS}. ` +
       `Removed rows carry [removed]. Read them with include_removed.`,
   );
-  const text = sections.join("\n");
+  const text = options.redact(sections.join("\n"));
   if (Buffer.byteLength(text, "utf8") <= DUMP_MAX_BYTES) return text;
   return clip(text);
+}
+
+/** Reshape the sampled list for the dump: removed rows stay out by default
+ * and carry a [removed] label when --include-removed keeps them. Untouched
+ * when no covered row left the active path. */
+function shapeSampleList(
+  text: string,
+  summaryId: number,
+  coveredIds: ReadonlySet<string>,
+  removedIds: ReadonlySet<string>,
+  includeRemoved: boolean,
+  visibleTotal: number,
+): string {
+  if (removedIds.size === 0) return text;
+  const groups: { id: string | undefined; chunks: string[] }[] = [];
+  for (const chunk of text.split("\n\n").slice(1)) {
+    const at = chunk.indexOf("\n");
+    const first = at === -1 ? chunk : chunk.slice(0, at);
+    const id = /^\[([^\]]+)\] \((?:user|assistant|toolResult|custom)\)$/.exec(first)?.[1];
+    if (id !== undefined && coveredIds.has(id)) groups.push({ id, chunks: [chunk] });
+    else if (groups.length > 0) groups[groups.length - 1]!.chunks.push(chunk);
+    else groups.push({ id: undefined, chunks: [chunk] });
+  }
+  const kept: string[] = [];
+  let shown = 0;
+  for (const group of groups) {
+    const removed = group.id !== undefined && removedIds.has(group.id);
+    if (removed && !includeRemoved) continue;
+    if (group.id !== undefined) shown++;
+    kept.push(
+      group.chunks
+        .map((chunk, index) => (index === 0 && removed ? labelRemoved(chunk) : chunk))
+        .join("\n\n"),
+    );
+  }
+  const head =
+    `Summary #${summaryId} → ${visibleTotal} original messages ` +
+    `(showing ${shown} from 0)${visibleTotal > shown ? ", use offset to page" : ""}`;
+  return [head, ...kept].join("\n\n");
+}
+
+/** Mark one kept list row as off the active path, grepView style. */
+function labelRemoved(chunk: string): string {
+  const at = chunk.indexOf("\n");
+  return at === -1 ? `${chunk} [removed]` : `${chunk.slice(0, at)} [removed]${chunk.slice(at)}`;
+}
+
+/** Keep one described summary bounded so large summaries cannot clip the tail. */
+function capSummaryText(text: string): string {
+  if (text.length <= DUMP_MAX_SUMMARY_CHARS) return text;
+  const more = text.length - DUMP_MAX_SUMMARY_CHARS;
+  return `${text.slice(0, DUMP_MAX_SUMMARY_CHARS)}\n[lcm:more ${more} chars]`;
 }
 
 /** Redact string seams in one metric row; keys and stub pointers stay intact. */

@@ -166,6 +166,8 @@ const CHECKS: { readonly [K in FindingKind]: Check<K> } = {
         },
 
   // Orphan sidecars are work to clear, not a broken invariant; deletion stays manual.
+  // "Live" means a handle this process holds open: cross-session recall still
+  // reads an unopened sidecar on demand, so the finding names files, not gone sessions.
   "orphan-sidecar": (snap) =>
     snap.orphanSidecars.length === 0
       ? undefined
@@ -173,7 +175,7 @@ const CHECKS: { readonly [K in FindingKind]: Check<K> } = {
           kind: "orphan-sidecar",
           severity: "info",
           count: snap.orphanSidecars.length,
-          detail: `${snap.orphanSidecars.length} sidecar(s) with no live session. Deletion stays manual.`,
+          detail: `${snap.orphanSidecars.length} sidecar(s) not open in this process. Deletion stays manual.`,
           sample: snap.orphanSidecars.slice(0, SAMPLE),
         },
 

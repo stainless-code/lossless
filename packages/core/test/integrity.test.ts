@@ -307,6 +307,14 @@ test("integrity: an orphan sidecar reports the finding with its path", () => {
     assert.ok(finding, JSON.stringify(report.findings));
     assert.equal(finding.severity, "info", "a file with no session is work, not a violation");
     assert.equal(finding.count, 3);
+    assert.ok(
+      finding.detail.includes("not open in this process"),
+      `the finding names unopened files, not gone sessions: ${finding.detail}`,
+    );
+    assert.ok(
+      !finding.detail.includes("no live session"),
+      `the finding must not claim the session is gone: ${finding.detail}`,
+    );
     assert.ok(finding.sample.includes(orphanPath), finding.sample.join(", "));
     assert.ok(
       !finding.sample.some((p) => p === livePath || p === `${livePath}-wal`),

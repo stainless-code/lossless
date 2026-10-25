@@ -9,7 +9,9 @@ import {
   chmodSync,
   existsSync,
   readFileSync,
+  renameSync,
   statSync,
+  unlinkSync,
   writeFileSync,
   type Stats,
 } from "node:fs";
@@ -652,8 +654,20 @@ export function dumpCommand(deps: LifecycleDeps): CommandDefinition {
       if (save !== undefined) {
         try {
           const target = resolve(save);
-          writeFileSync(target, `${result.text}\n`, { encoding: "utf8", mode: 0o600 });
-          chmodFile(target);
+          // A private temp beside the destination, then an atomic rename:
+          // the bytes never sit at a readable path, and an existing file
+          // keeps its old bytes and mode until the swap.
+          const tmp = `${target}.tmp`;
+          try {
+            writeFileSync(tmp, `${result.text}\n`, { encoding: "utf8", mode: 0o600 });
+            chmodFile(tmp);
+            renameSync(tmp, target);
+          } catch (error) {
+            try {
+              unlinkSync(tmp);
+            } catch {}
+            throw error;
+          }
           await deps.prompt(
             input.sessionID,
             `LCM dump: wrote ${Buffer.byteLength(result.text, "utf8")} bytes to ${target} (mode 0600).`,
