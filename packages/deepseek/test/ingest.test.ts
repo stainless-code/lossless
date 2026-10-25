@@ -314,19 +314,85 @@ describe("ingest mirror", () => {
     expect(rows[0]?.text).toBe(original);
   });
 
-  it("keeps no row for whitespace-only text", () => {
-    const session = Session.create(SessionId("mirror-ws-empty"));
+  it("maps whitespace-only text through a descriptor row", () => {
+    const session = Session.create(SessionId("mirror-ws-keep"));
+    const original = "   \n  ";
     const event = session.append(
       "user/message",
       createUserMessage({
-        content: [{ type: "text", text: "   \n  " }],
+        content: [{ type: "text", text: original }],
         source: { kind: "user" },
       }),
       { surfaceOp: "append" },
     );
-    expect(entryFor(session, event)).toBeUndefined();
+    expect(entryFor(session, event)?.text).toBe("[lcm:whitespace 6 chars]");
     const store = new LcmStore(":memory:");
-    expect(mirrorEvent(session, event, store).inserted).toBe(0);
-    expect(store.allMessages()).toHaveLength(0);
+    const index = new MessageIndex();
+    expect(mirrorEvent(session, event, store, index).inserted).toBe(1);
+    const rows = store.allMessages();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.text).toBe("[lcm:whitespace 6 chars]");
+    for (const message of session.deriveMessages()) {
+      const entryId = index.entryId(message.id);
+      expect(entryId).toBeDefined();
+      if (entryId === undefined) throw new Error(`no sidecar entry for ${message.id}`);
+      expect(store.messageByEntryId(entryId)).toBeDefined();
+    }
+  });
+
+  it("mirrors a blank tool output as one descriptor row and maps its span", () => {
+    const session = Session.create(SessionId("mirror-blank-tool"));
+    session.append("turn/start", { turn: 1 });
+    const callId = ToolCallId("call-blank");
+    session.append(
+      "assistant/message",
+      {
+        stream: [],
+        turn: 1,
+        step: 1,
+        message: createMessage({
+          role: "assistant",
+          content: [
+            { type: "tool-call", id: callId, name: "read", arguments: '{"path":"blank.txt"}' },
+          ],
+          source: { kind: "model", provider: MODEL, model: MODEL },
+        }),
+      },
+      { surfaceOp: "append" },
+    );
+    session.append("tool/call", {
+      turn: 1,
+      step: 1,
+      callId,
+      name: "read",
+      arguments: '{"path":"blank.txt"}',
+    });
+    const blank = "   \n  ";
+    const resultEvent = session.append(
+      "tool/result",
+      {
+        turn: 1,
+        step: 1,
+        message: createToolResultMessage({
+          callId,
+          content: [{ type: "text", text: blank }],
+          isError: false,
+        }),
+      },
+      { surfaceOp: "append" },
+    );
+    session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const row = store.messageByEntryId(`${session.id}:${resultEvent.seq}`);
+    expect(row).toBeDefined();
+    expect(row?.text).toBe("[lcm:whitespace 6 chars]");
+    for (const message of session.deriveMessages()) {
+      const entryId = index.entryId(message.id);
+      expect(entryId).toBeDefined();
+      if (entryId === undefined) throw new Error(`no sidecar entry for ${message.id}`);
+      expect(store.messageByEntryId(entryId)).toBeDefined();
+    }
   });
 });

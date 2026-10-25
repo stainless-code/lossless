@@ -252,9 +252,11 @@ function dshRole(role: Message["role"]): LcmRole {
 }
 
 /** Verbatim text plus the calls the transcript needs to stay replayable. A
- * message with blocks but no text keeps a descriptor row instead, so every
- * span message holds a sidecar address for compaction to map. */
+ * message with blocks but no text keeps a descriptor row instead, and blank
+ * text keeps a whitespace marker, so every span message holds a sidecar
+ * address for compaction to map. */
 function renderText(message: Message): string | undefined {
+  if (message.content.length === 0) return undefined;
   const parts: string[] = [];
   for (const block of message.content) {
     if (block.type === "text") parts.push(block.text);
@@ -262,12 +264,9 @@ function renderText(message: Message): string | undefined {
   }
   const text = parts.join("\n");
   if (text.trim().length > 0) return text;
-  if (message.content.length === 0) return undefined;
-  // Whitespace-only text carries no replay value.
-  if (parts.length > 0 && message.content.every((block) => block.type === "text")) {
-    return undefined;
-  }
-  return describeNonText(message);
+  if (message.content.some((block) => block.type !== "text")) return describeNonText(message);
+  // Blank text still needs an address or spans wedge; the marker keeps it honest.
+  return `[lcm:whitespace ${text.length} chars]`;
 }
 
 /** Bracketed stand-in mirroring the core file-handle shape: block kinds plus
