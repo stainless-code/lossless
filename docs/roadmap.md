@@ -145,6 +145,69 @@ Where this implementation departs from the paper, and what it does not claim:
     in [the OpenCode comparison](../apps/docs/content/reference/opencode/comparison.mdx).
     A separate TUI plugin could reuse the same command core. Evidence gate: a
     live session changes one option through a TUI and persists it without a restart.
+13. **Role and time filters on recall search.** `lcm_grep` takes text, a
+    pattern, a summary id, and paging today, with no way to narrow by role or
+    time. The `messages` table already stores `role` and `timestamp`, so add
+    both as optional predicates with one covering index. Check each new query
+    shape with `EXPLAIN QUERY PLAN` to confirm the planner keeps the FTS path.
+    Evidence gate: a test run over existing stores plus the plan output. Cost
+    is one index and tests, no migration.
+14. **A read-only files view with a coverage flag.** The `files`,
+    `message_files`, and `summary_files` tables already link every file handle
+    to its messages, and `uncoveredMessagesInSpan` reports gaps. Derive the
+    manifest at read time from those joins, with an incomplete-coverage flag
+    and a `large-inline` mark for a large body that named no path. Store
+    nothing new and call no model. This is a recall view, distinct from the
+    injected projection truth that stays deferred below. Evidence gate: a
+    manifest that matches direct table reads on path and paste fixtures. Cost
+    is one query plus formatting.
+15. **Anchor windows on expand.** `lcm_expand` pages inside one summary today
+    and cannot center a window on an entry id. Resolve an anchor entry through
+    `spanBounds` and `messagesInSpan`, then page by rowid under the existing
+    character limits. Keep the cross-session caps where they are. Evidence
+    gate: a truncation test at those caps. Cost is one view function plus tests.
+16. **A static sidecar dump.** Operators need a read-only dump of a session
+    sidecar plus its metrics without a server. Open sidecars `queryOnly`, skip
+    old generations as `StaleStoreError`, and reuse the recall views plus
+    `readMetricRows`. Redact every displayed seam and respect
+    `include_removed`. Keep the code outside `lossless-core` so the core
+    boundary test stays green. Evidence gate: a dump of a live session that
+    changes nothing on disk. Cost is a small command plus tests, no new
+    dependency.
+17. **Hash checks on import.** `importTranscript` inserts file rows without
+    checking the carried `sha256`. Verify the hash and the byte length before
+    insert and refuse the file on mismatch. Add an export, import, export
+    round-trip test plus a mismatched-hash fixture that the import refuses.
+    Cost is validation code plus one test.
+18. **Tool-name scoping without new state.** Readers often want only tool
+    results. Confirm the `[tool:Name]` markers `entryToText` embeds, then add
+    an optional `toolName` to `grepView` as an FTS query rewrite against those
+    markers. Add no table and no index. Evidence gate: equality between a
+    scoped query and the unscoped query filtered to tool rows on fixtures.
+    Cost is cheap.
+19. **Header overlap ordering before FTS.** Order the recall manifest and seed
+    the retrieval brief by stop-word stripped query-word overlap over summary
+    headers. Keep this a pure function over headers already in memory. FTS plus
+    regex stay the recall path. Evidence gate: a deterministic ordering test on
+    fixed fixtures with recall results unchanged apart from order. Cost is cheap.
+20. **A mechanical tier for noisy tools.** Noisy tool output forces summarizer
+    spend on leaves that add no summary value. Name those tools in
+    `summarizer-config`, compact their spans into deterministic `mechanical`
+    leaves at compaction time, and keep every message kept and covered so the
+    coverage check passes. Heal stays available on demand. Never skip at
+    ingest. Evidence gate: a noisy fixture that spends nothing on those spans
+    while coverage stays complete. Cost is moderate, config plus engine plus tests.
+21. **Orphan sidecar reports in doctor.** Sidecar files can outlive their
+    sessions. Report `.sqlite` files plus stale `wal` and `shm` files with no
+    live session as a new `FindingKind` in `integrity.ts`, surfaced through
+    `doctor` and the diagnose bundle. Report only. Deletion stays the manual
+    `drop`. Evidence gate: a fixture with an orphan that reports and a live
+    session that never reports. Cost is cheap.
+22. **Ingest signals for the watermark path.** A watermark miss forces a full
+    rescan today with no visible signal, while empty entries skip silently.
+    Emit a warning plus a metric row on the rescan path and keep the silent
+    skip for empty text. Change no ingest behavior. Evidence gate: a
+    dropped-turn fixture that carries the new signal. Cost is cheap.
 
 ## Considered and deferred
 
