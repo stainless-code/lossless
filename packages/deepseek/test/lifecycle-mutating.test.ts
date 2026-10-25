@@ -521,6 +521,92 @@ describe("lcm mutating verbs", () => {
     expect(dflt.text).toContain("nothing eligible");
   });
 
+  it("gc dry-run hint echoes session and older-than selectors", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-hint";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-hint"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    for (const stem of ["stale-hint-a", "stale-hint-b"]) {
+      const stale = new LcmStore(join(dir, `${stem}.sqlite`));
+      try {
+        seedMessages(stale, [`history for ${stem}`]);
+      } finally {
+        stale.close();
+      }
+      ageFile(join(dir, `${stem}.sqlite`), 31);
+    }
+    const sessionDry = await invoke(ctx, deps, liveId, "gc --session stale-hint-a");
+    expect(sessionDry.kind).toBe("success");
+    expect(sessionDry.text).toContain("/lcm gc --apply --session stale-hint-a");
+    const ageDry = await invoke(ctx, deps, liveId, "gc --older-than 1d");
+    expect(ageDry.kind).toBe("success");
+    expect(ageDry.text).toContain("/lcm gc --apply --older-than 1d");
+    const bothDry = await invoke(ctx, deps, liveId, "gc --session stale-hint-a --older-than 1d");
+    expect(bothDry.kind).toBe("success");
+    expect(bothDry.text).toContain("--session stale-hint-a");
+    expect(bothDry.text).toContain("--older-than 1d");
+  });
+
+  it("gc apply after a session hint deletes only the previewed session", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-hint-apply";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-hint-apply"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    for (const stem of ["stale-apply-a", "stale-apply-b"]) {
+      const stale = new LcmStore(join(dir, `${stem}.sqlite`));
+      try {
+        seedMessages(stale, [`history for ${stem}`]);
+      } finally {
+        stale.close();
+      }
+      ageFile(join(dir, `${stem}.sqlite`), 31);
+    }
+    const dry = await invoke(ctx, deps, liveId, "gc --session stale-apply-a");
+    expect(dry.kind).toBe("success");
+    expect(dry.text).toContain("stale-apply-a");
+    expect(dry.text).not.toContain("stale-apply-b");
+    expect(dry.text).toContain("/lcm gc --apply --session stale-apply-a");
+    const applied = await invoke(ctx, deps, liveId, "gc --session stale-apply-a --apply");
+    expect(applied.kind).toBe("success");
+    expect(applied.text).toContain("removed 1 of 1");
+    expect(existsSync(join(dir, "stale-apply-a.sqlite"))).toBe(false);
+    expect(existsSync(join(dir, "stale-apply-b.sqlite"))).toBe(true);
+  });
+
+  it("gc older-than accepts only a number with an optional d suffix", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-parse";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-parse"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    for (const valid of ["2", "2d", "2.5d"]) {
+      const result = await invoke(ctx, deps, liveId, `gc --older-than ${valid}`);
+      expect(result.kind).toBe("success");
+    }
+    for (const invalid of ["2weeks", "d", "-1"]) {
+      const result = await invoke(ctx, deps, liveId, `gc --older-than ${invalid}`);
+      expect(result.kind).toBe("error");
+      expect(result.text).toContain("--older-than takes a number of days");
+    }
+    const empty = await invoke(ctx, deps, liveId, "gc --older-than=");
+    expect(empty.kind).toBe("error");
+    expect(empty.text).toContain("--older-than takes a number of days");
+  });
+
   it("gc refuses a missing or invalid selector value", async () => {
     const { ctx } = setupContext(ROUTE, []);
     await mountBase(ctx);

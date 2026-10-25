@@ -658,8 +658,11 @@ export function handleGc(
       text: `LCM gc: session ${onlySession} is open in this process; gc never deletes an open sidecar.`,
     };
   }
-  const rawDays = valueOf(args, "--older-than") ?? String(GC_DEFAULT_DAYS);
-  const days = Number.parseFloat(rawDays.replace(/d$/u, ""));
+  const olderThanRaw = valueOf(args, "--older-than");
+  const rawDays = olderThanRaw ?? String(GC_DEFAULT_DAYS);
+  // Strict shape stops suffixes like 2weeks from parsing as 2.
+  const daysMatch = /^(\d+(?:\.\d+)?)d?$/.exec(rawDays.trim());
+  const days = daysMatch === null ? Number.NaN : Number(daysMatch[1]);
   if (!Number.isFinite(days) || days < 0) {
     return { kind: "error", text: "LCM gc: --older-than takes a number of days." };
   }
@@ -688,9 +691,12 @@ export function handleGc(
     (c) => `  ${c.id}: ${(c.sizeBytes / 1024).toFixed(0)} KB, ${c.ageDays.toFixed(1)} day(s) old`,
   );
   if (!apply) {
+    const selectors =
+      (onlySession !== undefined ? ` --session ${onlySession}` : "") +
+      (olderThanRaw !== undefined ? ` --older-than ${olderThanRaw}` : "");
     return {
       kind: "success",
-      text: `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lcm gc --apply\` to export then delete them. Backups are never touched.`,
+      text: `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lcm gc --apply${selectors}\` to export then delete them. Backups are never touched.`,
     };
   }
   const stamp = STAMP();
