@@ -198,6 +198,7 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
       ...ladder.leafSummaryIds,
       ...ladder.condensedSummaryIds,
     ]);
+    // Outcome unobservable here; next success overwrites, so staleness self-heals.
     this.lossless.memory?.note(sessionId, checkpoint);
     return toSummaryResult(checkpoint, ladder, this.config.maxTokens);
   }

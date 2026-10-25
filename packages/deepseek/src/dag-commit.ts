@@ -177,6 +177,9 @@ export async function commitDagTransaction(
     const endEvent = session.append("compaction/end", lifecycle);
     closed = true;
     result = { ...pending, endSeq: endEvent.seq };
+    // Note only after the end marker lands: earlier notes survive failed
+    // shrink, stability, and commit paths as phantom checkpoints.
+    deps.memory?.note(prepared.sessionId, condensed.condensedText);
   } catch (error) {
     failure = { error, stage: closing ? "commit" : stage };
     if (!closing) {
@@ -398,6 +401,7 @@ function prepareDagCommit(
 
 interface CondensedCommit {
   readonly checkpointMessage: ReturnType<typeof createUserMessage>;
+  readonly condensedText: string;
   readonly leafTexts: readonly string[];
   readonly condensedBlocks: ContentBlock[];
 }
@@ -416,7 +420,6 @@ function frameCondensed(
     ...ladder.leafSummaryIds,
     ...ladder.condensedSummaryIds,
   ]);
-  deps.memory?.note(prepared.sessionId, condensedText);
   const store = deps.store(prepared.sessionId);
   const leafTexts = ladder.leafSummaryIds.map((id) => {
     const text = store?.getSummary(id)?.text;
@@ -438,7 +441,7 @@ function frameCondensed(
       `summary is not smaller than the shadowed content (${framedSummaryTokenCount} estimated framed tokens >= ${prepared.shadowedRouteTokenCount})`,
     );
   }
-  return { checkpointMessage, leafTexts, condensedBlocks };
+  return { checkpointMessage, condensedText, leafTexts, condensedBlocks };
 }
 
 /** Append the condensed summary record, one log-only record per stored

@@ -301,4 +301,74 @@ describe("commitDagTransaction", () => {
     expect(ends).toHaveLength(1);
     expect(ends[0]?.data.turn).toBeNull();
   });
+
+  it("leaves memory untouched when the shrink check fails", async () => {
+    const session = buildSession("ok ");
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const bloated = "bloated summary ".repeat(400);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(bloated),
+      textChunks(bloated),
+      textChunks(bloated),
+      textChunks(bloated),
+      textChunks(bloated),
+      textChunks(bloated),
+      textChunks(bloated),
+      textChunks(bloated),
+    ]);
+    mountMeter(ctx);
+    const agent = fakeAgent(session, ROUTE);
+    const nodes = session.surface.nodes;
+    let notes = 0;
+    const memory = {
+      previous: (_sessionId: string) => undefined,
+      note: (_sessionId: string, _text: string) => {
+        notes += 1;
+      },
+    };
+    await expect(
+      commitDagTransaction(
+        { ...deps(ctx, store, index), memory },
+        agent,
+        { start: nodes[1]!, end: nodes[2]! },
+        { owner: "current-turn", stability: "whole-surface" },
+      ),
+    ).rejects.toThrow(/not smaller/);
+    expect(notes).toBe(0);
+  });
+
+  it("notes memory exactly once when the bracket commits", async () => {
+    const session = buildSession("working notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const agent = fakeAgent(session, ROUTE);
+    const nodes = session.surface.nodes;
+    let notes = 0;
+    let noted: string | undefined;
+    const memory = {
+      previous: (_sessionId: string) => undefined,
+      note: (_sessionId: string, text: string) => {
+        notes += 1;
+        noted = text;
+      },
+    };
+    await commitDagTransaction(
+      { ...deps(ctx, store, index), memory },
+      agent,
+      { start: nodes[1]!, end: nodes[nodes.length - 1]! },
+      { owner: "current-turn", stability: "whole-surface" },
+    );
+    expect(notes).toBe(1);
+    expect(noted).toContain(SUMMARY);
+  });
 });
