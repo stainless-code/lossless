@@ -76,7 +76,7 @@ const GrepParams = Type.Object({
   tool_name: Type.Optional(
     Type.String({
       description:
-        "Keep only tool-result rows for this tool (matches [tool:Name] markers); query searches only",
+        "Keep only tool-result rows for this tool. It matches [tool:Name] markers. It applies to query searches only.",
     }),
   ),
   // Unsafe rather than a union of literals: an anyOf schema does not survive

@@ -51,8 +51,7 @@ export interface CompactionInput {
   targetTokens?: number;
   /** Where the returned summary must reach back to; defaults to the span start. */
   frontierFrom?: string;
-  /** Tool names whose spans compact mechanically. Read at compaction time
-   * only; ingest still stores every message verbatim. */
+  /** Read at compaction time only; ingest stores every message verbatim. */
   mechanicalTools?: readonly string[];
 }
 
@@ -92,8 +91,7 @@ export async function runCompaction(
     session?: string;
     maxDepth?: number;
     stage?: CompactionStage;
-    /** Tool names whose spans compact mechanically. Merged with
-     * `input.mechanicalTools`; an empty list keeps the LLM path. */
+    /** Empty keeps the LLM path. */
     mechanicalTools?: readonly string[];
   },
 ): Promise<CompactionOutcome> {
@@ -133,9 +131,8 @@ export async function runCompaction(
     chunkContiguous(uncoveredAll, leafChunkBudget),
     opts?.maxChunks ?? 24,
   ).flatMap((chunk) => splitByMechanical(chunk, mechanicalIds));
-  // A mechanical leaf is the deterministic truncate over the same redacted
-  // source the ladder would fall back to, stored without a model call. The
-  // rows stay covered through provenance, so heal can re-derive the span.
+  // Same redacted source the ladder would fall back to, stored without a call;
+  // provenance keeps rows covered for heal.
   async function storeMechanicalLeaf(
     remaining: StoredMessage[],
     chunkHead: StoredMessage,
@@ -454,9 +451,8 @@ export async function runCompaction(
     const started = Date.now();
     const span: [string, string] = [groupHead.firstEntryId, groupTail.lastEntryId];
     const sourceChars = group.reduce((n, s) => n + s.text.length, 0);
-    // A group of only mechanical children carries no clean source, so the
-    // parent is the deterministic truncate, with no model spend. Heal repairs
-    // the leaves first and the parent after, as with any tainted ancestor.
+    // No clean source in mechanical-only groups, so truncate without a call;
+    // heal repairs leaves first, as with any tainted ancestor.
     const mechanicalGroup = mechanicalTools.length > 0 && group.every((n) => isMechanicalNode(n));
     const answer = mechanicalGroup
       ? null
@@ -564,8 +560,7 @@ export async function runCompaction(
   // overshoot counts, which is the same twice-the-target bar the final render
   // clips at, so the reduction hits exactly the nodes that would be cut.
   const lone = frontier.length === 1 ? frontier[0] : undefined;
-  // A mechanical lone node stays as stored: re-summarizing the truncate would
-  // spend a call to reproduce the same tier.
+  // A mechanical lone node already stores the truncate, so skip the re-summarize call.
   const loneMechanical = lone !== undefined && isMechanicalNode(lone);
   if (lone && frontierTok > targetTokens * 2 && !loneMechanical) {
     const beforeTokens = lone.tokens;
@@ -923,16 +918,14 @@ function adjacentRuns(frontier: readonly SummaryNode[]): SummaryNode[][] {
   return runs;
 }
 
-/** A node the mechanical path may fold without a call: the verdict says so,
- * or the text carries the storage marker predated rows keep. */
+/** Mechanical by verdict, or by the stored truncate marker old rows keep. */
 function isMechanicalNode(node: SummaryNode): boolean {
   return node.quality === "mechanical" || node.text.startsWith(TRUNCATED_SUMMARY_PREFIX);
 }
 
-/** Message ids that compact mechanically: a direct tool-name hit, or a
- * toolResult right after a listed call, which is how Pi stores a result whose
- * own text names no tool. Runs over row order so a covered call still marks
- * its uncovered result. */
+/** A direct tool-name hit, or a toolResult right after a listed call, which is
+ * how Pi stores a result whose own text names no tool. Row order keeps a
+ * covered call marking its uncovered result. */
 function mechanicalMessageIds(
   messages: readonly StoredMessage[],
   tools: readonly string[],
@@ -959,8 +952,7 @@ function mechanicalMessageIds(
   return ids;
 }
 
-/** Split a token chunk into runs of mechanical and non-mechanical messages,
- * so a noisy result isolates from the prose around it. Order is kept. */
+/** Split a chunk so a noisy result isolates from the prose around it. */
 function splitByMechanical(
   chunk: StoredMessage[],
   mechanicalIds: ReadonlySet<number>,

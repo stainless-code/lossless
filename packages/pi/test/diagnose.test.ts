@@ -309,7 +309,7 @@ test("diagnose: the bundle carries an orphan sidecar finding within the caps", (
             kind: "orphan-sidecar",
             severity: "info",
             count: 2,
-            detail: "2 sidecar(s) with no live session (manual drop removes them)",
+            detail: "2 sidecar(s) with no live session. Deletion stays manual.",
             sample: ["orphan.sqlite", "orphan.sqlite-wal"],
           },
         ],

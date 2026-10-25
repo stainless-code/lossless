@@ -61,7 +61,7 @@ export function registerRecallTools(editor: ToolEditor, deps: RecallDeps): void 
         date_end: { type: "number", description: "Keep only rows at or before this timestamp" },
         tool_name: {
           type: "string",
-          description: "Keep only tool-result rows for this tool (matches [tool:Name] markers)",
+          description: "Keep only tool-result rows for this tool. It matches [tool:Name] markers.",
         },
         scope: {
           type: "string",

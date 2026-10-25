@@ -165,8 +165,7 @@ const CHECKS: { readonly [K in FindingKind]: Check<K> } = {
             .map((d) => `${d.first}..${d.last} (${d.kind}) x${d.count}`),
         },
 
-  // A sidecar file outlives its session, so a file with no live session is
-  // work to clear rather than a broken invariant. Deletion stays manual.
+  // Orphan sidecars are work to clear, not a broken invariant; deletion stays manual.
   "orphan-sidecar": (snap) =>
     snap.orphanSidecars.length === 0
       ? undefined
@@ -174,7 +173,7 @@ const CHECKS: { readonly [K in FindingKind]: Check<K> } = {
           kind: "orphan-sidecar",
           severity: "info",
           count: snap.orphanSidecars.length,
-          detail: `${snap.orphanSidecars.length} sidecar(s) with no live session (manual drop removes them)`,
+          detail: `${snap.orphanSidecars.length} sidecar(s) with no live session. Deletion stays manual.`,
           sample: snap.orphanSidecars.slice(0, SAMPLE),
         },
 

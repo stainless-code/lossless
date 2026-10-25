@@ -219,10 +219,8 @@ const REFUSED = (reason: string): ImportResult => ({
   refused: reason,
 });
 
-/** A file row names the body its messages already carry, so the bytes and the
- * hash have to match what those rows hold. The check runs before any write, so
- * a corrupt file refuses without a partial import. Rows with no linked entries
- * carry nothing to check. */
+/** Runs before any write, so a corrupt file refuses without a partial import.
+ * Rows with no linked entries carry nothing to check. */
 function fileHashProblem(rows: readonly ExportRow[]): string | undefined {
   const textByEntry = new Map(
     rows

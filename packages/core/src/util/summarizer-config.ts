@@ -24,18 +24,13 @@ export interface SummarizerOptions {
   readonly summarizerTokensPerPass?: number;
   /** Tokens one on-demand heal run may spend across all of its calls. */
   readonly summarizerTokensPerHeal?: number;
-  /** Tool names whose messages compact mechanically. The rule fires at
-   * compaction time only, never at ingest: every message is still stored
-   * verbatim and covered, but a span of only listed tools skips the model. */
+  /** Fires at compaction time only; ingest still stores every message verbatim. */
   readonly mechanicalTools?: readonly string[];
 }
 
-/** The default mechanical tool list. Empty, so a caller opts in and existing
- * passes keep their spend. */
+/** Empty default: callers opt in and existing passes keep their spend. */
 export const DEFAULT_MECHANICAL_TOOLS: readonly string[] = [];
 
-/** A normalized mechanical tool list: trimmed, lowercased, deduped, with
- * empties dropped, so `Read` and `read` name the same tool. */
 export function normalizeMechanicalTools(tools: readonly string[] | undefined): string[] {
   if (!tools) return [];
   const seen = new Set<string>();
@@ -49,10 +44,9 @@ export function normalizeMechanicalTools(tools: readonly string[] | undefined): 
   return out;
 }
 
-/** The tool name a message carries, if any. Reads the renderings both hosts
- * store: `tool <name>` (OpenCode), `[tool:<name>]` (core), and `tool-call:
- * <name>`, plus a JSON payload that names the call. Lowercased, or undefined
- * when the message names no tool. */
+/** The tool name a message carries, if any. Reads both hosts: `tool <name>`
+ * (OpenCode), `[tool:<name>]` (core), `tool-call: <name>`, plus a JSON
+ * payload that names the call. Lowercased, else undefined. */
 export function mechanicalToolNameOf(message: {
   text: string;
   payload?: string;
@@ -95,8 +89,7 @@ function toolNameOfPayload(payload: string | undefined): string | undefined {
   return undefined;
 }
 
-/** True when the message names a tool on the normalized list. The list is
- * normalized here, so callers may pass raw config values. */
+/** Normalized here, so callers may pass raw config values. */
 export function isMechanicalToolMessage(
   message: { text: string; payload?: string },
   tools: readonly string[],

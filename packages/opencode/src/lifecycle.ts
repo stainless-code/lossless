@@ -612,15 +612,14 @@ export function healCommand(deps: LifecycleDeps): CommandDefinition {
   };
 }
 
-/** Read-only dump of this session's sidecar plus its metrics. Opens the
- * file with `queryOnly` instead of the live handle, so a dump never mutates
- * the store it reads. */
+/** Read-only dump of this session's sidecar plus its metrics, opened with
+ * `queryOnly` so a dump never mutates the store. */
 export function dumpCommand(deps: LifecycleDeps): CommandDefinition {
   const redact = makeRedactConfigAdapter(deps.options);
   return {
     name: "lossless-dump",
     description:
-      "Print a read-only dump of this session's sidecar: history, sampled summaries and messages, plus metrics.",
+      "Print a read-only dump of this session's sidecar. It holds history, sampled summaries and messages, and metrics.",
     execute: async (input) => {
       const args = argsOf(input.prompt.text);
       const includeRemoved = args.includes("--include-removed");

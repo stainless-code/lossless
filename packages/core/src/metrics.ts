@@ -633,9 +633,7 @@ export type BranchRemovedRow = LcmRowBase & {
   restored: number;
 };
 
-/** A watermark miss forced a full rescan. The watermark names the entry the
- * hook expected to continue after, and entries counts the raw session list
- * that was rescanned. Empty deltas never write one. */
+/** A watermark miss forced a full rescan. Empty deltas never write one. */
 export type IngestRescanRow = LcmRowBase & {
   kind: "ingest-rescan";
   watermark: string;

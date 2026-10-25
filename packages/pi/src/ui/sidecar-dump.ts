@@ -66,8 +66,8 @@ export function dumpSidecar(options: SidecarDumpOptions): SidecarDumpResult {
         status: "skipped",
         reason: "older-generation",
         detail:
-          `generation ${error.generation} is older than this build; ` +
-          `run migrate first (no rows were changed)`,
+          `generation ${error.generation} is older than this build. ` +
+          `Run migrate first. No rows were changed.`,
       };
     }
     return {
@@ -153,7 +153,7 @@ function buildDump(store: LcmStore, options: SidecarDumpOptions): string {
   sections.push(
     `omitted: no absolute paths, message bodies past ${DUMP_SAMPLE_CHARS} chars per sample, ` +
       `summaries past ${DUMP_MAX_SUMMARIES}, metric rows past ${DUMP_MAX_METRIC_ROWS}. ` +
-      `Removed rows carry [removed]; read them with include_removed.`,
+      `Removed rows carry [removed]. Read them with include_removed.`,
   );
   const text = sections.join("\n");
   if (Buffer.byteLength(text, "utf8") <= DUMP_MAX_BYTES) return text;

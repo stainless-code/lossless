@@ -32,6 +32,8 @@ once context crosses the soft threshold (default: 70% of the model's window).
 /lcm backup     # copy the live store to a timestamped file
 /lcm export     # write the full store as JSONL (verbatim; see Security notes)
 /lcm report     # metrics summary for the current session
+/lcm dump       # read-only dump of the session sidecar; add --include-removed
+                # to keep removed-branch rows, --save <path> to write mode 0600
 /lcm doctor     # diagnostics: store checks, thresholds, summarizer chain,
                 # footprint; add --repair to rebuild the index and drop the rows
                 # nothing can reach
@@ -61,7 +63,9 @@ a call, or a span needs, because an index cannot hold punctuation. A pattern is
 case-insensitive unless `case_sensitive` is set. Both paths page: hits come 20
 at a time, `offset` reaches the next page, and the query path reports its total
 while the pattern path says whether more matches exist rather than claiming a
-count it did not compute.
+count it did not compute. Four filters narrow the search: `role` keeps
+only rows stored with that role, `date_start` and `date_end` bound rows by
+timestamp, and `tool_name` keeps only tool-result rows for that tool.
 
 All three take an address when you have one, so a known id does not have to be
 searched for: `lcm_grep` accepts `summary_id` to search inside one node, and

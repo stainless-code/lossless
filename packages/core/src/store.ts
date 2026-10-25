@@ -113,23 +113,17 @@ export interface IntegritySnapshot {
   foreignKeyViolations: number;
   schemaVersion: number;
   uncoveredMessages: number;
-  /** Sidecar database files plus stale WAL and SHM files with no live session.
-   * Full paths, sorted, so doctor can name what a manual drop would remove. */
+  /** Full paths, sorted, so doctor can name what a manual drop would remove. */
   orphanSidecars: string[];
 }
 
-/** What `integritySnapshot` scans for orphan sidecars. Defaults cover the
- * common call: the store's own directory, the `.sqlite` suffix, and the store
- * itself as the only live session. */
 export interface IntegritySnapshotOptions {
   liveSidecarPaths?: readonly string[];
   sidecarDir?: string;
   sidecarExtension?: string;
 }
 
-/** Sidecar files in `dir` with no live session: every `extension` file whose
- * path is not live, plus every `extension-wal` and `extension-shm` file whose
- * base database is not live. Missing dirs and non-files read as empty. */
+/** Files in `dir` with no live session; missing dirs and non-files read as empty. */
 function findOrphanSidecars(
   dir: string | undefined,
   livePaths: readonly string[],
@@ -1849,8 +1843,7 @@ function isLcmRole(value: unknown): value is LcmRole {
   return value === "user" || value === "assistant" || value === "toolResult" || value === "custom";
 }
 
-/** Extra `messages` predicates for the recall filters. Empty means no filter;
- * the FTS `MATCH` stays the rank and access path either way. */
+/** Empty means no filter; the FTS `MATCH` stays the rank and access path either way. */
 function recallPredicates(
   role: LcmRole | undefined,
   dateStart: number | undefined,

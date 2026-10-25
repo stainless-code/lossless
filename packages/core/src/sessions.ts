@@ -351,8 +351,6 @@ function searchStore(
     toolName?: string;
   },
 ): GrepHit[] {
-  // A tool scope rewrites the query against the `[tool:Name]` markers, so the
-  // store call stays a plain grep with no extra table or index.
   const scoped =
     filters?.toolName === undefined
       ? query

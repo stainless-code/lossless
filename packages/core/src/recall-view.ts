@@ -37,7 +37,7 @@ type GrepFilter = {
 
 function grepFilterProblem(filter: GrepFilter): string | undefined {
   if (filter.role !== undefined && !LCM_ROLES.includes(filter.role)) {
-    return `Unknown role ${JSON.stringify(filter.role)}; pass one of ${LCM_ROLES.join(", ")}.`;
+    return `Unknown role ${JSON.stringify(filter.role)}. Pass one of ${LCM_ROLES.join(", ")}.`;
   }
   for (const key of ["dateStart", "dateEnd"] as const) {
     const value = filter[key];
@@ -51,17 +51,14 @@ function grepFilterProblem(filter: GrepFilter): string | undefined {
   return undefined;
 }
 
-/** The `[tool:Name]` marker `entryToText` embeds in front of a tool call's
- * arguments. A scoped search rewrites the query against it, so non-tool rows
- * can never match a tool scope and no table or index is needed. */
+/** The `[tool:Name]` marker in front of a tool call's arguments, so a scoped
+ * search needs no table or index. */
 export function toolMarker(toolName: string): string {
   return `[tool:${toolName}]`;
 }
 
-/** Rewrite an FTS5 query to its tool-scoped form. The marker is passed as a
- * quoted phrase, which the FTS5 tokenizer splits the same way as the stored
- * text, so `"[tool:read]"` matches the `tool read` token pair at the head of
- * a tool call row. */
+/** Rewrite an FTS5 query to its tool-scoped form. The marker passes as a quoted
+ * phrase, which the FTS5 tokenizer splits the same way as the stored text. */
 function withToolScope(query: string, toolName: string): string {
   return `(${query}) AND ${JSON.stringify(toolMarker(toolName))}`;
 }
@@ -83,15 +80,10 @@ export function grepView(
     now?: () => number;
     /** Tool the continuation marker names. Defaults to `lcm_expand_query`. */
     expandTool?: string;
-    /** Keep only rows stored with this role. */
     role?: GrepFilter["role"];
-    /** Keep only rows at or after this timestamp. */
     dateStart?: number;
-    /** Keep only rows at or before this timestamp. */
     dateEnd?: number;
-    /** Keep only tool-result rows for this tool, matched against the
-     * `[tool:Name]` markers `entryToText` embeds. Query searches only: with a
-     * pattern it is refused rather than silently ignored. */
+    /** Query searches only; with a pattern it is refused. */
     toolName?: string;
   },
 ): ViewResult {
@@ -124,7 +116,7 @@ export function grepView(
   }
   if (params.pattern !== undefined) {
     if (params.toolName !== undefined) {
-      return { ok: false, text: "toolName scopes a query search; pass query rather than pattern." };
+      return { ok: false, text: "toolName scopes a query search. Pass query rather than pattern." };
     }
     let afterRowId = 0;
     if (params.after !== undefined) {
@@ -475,10 +467,8 @@ function readWindow(
   };
 }
 
-/** List the summary's messages, or read one of them as a window of characters.
- * A message read without a summary names an entry directly, which is how an
- * entry that no leaf yet covers is read at all. A listing with `anchor`
- * centers the window on that entry id instead of starting at `offset`,
+/** List a summary's messages, or read one as a window. Without a summary an
+ * entry id reads directly; with `anchor` the window centers on that entry,
  * clamped at the span edges. */
 export type ExpandParams =
   | {
@@ -519,8 +509,7 @@ export function expandView(
       };
     }
     anchorIndex = coveredAt;
-    // Center the window on the anchor, clamped at both edges; `offset` pages
-    // relative to that centered start.
+    // `offset` pages relative to that centered start.
     offset = Math.max(
       0,
       Math.min(
@@ -549,8 +538,7 @@ export function expandView(
   };
 }
 
-/** Words too common to order a manifest by. Kept small and plain on purpose:
- * this is a tie-break for display order, not a ranking model. */
+/** Tie-break for display order only, not a ranking model. */
 const OVERLAP_STOP_WORDS = new Set(
   "a,an,and,are,as,at,be,but,by,for,from,had,has,have,how,i,in,is,it,its,of,on,or,that,the,their,then,there,these,they,this,to,was,were,what,when,where,which,who,with,you,your".split(
     ",",
@@ -565,11 +553,8 @@ function queryWords(query: string): Set<string> {
   return new Set(words);
 }
 
-/** Order summary headers by stop-word stripped query-word overlap, most
- * overlapping first. Pure and in-memory: it only sorts the headers the caller
- * already holds, so FTS plus regex stay the recall path and no score is
- * stored. Ties keep their input order, which keeps the ordering deterministic.
- */
+/** Sort headers the caller already holds, so FTS plus regex stay the recall
+ * path and no score is stored. Ties keep input order. */
 export function orderSummariesByOverlap<T extends { text: string }>(
   query: string,
   nodes: readonly T[],
@@ -587,15 +572,12 @@ export function orderSummariesByOverlap<T extends { text: string }>(
     .map((r) => r.node);
 }
 
-/** Bodies at or above this length with no linked file read as `large-inline`:
- * the ingest default that externalizes a named path, so the view and the
- * writer agree on what counts as large. */
+/** At or above this length with no linked file a body reads as `large-inline`,
+ * matching the ingest default, so view and writer agree. */
 export const LARGE_INLINE_CHARS = 32_000;
 
-/** A read-only files manifest: every linked file once, an incomplete-coverage
- * flag when some messages in the span no summary covers, and a `large-inline`
- * mark for a large body that named no path. Built at read time from the file
- * joins, so nothing is stored and no model is called. */
+/** A read-only files manifest, built at read time, so nothing is stored and
+ * no model is called. */
 export function filesView(
   store: LcmStore,
   redact: (text: string) => string,

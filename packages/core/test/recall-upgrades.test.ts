@@ -145,7 +145,6 @@ test("grepView: a tool scope equals the unfiltered query plus the tool filter", 
     assert.deepEqual(scoped, ["t00"]);
     const write = hitIds(grepView(store, redactSecrets, { query: "cache", toolName: "write" }));
     assert.deepEqual(write, ["t01"]);
-    // Non-tool messages never match a tool scope.
     assert.ok(!scoped.includes("t02") && !scoped.includes("t03"));
     // An unknown tool name returns empty, not an error.
     const unknown = grepView(store, redactSecrets, { query: "cache", toolName: "nosuchtool" });
@@ -183,9 +182,8 @@ test("orderSummariesByOverlap: query-word overlap orders headers deterministical
       "unrelated weather report",
     ],
   );
-  // Stop words carry no weight: a query of only stop words keeps input order.
+  // Stop words carry no weight.
   assert.deepEqual(orderSummariesByOverlap("the and of", nodes), nodes);
-  // Ties keep input order, so the ordering is deterministic.
   const tied = orderSummariesByOverlap("compaction", [nodes[1]!, nodes[3]!]);
   assert.deepEqual(tied, [nodes[1], nodes[3]]);
 });
@@ -217,8 +215,6 @@ test("historyManifest: a query seeds overlap order without changing the set", ()
         .flatMap((m) => (m[1] === undefined ? [] : [m[1]]))
         .sort((a, b) => (a < b ? -1 : 1));
     assert.deepEqual(idsOf(plain), idsOf(seeded));
-    // The plain manifest lists newest first (m02 ahead of m00); the seeded one
-    // floats the overlap winner (m00) to the top without changing the set.
     assert.ok(plain.indexOf("m02 .. m02") < plain.indexOf("m00 .. m00"), plain);
     assert.ok(seeded.indexOf("m00 .. m00") < seeded.indexOf("m02 .. m02"), seeded);
   } finally {
@@ -248,9 +244,7 @@ test("filesView: lists each linked file once, flags gaps, marks large-inline", (
       "f00",
     );
     store.linkMessageFile(byEntry.get("f00")!, "file-a");
-    // Same file linked from two messages reads once.
     store.linkMessageFile(byEntry.get("f01")!, "file-a");
-    // Only the first two messages are covered, so the span has gaps.
     const covered = [byEntry.get("f00")!, byEntry.get("f01")!];
     store.insertSummary({
       kind: "leaf",
