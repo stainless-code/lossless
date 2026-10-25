@@ -219,14 +219,32 @@ const REFUSED = (reason: string): ImportResult => ({
   refused: reason,
 });
 
+/** A repeated entry id must carry the same text every time. Ingest keeps the
+ * first row and skips the rest, so a conflict has no single reading to check
+ * a file against. Refuse before any write. */
+function duplicateEntryProblem(rows: readonly ExportRow[]): string | undefined {
+  const seen = new Map<string, string>();
+  for (const r of rows) {
+    if (r.rowType !== "message") continue;
+    const prev = seen.get(r.entryId);
+    if (prev === undefined) {
+      seen.set(r.entryId, r.text);
+    } else if (prev !== r.text) {
+      return `message entry ${r.entryId} repeats with different text`;
+    }
+  }
+  return undefined;
+}
+
 /** Runs before any write, so a corrupt file refuses without a partial import.
- * Rows with no linked entries carry nothing to check. */
+ * Rows with no linked entries carry nothing to check. The first row wins,
+ * which is what ingest keeps when an entry id repeats. */
 function fileHashProblem(rows: readonly ExportRow[]): string | undefined {
-  const textByEntry = new Map(
-    rows
-      .filter((r): r is ExportMessageRow => r.rowType === "message")
-      .map((m) => [m.entryId, m.text]),
-  );
+  const textByEntry = new Map<string, string>();
+  for (const r of rows) {
+    if (r.rowType !== "message") continue;
+    if (!textByEntry.has(r.entryId)) textByEntry.set(r.entryId, r.text);
+  }
   for (const f of rows) {
     if (f.rowType !== "file") continue;
     for (const entryId of f.entryIds) {
@@ -238,6 +256,30 @@ function fileHashProblem(rows: readonly ExportRow[]): string | undefined {
       const actual = createHash("sha256").update(text).digest("hex");
       if (actual !== f.sha256) {
         return `file ${f.fileId} carries sha256 ${f.sha256} but entry ${entryId} hashes to ${actual}`;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** A file row links to the stored message for its entry id, and ingest skips an
+ * entry id the target already holds. When the target holds different text, the
+ * file would link to bytes its hash was not checked against, so refuse before
+ * any write and leave the stored row alone. */
+function existingEntryProblem(store: LcmStore, rows: readonly ExportRow[]): string | undefined {
+  const textByEntry = new Map<string, string>();
+  for (const r of rows) {
+    if (r.rowType !== "message") continue;
+    if (!textByEntry.has(r.entryId)) textByEntry.set(r.entryId, r.text);
+  }
+  for (const f of rows) {
+    if (f.rowType !== "file") continue;
+    for (const entryId of f.entryIds) {
+      const supplied = textByEntry.get(entryId);
+      if (supplied === undefined) continue;
+      const existing = store.messageByEntryId(entryId);
+      if (existing !== undefined && existing.text !== supplied) {
+        return `file ${f.fileId} names entry ${entryId} whose text in this store differs from the file`;
       }
     }
   }
@@ -272,8 +314,14 @@ export function importTranscript(store: LcmStore, rows: readonly ExportRow[]): I
   const problem = provenanceProblem(rows);
   if (problem) return REFUSED(problem);
 
+  const duplicateProblem = duplicateEntryProblem(rows);
+  if (duplicateProblem) return REFUSED(duplicateProblem);
+
   const hashProblem = fileHashProblem(rows);
   if (hashProblem) return REFUSED(hashProblem);
+
+  const clashProblem = existingEntryProblem(store, rows);
+  if (clashProblem) return REFUSED(clashProblem);
 
   const exported = new Set(messages.map((m) => m.entryId));
   const foreign = store.allMessages().filter((m) => !exported.has(m.entryId));

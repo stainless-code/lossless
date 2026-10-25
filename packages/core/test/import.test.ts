@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 import { test } from "vite-plus/test";
 
-import { EXPORT_VERSION, exportTranscript, type ExportSummaryRow } from "../src/export.ts";
+import {
+  EXPORT_VERSION,
+  exportTranscript,
+  type ExportRow,
+  type ExportSummaryRow,
+} from "../src/export.ts";
 import { importTranscript, parseExport } from "../src/import.ts";
 import { ingestEntries } from "../src/ingest.ts";
 import { LcmStore, TRUNCATED_SUMMARY_PREFIX } from "../src/store.ts";
@@ -236,6 +242,83 @@ test("import: provenance naming a child the file does not hold is refused", () =
   const result = importTranscript(target, (parsed as { rows: never[] }).rows);
   assert.match(result.refused ?? "", /names child 7/);
   assert.equal(target.allSummaries().length, 0);
+  target.close();
+});
+
+test("import: a repeated entry id with different text is refused before any write", () => {
+  const first = "first body for e00";
+  const second = "second body for e00, different";
+  const rows: ExportRow[] = [
+    {
+      v: EXPORT_VERSION,
+      rowType: "message",
+      entryId: "e00",
+      role: "user",
+      text: first,
+      tokens: 1,
+      timestamp: 1,
+    },
+    {
+      v: EXPORT_VERSION,
+      rowType: "message",
+      entryId: "e00",
+      role: "user",
+      text: second,
+      tokens: 1,
+      timestamp: 2,
+    },
+    {
+      v: EXPORT_VERSION,
+      rowType: "file",
+      fileId: "0123456789abcdef",
+      path: "/x/a.txt",
+      bytes: second.length,
+      sha256: createHash("sha256").update(second).digest("hex"),
+      kind: "text",
+      preview: "preview",
+      entryIds: ["e00"],
+    },
+  ];
+  const target = new LcmStore(":memory:");
+  const result = importTranscript(target, rows);
+  assert.match(result.refused ?? "", /repeats with different text/);
+  assert.equal(target.messageCount(), 0, "the conflicting rows write nothing");
+  assert.equal(target.stats().files, 0);
+  target.close();
+});
+
+test("import: a file row clashing with stored text for the same entry id is refused", () => {
+  const stored = "stored body for e00";
+  const supplied = "supplied different body for e00";
+  const target = new LcmStore(":memory:");
+  ingestEntries(target, [{ entryId: "e00", role: "user", text: stored, timestamp: 1 }]);
+  const rows: ExportRow[] = [
+    {
+      v: EXPORT_VERSION,
+      rowType: "message",
+      entryId: "e00",
+      role: "user",
+      text: supplied,
+      tokens: 1,
+      timestamp: 1,
+    },
+    {
+      v: EXPORT_VERSION,
+      rowType: "file",
+      fileId: "0123456789abcdef",
+      path: "/x/a.txt",
+      bytes: supplied.length,
+      sha256: createHash("sha256").update(supplied).digest("hex"),
+      kind: "text",
+      preview: "preview",
+      entryIds: ["e00"],
+    },
+  ];
+  const result = importTranscript(target, rows);
+  assert.match(result.refused ?? "", /differs from the file/);
+  assert.equal(target.messageCount(), 1, "the stored row stays alone");
+  assert.equal(target.messageByEntryId("e00")?.text, stored, "the stored text is untouched");
+  assert.equal(target.stats().files, 0, "the file does not link to the wrong text");
   target.close();
 });
 
