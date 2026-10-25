@@ -633,6 +633,15 @@ export type BranchRemovedRow = LcmRowBase & {
   restored: number;
 };
 
+/** A watermark miss forced a full rescan. The watermark names the entry the
+ * hook expected to continue after, and entries counts the raw session list
+ * that was rescanned. Empty deltas never write one. */
+export type IngestRescanRow = LcmRowBase & {
+  kind: "ingest-rescan";
+  watermark: string;
+  entries: number;
+};
+
 export type FileExternalizedRow = LcmRowBase & {
   kind: "file-externalized";
   entryId: string;
@@ -747,6 +756,7 @@ export type LcmMetricRecord =
   | GcDeletedRow
   | StoreMigratedRow
   | BranchRemovedRow
+  | IngestRescanRow
   | FileExternalizedRow
   | LargeInlineRow
   | RecallRow
