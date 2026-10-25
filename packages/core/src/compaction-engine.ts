@@ -277,11 +277,17 @@ export async function runCompaction(
         return;
       }
       let sourceClipped = false;
+      let mixedSkipped = false;
       // A post-split re-cap can join noisy and ordinary runs, so a mixed
       // range keeps full provenance but prompts only ordinary messages.
       // Contiguous spans stay intact for the span index and the frontier.
+      // Skipped noisy bodies count as clipped source, so the leaf stays
+      // healable and never reads as clean.
       const items = remaining.flatMap((m) => {
-        if (mechanicalIds.has(m.id)) return [];
+        if (mechanicalIds.has(m.id)) {
+          mixedSkipped = true;
+          return [];
+        }
         const ref = refByMessage.get(m.id);
         // The summarizer never reads a stored body unmasked. The mask runs on
         // the whole body rather than on the clipped copy, so a value that
@@ -318,7 +324,7 @@ export async function runCompaction(
       }
       const stored = storedSummaryText(text, level, redact);
       const tokens = estimateTokens(stored);
-      const quality = leafQuality(level, sourceClipped);
+      const quality = leafQuality(level, sourceClipped || mixedSkipped);
       const inserted = store.insertSummary({
         kind: "leaf",
         text: stored,
@@ -764,6 +770,8 @@ function replaceIfSmaller(
   return true;
 }
 
+/** A leaf that omitted listed noisy bodies is clipped, like a length clip:
+ * the model did not see the full source, but heal reads the full rows. */
 function leafQuality(level: SummaryLevel, sourceClipped: boolean): SummaryQuality {
   if (level === 3) return "mechanical";
   return sourceClipped ? "clipped" : "clean";

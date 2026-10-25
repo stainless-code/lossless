@@ -7,6 +7,7 @@ import { estimateTokens } from "../src/estimate-tokens.ts";
 import { runHeal } from "../src/heal.ts";
 import { ingestEntries } from "../src/ingest.ts";
 import { checkIntegrity } from "../src/integrity.ts";
+import { describeView } from "../src/recall-view.ts";
 import { LcmStore, TRUNCATED_SUMMARY_PREFIX } from "../src/store.ts";
 import type { LlmComplete } from "../src/summarize.ts";
 import {
@@ -413,6 +414,87 @@ test("mechanical tier: opts carry the list when the input does not", async () =>
     );
     assert.equal(outcome.kind, "stored");
     assert.equal(calls.length, 0);
+  } finally {
+    store.close();
+  }
+});
+
+test("mechanical tier: merged mixed leaves stay clipped and heal restores detail", async () => {
+  const store = new LcmStore(":memory:");
+  try {
+    const span = Array.from({ length: 20 }, (_, i) =>
+      i % 2 === 0
+        ? {
+            entryId: `e${i}`,
+            role: "user" as const,
+            text: `ORDINARY-${i} ${"p".repeat(50)}`,
+          }
+        : {
+            entryId: `e${i}`,
+            role: "toolResult" as const,
+            text: `tool noisy-read {"n":${i}}\nNOISY-BODY-${i} ${"z".repeat(200)}`,
+          },
+    );
+    const calls: string[] = [];
+    const outcome = await storedPass(
+      store,
+      { span, targetTokens: 1500, mechanicalTools: ["noisy-read"] },
+      countingLlm(() => "summary", calls),
+      { leafChunkTokens: 100_000, maxChunks: 4 },
+    );
+    assert.ok(calls.length >= 1 && calls.length <= 4, `bounded attempts, got ${calls.length}`);
+    for (const prompt of calls) {
+      assert.ok(!prompt.includes("NOISY-BODY"), "noisy body never reaches a model call");
+      assert.ok(!prompt.includes("noisy-read"), "noisy marker never reaches a model call");
+    }
+    const joined = calls.join("\n");
+    for (let i = 0; i < 20; i += 2) {
+      assert.ok(joined.includes(`ORDINARY-${i}`), `ordinary ${i} reaches a prompt`);
+    }
+    const leaves = outcome.leafSummaryIds.map((id) => store.getSummary(id)!);
+    assert.ok(leaves.length <= 4);
+    for (const leaf of leaves) {
+      assert.equal(leaf.quality, "clipped", "a mixed leaf never reads as clean");
+    }
+    const allIds = store
+      .allMessages()
+      .map((m) => m.id)
+      .sort((a, b) => a - b);
+    const covered: number[] = [];
+    for (const id of outcome.leafSummaryIds) covered.push(...store.summarySources(id).messages);
+    assert.deepEqual(
+      [...covered].sort((a, b) => a - b),
+      allIds,
+      "every message stays in exactly one leaf",
+    );
+    assert.equal(new Set(covered).size, allIds.length, "no double summary");
+    assert.deepEqual(store.uncoveredMessagesInSpan("e0", "e19"), []);
+    const view = describeView(store, (t) => t, leaves[0]!.id);
+    assert.ok(view.ok);
+    if (!view.ok) return;
+    assert.ok(view.text.includes("Quality: clipped"), view.text);
+    assert.equal(view.details["quality"], "clipped");
+    const healCalls: string[] = [];
+    const healLlm: LlmComplete = Object.assign(
+      async (_system: string, user: string, _max: number): Promise<string> => {
+        healCalls.push(user);
+        return "healed summary";
+      },
+      { metrics: () => {} },
+    );
+    const healed = await runHeal(store, { targetTokens: 100 }, healLlm);
+    assert.deepEqual(
+      [...healed.repaired].sort((a, b) => a - b),
+      [...outcome.leafSummaryIds].sort((a, b) => a - b),
+    );
+    assert.ok(healCalls.length >= 1);
+    assert.ok(
+      healCalls.join("\n").includes("NOISY-BODY"),
+      "heal reads the full rows including noisy text",
+    );
+    for (const id of outcome.leafSummaryIds) {
+      assert.equal(store.getSummary(id)?.quality, "clean");
+    }
   } finally {
     store.close();
   }

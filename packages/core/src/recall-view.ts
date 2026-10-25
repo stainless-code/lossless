@@ -608,6 +608,7 @@ export function describeView(
   const costs = nodeCosts(store, node, children);
   const lines = [
     `Summary #${node.id} (${node.kind}, depth ${node.depth}, ${node.tokens} tokens)`,
+    `Quality: ${node.quality}`,
     `Span: ${node.firstEntryId} .. ${node.lastEntryId}`,
     `Costs: source ${costs.source} tokens across ${costs.messages} messages; subtree ${costs.subtree} tokens`,
     ...((node.thoroughText ?? "") === ""
@@ -625,7 +626,13 @@ export function describeView(
   return {
     ok: true,
     text: lines.join("\n"),
-    details: { id: node.id, kind: node.kind, depth: node.depth, tokens: node.tokens },
+    details: {
+      id: node.id,
+      kind: node.kind,
+      depth: node.depth,
+      tokens: node.tokens,
+      quality: node.quality,
+    },
   };
 }
 
