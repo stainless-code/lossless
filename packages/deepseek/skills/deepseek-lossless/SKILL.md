@@ -60,6 +60,7 @@ the tools, and the command.
 - `sidecarDir` holds one SQLite file per session; delete one to forget that session.
 - `auto: false` (default) runs no automatic pressure compaction; `/lcm compact` works regardless. `bracketAuto: true` routes automatic compaction through the DAG bracket.
 - `summarizationProvider` / `summarizationModel` unset follow the routed model.
+- `thresholdRatio` (default `0.8`) sets the window fraction where pressure compacts; `retainRatio` (default `0.16`) keeps that fraction of recent context verbatim. `retainTokens` replaces the fraction with an absolute budget; the two are mutually exclusive.
 - Budgets: `summarizerTokensPerCall`, `summarizerTokensPerPass`, `summarizerTokensPerHeal`; `healSourceTokens` unset derives 8x `summaryTokens`, clamped to 3000 through 24000.
 
 ## Common mistakes
