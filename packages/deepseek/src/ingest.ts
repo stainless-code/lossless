@@ -152,9 +152,9 @@ export interface BackfillOptions {
 export interface BackfillResult {
   ingested: number;
   skipped: number;
-  /** Seq of the first mirrored event, -1 when nothing was mirrored. */
+  /** Seq of the first visited event, -1 when nothing visited. */
   fromSeq: number;
-  /** Seq of the last mirrored event, -1 when nothing was mirrored. */
+  /** Seq of the last visited event, -1 when nothing visited. */
   throughSeq: number;
   /** True when the observation held more events than the cap allowed. */
   capped: boolean;
@@ -279,6 +279,9 @@ function describeNonText(message: Message): string {
 function describeBlock(block: ContentBlock): string {
   switch (block.type) {
     case "image": {
+      if ((block as { attachment?: unknown }).attachment === undefined) {
+        return "image (attachment missing)";
+      }
       const ref = block.attachment;
       const details = [
         ref.mediaType,
@@ -291,6 +294,9 @@ function describeBlock(block: ContentBlock): string {
       return `image${name} (${details.join(", ")})`;
     }
     case "file": {
+      if ((block as { attachment?: unknown }).attachment === undefined) {
+        return "file (attachment missing)";
+      }
       const ref = block.attachment;
       return `file ${JSON.stringify(ref.name)} (${ref.bytes} bytes, ${String(ref.attachmentId)})`;
     }

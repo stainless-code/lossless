@@ -19,7 +19,10 @@ without re-litigation.
 - MUST KILL reshapes are out of bounds. dshRef, UsageTracker,
   commitDagTransaction, DagStabilityError, resolveSummarizationTarget,
   MessageIndex, resolveEntryId, SpanAlreadyMemoryError, withSummaryRefs,
-  cross-session caps, selectDagRange: all need new shapes (redesigns), so
+  cross-session caps, selectDagRange, lcmCommandDefinition, pressureZone,
+  writeDumpTarget, whitespace sentinel, mechanicalToolNameOf split,
+  SidecarStores opened handles, scopedGrepAll pushdown, toolScopeMessageIds
+  scope state: all need new shapes (redesigns), so
   their comments stay and the flags report open (same pass).
 - UI routing comments stay. Sidebar and harness-nav comments record the
   reference-only constraint and cross-file sync points a reader cannot

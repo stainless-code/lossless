@@ -233,7 +233,6 @@ describe("pre-mount backfill", () => {
     });
     expect(seen.calls).toBe(1);
     expect(result.capped).toBe(true);
-    // Skips never burn budget: 25 inserts need 50 visits here.
     expect(result.ingested).toBe(25);
     expect(result.skipped).toBe(25);
     expect(result.ingested + result.skipped).toBe(50);
@@ -260,7 +259,6 @@ describe("pre-mount backfill", () => {
     });
     expect(result.capped).toBe(true);
     expect(result.ingested).toBe(10);
-    // 20 dedup and non-message skips plus 10 fresh inserts need 39 visits.
     expect(result.ingested + result.skipped).toBe(39);
     expect(result.throughSeq).toBe(Number(events[38]?.seq));
     expect(store.allMessages()).toHaveLength(20);
@@ -291,7 +289,6 @@ describe("pre-mount backfill", () => {
     const result = await backfillSession(session, store, fakeSource(events));
     expect(result.capped).toBe(true);
     expect(result.ingested).toBe(BACKFILL_MAX_EVENTS);
-    // 500 inserts need 999 visits here, still under the visit ceiling.
     expect(result.ingested + result.skipped).toBe(999);
     expect(result.ingested + result.skipped).toBeLessThan(BACKFILL_MAX_VISITED);
     expect(store.allMessages()).toHaveLength(BACKFILL_MAX_EVENTS);
@@ -311,6 +308,27 @@ describe("pre-mount backfill", () => {
     expect(second.ingested).toBe(0);
     expect(second.skipped).toBe(600);
     expect(store.allMessages()).toHaveLength(session.deriveMessages().length);
+  });
+
+  it("mirrors an attachment-less image block as a marker row", async () => {
+    const session = Session.create(SessionId("backfill-missing-attachment"));
+    session.append("turn/start", { turn: 1 });
+    session.append(
+      "user/message",
+      createUserMessage({
+        content: [{ type: "image" } as unknown as { type: "text"; text: string }],
+        source: { kind: "user" },
+      }),
+      { surfaceOp: "append" },
+    );
+    session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
+    const store = new LcmStore(":memory:");
+    const result = await backfillSession(session, store, fakeSource(session.snapshotEvents()));
+    expect(result.capped).toBe(false);
+    expect(result.ingested).toBe(1);
+    const rows = store.allMessages();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.text).toContain("image (attachment missing)");
   });
 });
 

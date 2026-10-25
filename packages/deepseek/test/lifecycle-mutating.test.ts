@@ -634,6 +634,60 @@ describe("lcm mutating verbs", () => {
     expect(unknown.text).toContain("no sidecar for session no-such-sidecar");
   });
 
+  it("dump --save= with an empty inline value names the file error", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("dump-empty-save"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    seedMessages(deps.storeFor!("dump-empty-save"), ["empty save history"]);
+    const result = await invoke(ctx, deps, "dump-empty-save", "dump --save=");
+    expect(result.kind).toBe("error");
+    expect(result.text).toContain("name the file to write");
+  });
+
+  it("gc --session= with an empty inline value asks for a session id", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-empty-session";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    ctx.sessions.create(SessionId("other-empty-session"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    const result = await invoke(ctx, deps, liveId, "gc --session=");
+    expect(result.kind).toBe("error");
+    expect(result.text).toContain("--session takes a session id");
+  });
+
+  it("dump lists each stored summary once from a single read", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("dump-single-read"), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    const store = deps.storeFor!("dump-single-read");
+    seedMessages(store, ["single read one", "single read two"]);
+    const ids = store.messagesInSpan("e00", "e01").map((message) => message.id);
+    store.insertSummary({
+      kind: "leaf",
+      text: "leaf for single read",
+      tokens: 4,
+      depth: 0,
+      firstEntryId: "e00",
+      lastEntryId: "e01",
+      messageIds: ids,
+    });
+    const result = await invoke(ctx, deps, "dump-single-read", "dump");
+    expect(result.kind).toBe("success");
+    expect(result.text).toContain("LCM sidecar dump: dump-single-read");
+    expect(result.text).toContain("1 shown of 1");
+    expect(result.text).toContain("single read one");
+  });
+
   it("heal dry-run lists a truncated node and apply repairs it on a scripted model", async () => {
     const scripts = [[...textChunks("a repaired leaf summary")]];
     const { ctx } = setupContext(ROUTE, scripts);

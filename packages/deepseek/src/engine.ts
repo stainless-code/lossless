@@ -228,8 +228,17 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
     // A leading system message is the retained head, not shadowed content.
     const startAt = input.messages[0]?.role === "system" ? 1 : 0;
     const items: Array<{ seq: number; entry: CompactionSpanEntry }> = [];
+    let warmed = false;
     for (const message of input.messages.slice(startAt)) {
-      const entryId = index.entryId(message.id) ?? this.resolveEntryId(session, index, message.id);
+      let entryId = index.entryId(message.id);
+      if (entryId === undefined) {
+        if (warmed) {
+          entryId = undefined;
+        } else {
+          warmed = true;
+          entryId = this.resolveEntryId(session, index, message.id);
+        }
+      }
       if (entryId === undefined) {
         throw new Error(
           `lossless compaction: message ${message.id} has no sidecar row; the span is not fully mirrored`,

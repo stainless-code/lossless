@@ -1,6 +1,7 @@
 import { Context } from "@deepseek-ai/cordis";
 import { ManualCompactionError } from "@deepseek-ai/dsh-compaction";
 import { createMessage, createSystemMessage, createUserMessage } from "@deepseek-ai/dsh-llm";
+import type { Message } from "@deepseek-ai/dsh-llm";
 import SessionStore, { Session, SessionId } from "@deepseek-ai/dsh-session";
 import SessionProjectionRegistry from "@deepseek-ai/dsh-session-projection";
 import TokenMeter from "@deepseek-ai/dsh-token-meter";
@@ -371,6 +372,47 @@ describe("LosslessSummarizerEngine", () => {
     const sid = String(session.id);
     const pass = rows.find((row) => row.kind === "pass");
     expect(pass?.span).toEqual([`${sid}:${Math.min(...seqs)}`, `${sid}:${Math.max(...seqs)}`]);
+  });
+
+  it("scans the live log once for consecutive index misses", () => {
+    const session = buildSession("scan once ".repeat(20));
+    const store = new LcmStore(":memory:");
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store);
+    const derived = session.deriveMessages();
+    const real = derived.find((message) => message.role !== "system");
+    if (!real) throw new Error("conversation is missing a non-system message");
+    const ghost = { id: "ghost-1", role: "user" } as unknown as Message;
+    const { ctx } = setupContext(ROUTE, [textChunks(SUMMARY)]);
+    mountMeter(ctx);
+    const engine = engineFor(ctx, store, new MessageIndex());
+    const spanOf = (
+      engine as unknown as {
+        spanOf(
+          input: { messages: readonly Message[] },
+          store: LcmStore,
+          index: MessageIndex,
+          session: Session,
+        ): unknown[];
+      }
+    ).spanOf.bind(engine);
+    let scans = 0;
+    const snapshotEvents = session.snapshotEvents.bind(session);
+    session.snapshotEvents = (() => {
+      scans += 1;
+      return snapshotEvents();
+    }) as typeof session.snapshotEvents;
+    const index = new MessageIndex();
+    let failure: unknown;
+    try {
+      spanOf({ messages: [real, ghost] }, store, index, session);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toBe(
+      "lossless compaction: message ghost-1 has no sidecar row; the span is not fully mirrored",
+    );
+    expect(scans).toBe(1);
   });
 
   it("rethrows the original span error when no history source exists", async () => {

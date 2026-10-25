@@ -79,9 +79,10 @@ export interface ReadMetricRowsOptions {
 export function readMetricRows(dir: string, opts?: ReadMetricRowsOptions): unknown[] {
   const session =
     typeof opts?.session === "string" && opts.session.length > 0 ? opts.session : undefined;
-  const limit =
+  let limit =
     typeof opts?.limit === "number" && Number.isFinite(opts.limit) ? opts.limit : undefined;
-  if (session === undefined && (limit === undefined || limit < 0)) {
+  if (limit !== undefined && limit < 0) limit = undefined;
+  if (session === undefined && limit === undefined) {
     return readAllMetricRows(dir);
   }
   if (limit !== undefined && limit <= 0) return [];

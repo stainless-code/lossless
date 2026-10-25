@@ -105,8 +105,9 @@ function buildDump(store: LcmStore, options: SidecarDumpOptions): string {
     `history:`,
     historyManifest(store, DUMP_MAX_HISTORY),
   ];
-  const summaries = store.allSummaries().slice(0, DUMP_MAX_SUMMARIES);
-  const totalSummaries = store.allSummaries().length;
+  const allSummaries = store.allSummaries();
+  const summaries = allSummaries.slice(0, DUMP_MAX_SUMMARIES);
+  const totalSummaries = allSummaries.length;
   const sections: string[] = [...head];
   if (summaries.length > 0) {
     sections.push(`summaries: ${summaries.length} shown of ${totalSummaries}`);
@@ -220,7 +221,6 @@ function shapeSampleList(
   return [head, ...kept].join("\n\n");
 }
 
-/** Mark one kept list row as off the active path, grepView style. */
 function labelRemoved(chunk: string): string {
   const at = chunk.indexOf("\n");
   return at === -1 ? `${chunk} [removed]` : `${chunk.slice(0, at)} [removed]${chunk.slice(at)}`;

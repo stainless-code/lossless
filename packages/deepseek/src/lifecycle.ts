@@ -142,7 +142,6 @@ function policyFor(
   );
 }
 
-/** Zone status and diagnose report: base seam keys plus the routed override. */
 function pressureZone(deps: LcmCommandDeps, route: DshRoute | undefined): ThresholdConfig {
   const override = policyFor(deps, route)?.thresholdRatio;
   return mergeZone(
@@ -545,13 +544,15 @@ export function handleDump(
 ): CommandResult {
   const sessionId = String(invocation.agent.session.id);
   const includeRemoved = args.includes("--include-removed");
-  if (args.includes("--save") && valueOf(args, "--save") === undefined) {
+  const saveValue = valueOf(args, "--save") || undefined;
+  const hasSave = args.includes("--save") || args.some((arg) => arg.startsWith("--save="));
+  if (hasSave && saveValue === undefined) {
     return {
       kind: "error",
       text: "LCM dump --save: name the file to write, e.g. `/lcm dump --save lcm-dump.txt`.",
     };
   }
-  const save = valueOf(args, "--save");
+  const save = saveValue;
   const query = args.filter((arg) => !arg.startsWith("--") && arg !== save).join(" ");
   const result = dumpSidecar({
     path: deps.storePathFor(sessionId),
@@ -645,13 +646,15 @@ export function handleGc(
 ): CommandResult {
   const sessionId = String(invocation.agent.session.id);
   const apply = args.includes("--apply");
-  if (args.includes("--session") && valueOf(args, "--session") === undefined) {
+  const sessionValue = valueOf(args, "--session") || undefined;
+  const hasSession = args.includes("--session") || args.some((arg) => arg.startsWith("--session="));
+  if (hasSession && sessionValue === undefined) {
     return { kind: "error", text: "LCM gc: --session takes a session id." };
   }
   if (args.includes("--older-than") && valueOf(args, "--older-than") === undefined) {
     return { kind: "error", text: "LCM gc: --older-than takes a number of days." };
   }
-  const onlySession = valueOf(args, "--session");
+  const onlySession = sessionValue;
   if (onlySession !== undefined && liveStems(deps, sessionId).has(sanitizeSidecarId(onlySession))) {
     return {
       kind: "error",
