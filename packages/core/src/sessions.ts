@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Type, type Static } from "typebox";
 import { Compile } from "typebox/compile";
 
-import { scopedGrepAll, toolScopeMessageIds } from "./recall-view.ts";
+import { ftsPhrase, scopedGrepAll, toolScopeMessageIds } from "./recall-view.ts";
 import { hashSessionPath } from "./retention.ts";
 import { LcmStore, StaleStoreError, type GrepHit } from "./store.ts";
 
@@ -362,7 +362,7 @@ function searchStore(
       return store.grep(query, { limit, ...grepFilters });
     } catch {
       try {
-        return store.grep(JSON.stringify(query), { limit, ...grepFilters });
+        return store.grep(ftsPhrase(query), { limit, ...grepFilters });
       } catch {
         return [];
       }
@@ -380,6 +380,6 @@ function searchStore(
       return undefined;
     }
   };
-  const hits = searchIn(scopedIds, query) ?? searchIn(scopedIds, JSON.stringify(query));
+  const hits = searchIn(scopedIds, query) ?? searchIn(scopedIds, ftsPhrase(query));
   return hits ?? [];
 }

@@ -81,7 +81,9 @@ export function withToolScope(query: string, toolName: string): string {
  * belongs to that call batch; any other role ends the run, as does a
  * toolResult row that names a different tool. Bracket text is checked
  * directly so one row naming two tools anchors both, and
- * mechanicalToolNameOf covers the `tool <name>` and payload forms. */
+ * mechanicalToolNameOf covers the `tool <name>` and payload forms. User and
+ * custom rows never open a scope, so quoting a marker in chat pulls in no
+ * results; a mixed assistant block still opens through its literal marker. */
 export function toolScopeMessageIds(
   store: LcmStore,
   toolName: string,
@@ -101,8 +103,10 @@ export function toolScopeMessageIds(
   let open = false;
   for (const row of visible) {
     const namesTool =
-      row.text.toLowerCase().includes(`[tool:${want}]`) ||
-      mechanicalToolNameOf({ text: row.text, payload: row.payload }) === want;
+      row.role !== "user" &&
+      row.role !== "custom" &&
+      (row.text.toLowerCase().includes(`[tool:${want}]`) ||
+        mechanicalToolNameOf({ text: row.text, payload: row.payload, role: row.role }) === want);
     if (namesTool) {
       out.add(row.id);
       open = true;
@@ -229,7 +233,7 @@ export function grepView(
   };
   hits = search(pattern, includeRemoved, offset);
   if (hits === undefined) {
-    pattern = JSON.stringify(params.query);
+    pattern = ftsPhrase(params.query);
     hits = search(pattern, includeRemoved, offset);
   }
   if (hits === undefined) {
@@ -365,7 +369,7 @@ function toolScopedView(
     all = undefined;
   }
   if (all === undefined) {
-    pattern = JSON.stringify(query);
+    pattern = ftsPhrase(query);
     try {
       all = runAll(pattern, visibleIds, includeRemoved);
     } catch {

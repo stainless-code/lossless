@@ -15,6 +15,7 @@ import {
   LARGE_INLINE_CHARS,
   orderSummariesByOverlap,
   toolMarker,
+  toolScopeMessageIds,
   withToolScope,
 } from "../src/recall-view.ts";
 import { redactSecrets } from "../src/redact.ts";
@@ -662,6 +663,99 @@ test("searchSessions: a tool scope finds a Pi result row after its call row", ()
     assert.equal(result.scanned, 1);
     assert.deepEqual(
       result.hits.map((h) => h.entryId),
+      ["p01"],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("toolScope: a user-quoted marker opens no scope but mixed assistant still matches", () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      { entryId: "u00", role: "user", text: 'quoting "[tool:read]" in prose', timestamp: 1 },
+      { entryId: "r00", role: "toolResult", text: "followword body here", timestamp: 2 },
+      { entryId: "c00", role: "custom", text: 'quoting "[tool:read]" in prose', timestamp: 3 },
+      { entryId: "r01", role: "toolResult", text: "customfollowword body here", timestamp: 4 },
+      {
+        entryId: "a00",
+        role: "assistant",
+        text: 'checking [tool:read] {"path": "/a"} plus prose',
+        timestamp: 5,
+      },
+      { entryId: "r02", role: "toolResult", text: "mixedword body here", timestamp: 6 },
+    ]);
+    const byEntry = new Map(store.allMessages().map((m) => [m.entryId, m.id]));
+    const scoped = toolScopeMessageIds(store, "read");
+    assert.ok(!scoped.has(byEntry.get("u00")!), "user marker row opens no scope");
+    assert.ok(!scoped.has(byEntry.get("r00")!), "result after a user marker stays out");
+    assert.ok(!scoped.has(byEntry.get("c00")!), "custom marker row opens no scope");
+    assert.ok(!scoped.has(byEntry.get("r01")!), "result after a custom marker stays out");
+    assert.ok(scoped.has(byEntry.get("a00")!), "mixed assistant marker still opens");
+    assert.ok(scoped.has(byEntry.get("r02")!), "result after mixed assistant stays in");
+    const missed = grepView(store, redactSecrets, { query: "followword", toolName: "read" });
+    assert.equal(missed.ok, true);
+    assert.match(missed.text, /No matches/);
+    const kept = hitIds(grepView(store, redactSecrets, { query: "mixedword", toolName: "read" }));
+    assert.deepEqual(kept, ["r02"]);
+  } finally {
+    store.close();
+  }
+});
+
+test("grepView: an unbalanced-quote query falls back to a phrase search", () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      { entryId: "p00", role: "assistant", text: '[tool:read] {"path": "/a"}', timestamp: 1 },
+      { entryId: "p01", role: "toolResult", text: "hello world cache here", timestamp: 2 },
+    ]);
+    const plain = grepView(store, redactSecrets, { query: 'hello"' });
+    assert.equal(plain.ok, true);
+    assert.ok(plain.text.includes("[p01]"), plain.text);
+    const scoped = grepView(store, redactSecrets, { query: 'hello"', toolName: "read" });
+    assert.equal(scoped.ok, true);
+    assert.ok(scoped.text.includes("[p01]"), scoped.text);
+    const miss = grepView(store, redactSecrets, { query: 'foo"', toolName: "read" });
+    assert.equal(miss.ok, true);
+    assert.match(miss.text, /No matches/);
+  } finally {
+    store.close();
+  }
+});
+
+test("searchSessions: an unbalanced-quote query runs a phrase search", () => {
+  const dir = mkdtempSync(join(tmpdir(), "lcm-session-phrase-"));
+  const storePath = join(dir, "store.db");
+  const setup = new LcmStore(storePath);
+  try {
+    ingestEntries(setup, [
+      { entryId: "p00", role: "assistant", text: '[tool:read] {"path": "/a"}', timestamp: 1 },
+      { entryId: "p01", role: "toolResult", text: "hello world cache here", timestamp: 2 },
+    ]);
+  } finally {
+    setup.close();
+  }
+  const ref = {
+    hash: "h",
+    sessionFile: join(dir, "s.jsonl"),
+    storePath,
+    cwd: "/x",
+    sessionId: "s",
+    when: 1,
+  };
+  try {
+    const plain = searchSessions([ref], 'hello"');
+    assert.equal(plain.scanned, 1);
+    assert.deepEqual(
+      plain.hits.map((h) => h.entryId),
+      ["p01"],
+    );
+    const scoped = searchSessions([ref], 'hello"', { toolName: "read" });
+    assert.equal(scoped.scanned, 1);
+    assert.deepEqual(
+      scoped.hits.map((h) => h.entryId),
       ["p01"],
     );
   } finally {
