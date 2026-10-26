@@ -1,25 +1,18 @@
 # Lossless presets: one `@deepseek-ai/dsh-agent-preset` declaration per
-# shipped web preset, inserted after the web patch. Each entry is a copy of
-# the matching harness preset with two deliberate differences: the compaction
-# group backend becomes `deepseek-lossless/preset`, and em dashes in the
-# copied plan-mode prompt read as commas (repo ships no em dashes; carry the
-# normalization forward on re-sync). Everything else is byte for byte the
-# pinned harness preset, so preset sessions keep their catalog while
-# compaction runs through the shared lossless core.
+# shipped web preset, inserted after the web patch. Each entry is generated
+# by scripts/sync-lossless-presets.ts from the pinned harness presets
+# (dsh v0.2.1-rc.3, the runtime our peers admit) with exactly two
+# deliberate differences: the compaction group backend becomes
+# `deepseek-lossless/preset`, and em dashes in copied plan-mode prose read
+# as commas (this repo ships no em dashes). Everything else is byte for
+# byte the pinned harness preset, so preset sessions keep their catalog
+# while compaction runs through the shared lossless core.
 #
-# Source: packages/bundle/web-app/presets/*.patch.yml at dsh v0.2.1-rc.3,
-# the runtime our peers admit. Re-sync these copies when the harness
-# moves: diff each file against the new harness preset and carry over
-# everything except the backend row.
+# Selecting a Lossless preset is the opt-in; the backend row ships enabled
+# because the selection itself is the opt-in. The host row stays disabled
+# by default, so enable it too: the realm backend borrows the shared core
+# and fails fast naming the host row when it is absent.
 #
-# This bundle installs only on preset-bearing profiles (web, desktop,
-# or a custom profile built on web-app). Host-plane profiles keep the
-# host switch from `deepseek-lossless` alone. Selecting a Lossless
-# preset is the opt-in; the backend row ships enabled because the
-# selection itself is the opt-in. The host row stays disabled by
-# default, so enable it too: the realm backend borrows the shared
-# core and fails fast naming the host row when it is absent.
-
 - insert:
     - id: preset-lossless-standard
       name: "@deepseek-ai/dsh-agent-preset"

@@ -62,6 +62,7 @@ test("publish surface: the lossless presets mirror the pinned harness presets", 
     assert.ok(patch.includes(`id: lossless-${preset}`), `lossless ${preset} identity is set`);
   }
   assert.ok(!patch.includes("- id: compaction-basic"), "no preset keeps the base backend row");
+  assert.ok(!patch.includes("\u2014"), "no em dashes in shipped prose");
   assert.ok(
     patch.includes("deepseek-lossless/preset"),
     "the realm backend resolves the sibling entrypoint",
