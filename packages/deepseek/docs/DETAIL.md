@@ -4,19 +4,18 @@ Long sessions keep working past the point where the model would forget. Aged tur
 
 ## Install
 
-Install is per profile. Repeat for each profile you boot.
+Install is per profile. The recipe below targets host-plane profiles, verified end to end: `headless` and custom profiles built from the base bundle.
 
 ```sh
-dsh plugin --profile web add deepseek-lossless
 dsh plugin --profile headless add deepseek-lossless
 ```
 
-For a custom profile, replace `web` with its name. Without a shipped template, the profile starts from the base bundle.
+For a custom profile, replace `headless` with its name. Without a shipped template, the profile starts from the base bundle. The `web` profile mounts its own compaction backend per agent preset, so the host-level switch below does not reach it; web preset support is follow-up work.
 
 ## Enable
 
 The bundle ships disabled and the base compaction backend stays active.
-To switch one profile over, disable the base row and enable this one in
+To switch a host-plane profile over, disable the base row and enable this one in
 the profile user layer at `~/.dsh/profiles/<name>/cordis.patch.yml`:
 
 ```yaml

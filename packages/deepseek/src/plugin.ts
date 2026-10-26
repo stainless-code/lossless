@@ -102,7 +102,10 @@ export const Config = z.object({
   summarizationModel: z.string(),
   thresholdRatio: z.number().min(0).max(1).default(0.8),
   retainTokens: z.number().step(1).min(0),
-  retainRatio: z.number().min(0).max(1).default(0.16),
+  // No default: the seam owns the ratio default and rejects the pair when
+  // both ride the config. A schema default here would also populate the ratio
+  // when only the absolute budget is set.
+  retainRatio: z.number().min(0).max(1),
   headroomTokens: z.number().step(1).min(0).default(65536),
   modelPolicies: z.array(z.any()),
   summarizerTokensPerCall: z.number().step(1).min(1).default(60000),
