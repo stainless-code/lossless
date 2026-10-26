@@ -1,0 +1,29 @@
+---
+title: "Configuration for DeepSeek"
+description: "DeepSeek: set options in the profile patch: the enable flag, the compaction thresholds, the summarizer budgets, and what stays adapter-only."
+search:
+  tags: ["guide", "config"]
+  boost: 3
+  keywords: [config, cordis.patch.yml, thresholds, options]
+related:
+  - /concepts/compaction-zones
+  - /reference/deepseek/config
+  - /guides/deepseek/troubleshooting
+sidebar:
+  label: "Configuration"
+---
+
+There is no separate config file. Options live in the profile patch row for `deepseek-lossless` at `~/.dsh/profiles/<name>/cordis.patch.yml`. A patch replaces the whole row config, so restating only the keys you change is enough: the rest fall back to the bundled schema defaults, which the Plugins page validates.
+
+```yaml
+- id: deepseek-lossless
+  config:
+    enabled: true
+    auto: false
+    sidecarDir: ./.lossless
+    summaryTokens: 1500
+```
+
+The [config reference](/reference/deepseek/config#keys) lists every key with its type, default, and effect. `enabled` is the master flag and only exactly `true` mounts anything. `retainTokens` and `retainRatio` are mutually exclusive. `modelPolicies` entries match an exact provider plus model route and duplicate targets fail load. Seam keys ride the harness config where unknown keys fail load; adapter-only keys (`summarizerTokensPerCall`, `summarizerTokensPerPass`, `summarizerTokensPerHeal`, `healSourceTokens`, `mechanicalTools`) never reach the seam.
+
+The summarizer follows the routed provider and model unless both summarizer fields are set. `/lcm status` reports the effective values, so a bad value is visible before it costs anything.

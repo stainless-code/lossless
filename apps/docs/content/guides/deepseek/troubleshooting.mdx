@@ -1,0 +1,18 @@
+---
+title: "Troubleshooting for DeepSeek"
+description: "DeepSeek: what to run when compactions do not happen, when the backend stays inert, and how to file a useful report."
+search:
+  tags: ["guide", "troubleshooting"]
+related:
+  - /reference/deepseek/files
+  - /concepts/limits
+  - /reference/deepseek/command
+sidebar:
+  label: "Troubleshooting"
+---
+
+Start with `/lcm status`. It reports the sidecar directory, the active backend, and the effective thresholds. When compactions do not happen, check three things in order: the row is enabled in the profile patch, the base `compaction-basic` row is disabled in the same file, and the profile was restarted after the edit. With the default `enabled: false` the bundle is inert and the base backend stays active, so `/lcm compact` runs through the base path.
+
+When the window gauge disagrees with the harness, compare `/lcm status` against the routed model window. `thresholdRatio`, `retainRatio`, and `headroomTokens` ride the seam, and the clamp pulls an unusable line back with a `(clamped)` marker.
+
+To file a useful report, run `/lcm diagnose --save <file>`. It builds a redacted bundle without secrets. Include the profile name, the backend line from `/lcm status`, and the files list from the [files reference](/reference/deepseek/files). Limits live under [limits](/concepts/limits): what LCM does not do.
