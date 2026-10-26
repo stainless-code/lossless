@@ -1,13 +1,12 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { ModelCompactPolicyConfig } from "@deepseek-ai/dsh-compaction-basic";
 import z from "@deepseek-ai/schemastery";
-import { SidecarStores, redactSecrets, type LcmStore } from "lossless-core";
+import { redactSecrets } from "lossless-core";
 
 import { registerLcmCommand } from "./command.ts";
-import { LosslessSummarizerEngine, checkpointMemory } from "./engine.ts";
-import { MessageIndex, backfillSession, historySourceFrom, mirrorEvent } from "./ingest.ts";
+import { LosslessSummarizerEngine } from "./engine.ts";
+import { backfillSession, historySourceFrom, mirrorEvent } from "./ingest.ts";
 import { healInFlightSessions } from "./lifecycle.ts";
-import { createRecord } from "./metrics.ts";
 import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 
 /** Composition options for `applyLossless`. Each field carries its own default. */
@@ -78,7 +77,13 @@ export interface LosslessPluginConfig {
   readonly mechanicalTools?: readonly string[];
 }
 
-const DEFAULT_SIDECAR_DIR = "./.lossless";
+import {
+  DEFAULT_SIDECAR_DIR,
+  acquireCore,
+  readMechanicalTools,
+  releaseCore,
+  type LosslessCore,
+} from "./core.ts";
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = "deepseek-lossless";
@@ -121,47 +126,57 @@ export function apply(ctx: Context, config: LosslessPluginConfig = {}): () => vo
   return applyLossless(ctx, config);
 }
 
-/** Per-session sidecars: stores delegate to the shared core seam while each
- * session keeps its own live message index beside its store. */
-class SessionSidecars extends SidecarStores {
-  private readonly indexes = new Map<string, MessageIndex>();
-
-  constructor(dir: string) {
-    super({ dir });
-  }
-
-  entryFor(sessionId: string): { store: LcmStore; index: MessageIndex } {
-    const store = this.for(sessionId);
-    let index = this.indexes.get(sessionId);
-    if (!index) {
-      index = new MessageIndex();
-      this.indexes.set(sessionId, index);
-    }
-    return { store, index };
-  }
-
-  peekIndex(sessionId: string): MessageIndex | undefined {
-    return this.indexes.get(sessionId);
-  }
-
-  storesMap(): Map<string, LcmStore> {
-    const map = new Map<string, LcmStore>();
-    for (const id of this.ids()) {
-      const store = this.peek(id);
-      if (store) map.set(id, store);
-    }
-    return map;
-  }
-
-  override clear(): void {
-    super.clear();
-    this.indexes.clear();
-  }
-
-  override evict(sessionId: string): void {
-    super.evict(sessionId);
-    this.indexes.delete(sessionId);
-  }
+/** Split the engine arguments so the host composition and the preset-realm
+ * backend share one construction path. The seam object carries only seam
+ * policy knobs (the seam resolver rejects unknown keys); every adapter-only
+ * key stays on the engine deps. */
+export function buildEngineArgs(
+  config: LosslessPluginConfig,
+  core: LosslessCore,
+): [
+  seam: ConstructorParameters<typeof LosslessSummarizerEngine>[1],
+  deps: ConstructorParameters<typeof LosslessSummarizerEngine>[2],
+] {
+  const mechanicalTools = readMechanicalTools(config.mechanicalTools);
+  return [
+    {
+      auto: config.auto ?? false,
+      ...(config.summarizationProvider === undefined
+        ? {}
+        : { summarizationProvider: config.summarizationProvider }),
+      ...(config.summarizationModel === undefined
+        ? {}
+        : { summarizationModel: config.summarizationModel }),
+      ...(config.thresholdRatio === undefined ? {} : { thresholdRatio: config.thresholdRatio }),
+      ...(config.retainTokens === undefined ? {} : { retainTokens: config.retainTokens }),
+      ...(config.retainRatio === undefined ? {} : { retainRatio: config.retainRatio }),
+      ...(config.headroomTokens === undefined ? {} : { headroomTokens: config.headroomTokens }),
+      ...(config.modelPolicies === undefined ? {} : { modelPolicies: config.modelPolicies }),
+    },
+    {
+      store: (sessionId) => core.sidecars.peek(sessionId),
+      index: (sessionId) => core.sidecars.peekIndex(sessionId),
+      memory: core.memory,
+      redact: redactSecrets,
+      record: core.record,
+      ...(config.summaryTokens === undefined ? {} : { summaryTokens: config.summaryTokens }),
+      ...(config.leafChunkTokens === undefined ? {} : { leafChunkTokens: config.leafChunkTokens }),
+      ...(config.bracketAuto === undefined ? {} : { bracketAuto: config.bracketAuto }),
+      ...(config.summarizerTokensPerCall === undefined
+        ? {}
+        : { summarizerTokensPerCall: config.summarizerTokensPerCall }),
+      ...(config.summarizerTokensPerPass === undefined
+        ? {}
+        : { summarizerTokensPerPass: config.summarizerTokensPerPass }),
+      ...(config.summarizerTokensPerHeal === undefined
+        ? {}
+        : { summarizerTokensPerHeal: config.summarizerTokensPerHeal }),
+      ...(config.healSourceTokens === undefined
+        ? {}
+        : { healSourceTokens: config.healSourceTokens }),
+      ...(mechanicalTools === undefined ? {} : { mechanicalTools }),
+    },
+  ];
 }
 
 /** Compose lossless memory into a harness context: mirror every session
@@ -177,38 +192,17 @@ class SessionSidecars extends SidecarStores {
 export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): () => void {
   if (config.enabled !== true) return () => undefined;
   const dir = config.sidecarDir ?? DEFAULT_SIDECAR_DIR;
-  const sidecars = new SessionSidecars(dir);
+  const core = acquireCore(dir, true);
+  const { sidecars, record } = core;
   const stopMirror = ctx.on("session/event", (live, event) => {
     const entry = sidecars.entryFor(String(live.id));
     mirrorEvent(live, event, entry.store, entry.index);
   });
-  // One recorder per composition: recall, ladder-run, and bracket rows all
-  // land in the same sidecar directory as the stores they describe.
-  const record = createRecord(dir);
   // Pre-mount backfill: sessions already live when the plugin mounts mirror
   // their earlier history through the same mirrorEvent path as the live feed
   // above, paged and capped so a huge log cannot stall mount. The query
   // backend is optional: without it only new events are mirrored. Contained
   // per session and never rejecting, so mount cannot fail over history.
-  // Tool names that skip the model. One name or a list; blanks and repeats
-  // drop, and an empty result keeps the LLM path.
-  const readMechanicalTools = (raw: unknown): string[] | undefined => {
-    const list = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : undefined;
-    if (list === undefined) return undefined;
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const entry of list) {
-      if (typeof entry !== "string") continue;
-      const name = entry.trim();
-      if (name.length === 0) continue;
-      const key = name.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(name);
-    }
-    return out.length === 0 ? undefined : out;
-  };
-  const mechanicalTools = readMechanicalTools(config.mechanicalTools);
   const history = historySourceFrom(ctx);
   if (history !== undefined) {
     const pending = ctx.sessions.list().map((session) => {
@@ -240,49 +234,8 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   // Hydration fallback: a resumed session rebuilds its last checkpoint
   // from its sidecar until it compacts again. Reads only; a lookup miss
   // creates no store.
-  const memory = checkpointMemory((sessionId) => sidecars.peek(sessionId));
-  void new LosslessSummarizerEngine(
-    ctx,
-    {
-      auto: config.auto ?? false,
-      ...(config.summarizationProvider === undefined
-        ? {}
-        : { summarizationProvider: config.summarizationProvider }),
-      ...(config.summarizationModel === undefined
-        ? {}
-        : { summarizationModel: config.summarizationModel }),
-      // Seam policy knobs only: the seam's resolveConfig rejects unknown
-      // keys, so every adapter-only key stays on our own deps below.
-      ...(config.thresholdRatio === undefined ? {} : { thresholdRatio: config.thresholdRatio }),
-      ...(config.retainTokens === undefined ? {} : { retainTokens: config.retainTokens }),
-      ...(config.retainRatio === undefined ? {} : { retainRatio: config.retainRatio }),
-      ...(config.headroomTokens === undefined ? {} : { headroomTokens: config.headroomTokens }),
-      ...(config.modelPolicies === undefined ? {} : { modelPolicies: config.modelPolicies }),
-    },
-    {
-      store: (sessionId) => sidecars.peek(sessionId),
-      index: (sessionId) => sidecars.peekIndex(sessionId),
-      memory,
-      redact: redactSecrets,
-      record,
-      ...(config.summaryTokens === undefined ? {} : { summaryTokens: config.summaryTokens }),
-      ...(config.leafChunkTokens === undefined ? {} : { leafChunkTokens: config.leafChunkTokens }),
-      ...(config.bracketAuto === undefined ? {} : { bracketAuto: config.bracketAuto }),
-      ...(config.summarizerTokensPerCall === undefined
-        ? {}
-        : { summarizerTokensPerCall: config.summarizerTokensPerCall }),
-      ...(config.summarizerTokensPerPass === undefined
-        ? {}
-        : { summarizerTokensPerPass: config.summarizerTokensPerPass }),
-      ...(config.summarizerTokensPerHeal === undefined
-        ? {}
-        : { summarizerTokensPerHeal: config.summarizerTokensPerHeal }),
-      ...(config.healSourceTokens === undefined
-        ? {}
-        : { healSourceTokens: config.healSourceTokens }),
-      ...(mechanicalTools === undefined ? {} : { mechanicalTools }),
-    },
-  );
+  const [seamConfig, engineDeps] = buildEngineArgs(config, core);
+  void new LosslessSummarizerEngine(ctx, seamConfig, engineDeps);
   const stopCommand = registerLcmCommand(ctx, {
     stores: () => sidecars.storesMap(),
     storeFor: (sessionId) => sidecars.for(sessionId),
@@ -325,5 +278,6 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
         sidecars.evict(id);
       } catch {}
     }
+    releaseCore(dir);
   };
 }

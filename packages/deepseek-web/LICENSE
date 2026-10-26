@@ -1,0 +1,13 @@
+MIT License
+
+This software is an original implementation of the Lossless Context Management
+(LCM) architecture, specified in the paper "Lossless Context Management" by
+Clint Ehrlich and Theodore Blackman, Voltropy PBC
+(https://papers.voltropy.com/LCM). The paper is credited as the algorithmic
+specification; all code in this repository was written from that spec.
+
+The "smart zone" framing (quality degradation at a token budget, not the
+window limit) is credited to Matt Pocock, AI Coding Dictionary
+(https://www.aihero.dev/ai-coding-dictionary/smart-zone).
+
+Copyright (c) 2026 stainless-code

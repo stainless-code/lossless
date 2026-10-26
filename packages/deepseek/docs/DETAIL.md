@@ -4,13 +4,23 @@ Long sessions keep working past the point where the model would forget. Aged tur
 
 ## Install
 
-Install is per profile. The recipe below targets host-plane profiles, verified end to end: `headless` and custom profiles built from the base bundle.
+Install is per profile. The host package covers host-plane profiles,
+verified end to end: `headless`, `acp`, `sdk`, and custom profiles built
+from the base bundle.
 
 ```sh
 dsh plugin --profile headless add deepseek-lossless
 ```
 
-For a custom profile, replace `headless` with its name. Without a shipped template, the profile starts from the base bundle. The `web` profile mounts its own compaction backend per agent preset, so the host-level switch below does not reach it; web preset support is follow-up work.
+For a custom profile, replace `headless` with its name. Without a shipped
+template, the profile starts from the base bundle. Preset-bearing profiles
+(`web`, `desktop`, or a custom profile built on `web-app`) need the preset
+companion as well:
+
+```sh
+dsh plugin --profile web add deepseek-lossless
+dsh plugin --profile web add deepseek-lossless-web
+```
 
 ## Enable
 
@@ -25,6 +35,10 @@ the profile user layer at `~/.dsh/profiles/<name>/cordis.patch.yml`:
   config:
     enabled: true
 ```
+
+On a preset-bearing profile, enable the host row the same way, then select
+a Lossless preset for the session. The preset backend borrows the shared
+core and fails fast naming the host row when it is absent.
 
 Restart the profile, then verify with `/lcm status`. To switch back,
 remove both rows and restart: the base backend returns and this bundle

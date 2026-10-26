@@ -9,17 +9,33 @@ sidebar:
   label: "Getting started"
 ---
 
-Install into each profile you boot, starting with the one you run.
+Install into each profile you boot, starting with the one you run. Host-plane
+profiles (`headless`, `acp`, `sdk`, and custom profiles built from the base
+bundle) need only the host package:
 
 ```sh
 dsh plugin --profile headless add deepseek-lossless
 ```
 
-Repeat with any custom profile name. The install resolves through the npm registry, so the version you publish is the version they get. It appends `deepseek-lossless` to `dsh.profile.bundles` automatically because the package declares `dsh.bundle`; without that manifest it would warn and install as a plain dependency with no profile layer.
+Preset-bearing profiles (`web`, `desktop`, or a custom profile built on
+`web-app`) need the preset companion too. It ships Lossless variants of all
+four shipped presets whose compaction backend runs the shared core:
 
-The recipe below switches host-plane profiles: `headless` and custom profiles built from the base bundle, verified end to end. The `web` profile mounts its own compaction backend per agent preset, so the host-level switch does not reach it; web preset support is follow-up work. Installing the package into `web` is harmless and composes the layer, but do not expect the backend to switch there yet.
+```sh
+dsh plugin --profile web add deepseek-lossless
+dsh plugin --profile web add deepseek-lossless-web
+```
 
-The bundle ships disabled and the base compaction backend stays active. To switch a host-plane profile over, disable the base row and enable this one in the profile user layer at `~/.dsh/profiles/<name>/cordis.patch.yml`:
+For a custom profile, replace the name. Without a shipped template, the
+profile starts from the base bundle. The install resolves through the npm
+registry, so the version you publish is the version they get. Each install
+appends its package to `dsh.profile.bundles` automatically because both
+declare `dsh.bundle`; without that manifest a package would warn and install
+as a plain dependency with no profile layer.
+
+The bundles ship disabled and the base backends stay active. On a
+host-plane profile, switch the backend over in the profile user layer at
+`~/.dsh/profiles/<name>/cordis.patch.yml`:
 
 ```yaml
 - id: compaction-basic
@@ -30,6 +46,12 @@ The bundle ships disabled and the base compaction backend stays active. To switc
 ```
 
 A patch replaces the whole row config, so restating only `enabled: true` is enough: every other key falls back to the bundled schema defaults. Restart the profile after editing. To switch back, remove both rows and restart: the base backend returns and this bundle goes inert without uninstalling.
+
+On a preset-bearing profile, enable the host row the same way, then
+select a Lossless preset for the session instead of a shipped one. The
+preset backend borrows the shared core and fails fast naming the host row
+when it is absent, instead of running a split-brain copy. To switch back,
+select a shipped preset again; the base backend returns for those sessions.
 
 Verify with `/lcm status` in a booted session. It reports per-session message and summary counts, the meter window, the resolved swap and re-cut thresholds, and the last pass outcome. Then run `/lcm compact` once on an idle session to prove the manual path: aged turns become summary pointers and every verbatim message stays in the local SQLite sidecar.
 

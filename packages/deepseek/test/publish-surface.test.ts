@@ -37,6 +37,9 @@ test("publish surface: the tarball carries the build, the changelog, and the ski
   const root = manifest.exports?.["."] as { types?: string; default?: string } | undefined;
   assert.equal(root?.default, manifest.main);
   assert.equal(root?.types, manifest.main?.replace(/\.mjs$/, ".d.mts"));
+  const preset = manifest.exports?.["./preset"] as { types?: string; default?: string } | undefined;
+  assert.equal(preset?.default, "./dist/preset.mjs");
+  assert.equal(preset?.types, "./dist/preset.d.mts");
   assert.equal(manifest.repository?.directory, "packages/deepseek");
   for (const name of ["README.md", "LICENSE", "CHANGELOG.md"]) {
     assert.ok(existsSync(join(PACKAGE_DIR, name)), `${name} is not in the package`);
@@ -51,12 +54,18 @@ test("publish surface: the tarball carries the build, the changelog, and the ski
 test("publish surface: the bundle manifest resolves through the profile composer", () => {
   assert.equal(manifest.icon, "./icon.svg");
   assert.equal(manifest.dsh?.bundle?.patch, "./cordis.patch.yml");
-  for (const subpath of ["./package.json", "./cordis.patch.yml", "./locale/*.json"]) {
+  for (const subpath of ["./package.json", "./cordis.patch.yml", "./locale/*.json", "./preset"]) {
     assert.ok(manifest.exports?.[subpath] !== undefined, `${subpath} is exported`);
   }
   for (const name of ["cordis.patch.yml", "icon.svg", "locale/en.json", "docs/DETAIL.md"]) {
     assert.ok(existsSync(join(PACKAGE_DIR, name)), `${name} ships in the tarball`);
   }
+});
+
+test("publish surface: preset realms live in the web companion package", () => {
+  assert.equal(manifest.dsh?.bundle?.patch, "./cordis.patch.yml");
+  const patch = readFileSync(join(PACKAGE_DIR, "cordis.patch.yml"), "utf8");
+  assert.ok(!patch.includes("preset-lossless"), "no preset rows in the host patch");
 });
 
 test("publish surface: peer ranges admit the pinned prerelease hosts", () => {

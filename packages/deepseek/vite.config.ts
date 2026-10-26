@@ -11,7 +11,7 @@ export default defineConfig({
     deps: {
       resolveDepSubpath: true,
     },
-    entry: ["src/index.ts"],
+    entry: ["src/index.ts", "src/preset.ts"],
     format: ["esm"],
     dts: true,
     sourcemap: true,
