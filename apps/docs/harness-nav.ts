@@ -11,9 +11,9 @@ export interface Host {
   icon: string;
   /**
    * Static entry route used when the current section holds no group for this
-   * host. DeepSeek ships reference only, so the guides-shaped default would
-   * link a page that does not exist. Mirrors the first entry of
-   * `content/reference/deepseek/meta.ts`.
+   * host. Guides and reference both ship for DeepSeek now; the entry mirrors
+   * the first reference page for sections without a DeepSeek group.
+   * Mirrors the first entry of `content/reference/deepseek/meta.ts`.
    */
   entry?: string;
 }
@@ -48,6 +48,6 @@ export const hostFromRoute = (route: string): HostId | undefined => {
   if (under(route, "/guides/opencode") || under(route, "/reference/opencode")) {
     return "opencode";
   }
-  if (under(route, "/reference/deepseek")) return "deepseek";
+  if (under(route, "/guides/deepseek") || under(route, "/reference/deepseek")) return "deepseek";
   return undefined;
 };

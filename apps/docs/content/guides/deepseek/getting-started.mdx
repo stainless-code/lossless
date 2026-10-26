@@ -1,0 +1,35 @@
+---
+title: "Getting started for DeepSeek"
+description: "DeepSeek: install `deepseek-lossless` into each profile you boot, switch the compaction backend over, and verify with `/lcm status`."
+search:
+  tags: ["guide", "install"]
+  boost: 5
+  keywords: [install, setup, quickstart, deepseek, dsh, profile]
+sidebar:
+  label: "Getting started"
+---
+
+Install is per profile. The homepage shows the web profile because most people start with `dsh web`. Repeat for every profile you boot: `headless` for one-shot CLI runs, `web` for interactive use, or a custom name.
+
+```sh
+dsh plugin --profile web add deepseek-lossless
+dsh plugin --profile headless add deepseek-lossless
+```
+
+For a custom profile, replace `web` with its name. Without a shipped template, the profile starts from the base bundle. The install resolves through the npm registry, so the version you publish is the version they get. It appends `deepseek-lossless` to `dsh.profile.bundles` automatically because the package declares `dsh.bundle`; without that manifest it would warn and install as a plain dependency with no profile layer.
+
+The bundle ships disabled and the base compaction backend stays active. To switch one profile over, disable the base row and enable this one in the profile user layer at `~/.dsh/profiles/<name>/cordis.patch.yml`:
+
+```yaml
+- id: compaction-basic
+  disabled: true
+- id: deepseek-lossless
+  config:
+    enabled: true
+```
+
+A patch replaces the targeted row whole config, so restating only `enabled: true` is enough: every other key falls back to the bundled schema defaults. Restart the profile after editing. To switch back, remove both rows and restart: the base backend returns and this bundle goes inert without uninstalling.
+
+Verify with `/lcm status` in a booted session. It reports the sidecar directory and the active backend. Then run `/lcm compact` once on an idle session to prove the manual path: aged turns become summary pointers and every verbatim message stays in the local SQLite sidecar.
+
+Reference holds the full surface: [command](/reference/deepseek/command), [tools](/reference/deepseek/tools), [config](/reference/deepseek/config), and [files](/reference/deepseek/files). Common keys live under the plugin config: `auto` for pressure compaction inside the turn, `sidecarDir` for one SQLite file per session, `summaryTokens` and `leafChunkTokens` for summary budgets, and `mechanicalTools` for spans that compact without a model call. The Plugins page validates them against the bundled schema.

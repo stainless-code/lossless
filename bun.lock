@@ -31,6 +31,9 @@
     "packages/deepseek": {
       "name": "deepseek-lossless",
       "version": "0.1.0",
+      "dependencies": {
+        "@deepseek-ai/schemastery": "^3.18.5",
+      },
       "devDependencies": {
         "@deepseek-ai/cordis": "4.0.5",
         "@deepseek-ai/dsh-agent": "0.2.1-rc.3",

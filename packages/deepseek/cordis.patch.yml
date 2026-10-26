@@ -1,0 +1,5 @@
+- insert:
+    - id: deepseek-lossless
+      name: deepseek-lossless
+      config:
+        enabled: false

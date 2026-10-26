@@ -19,7 +19,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { lcmCommandDefinition } from "../src/command.ts";
 import { LosslessSummarizerEngine } from "../src/engine.ts";
 import type { DshRoute } from "../src/model-host.ts";
-import { applyLossless } from "../src/plugin.ts";
+import { apply, applyLossless, Config, inject, name } from "../src/plugin.ts";
 import { fakeAgent } from "./support/agent-fake.ts";
 import { appendConversation } from "./support/conversation.ts";
 import { setupContext, textChunks } from "./support/script-adapter.ts";
@@ -50,6 +50,16 @@ function sidecarMap(dir: string): Map<string, LcmStore> {
 }
 
 describe("applyLossless", () => {
+  it("exposes the Cordis plugin shape the loader applies", () => {
+    expect(name).toBe("deepseek-lossless");
+    for (const service of ["sessions", "tools", "commands", "llm", "tokenMeter"]) {
+      expect(inject).toContain(service);
+    }
+    expect(inject).not.toContain("compaction");
+    expect(inject).not.toContain("sessionQuery");
+    expect(Config).toBeDefined();
+    expect(typeof apply).toBe("function");
+  });
   it("registers nothing until enabled", async () => {
     const ctx = new Context();
     await ctx.plugin(SystemPrompt, {});

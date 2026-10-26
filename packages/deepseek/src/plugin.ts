@@ -1,5 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 import type { ModelCompactPolicyConfig } from "@deepseek-ai/dsh-compaction-basic";
+import z from "@deepseek-ai/schemastery";
 import { SidecarStores, redactSecrets, type LcmStore } from "lossless-core";
 
 import { registerLcmCommand } from "./command.ts";
@@ -78,6 +79,44 @@ export interface LosslessPluginConfig {
 }
 
 const DEFAULT_SIDECAR_DIR = "./.lossless";
+
+/** Cordis plugin name used by loader diagnostics. */
+export const name = "deepseek-lossless";
+
+/** Capability services the composition reads. Session query stays out:
+ * history backfill degrades gracefully without it, so it remains optional.
+ * Compaction stays out: the composition provides it, so requiring it would
+ * deadlock startup. */
+export const inject = ["sessions", "tools", "commands", "llm", "tokenMeter"];
+
+/** Loader schema for the composition options. Mirrors
+ * `LosslessPluginConfig` with loader defaults and generated docs. */
+export const Config = z.object({
+  enabled: z.boolean().default(false),
+  auto: z.boolean().default(false),
+  bracketAuto: z.boolean().default(false),
+  sidecarDir: z.string().default(DEFAULT_SIDECAR_DIR),
+  summaryTokens: z.number().step(1).min(1).default(1500),
+  leafChunkTokens: z.number().step(1).min(1).default(3000),
+  summarizationProvider: z.string(),
+  summarizationModel: z.string(),
+  thresholdRatio: z.number().min(0).default(0.8),
+  retainTokens: z.number().step(1).min(1),
+  retainRatio: z.number().min(0).default(0.16),
+  headroomTokens: z.number().step(1).min(1).default(65536),
+  modelPolicies: z.array(z.any()),
+  summarizerTokensPerCall: z.number().step(1).min(1).default(60000),
+  summarizerTokensPerPass: z.number().step(1).min(1).default(250000),
+  summarizerTokensPerHeal: z.number().step(1).min(1).default(120000),
+  healSourceTokens: z.number().step(1).min(1),
+  mechanicalTools: z.array(z.string()).default([]),
+});
+
+/** Cordis plugin entrypoint. Delegates to `applyLossless` so the loader
+ * and direct composition share one path. */
+export function apply(ctx: Context, config: LosslessPluginConfig = {}): () => void {
+  return applyLossless(ctx, config);
+}
 
 /** Per-session sidecars: stores delegate to the shared core seam while each
  * session keeps its own live message index beside its store. */

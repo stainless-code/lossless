@@ -7,7 +7,7 @@ export { LosslessSummarizerEngine, SpanAlreadyMemoryError, checkpointMemory } fr
 export type { CheckpointMemory, LosslessEngineDeps } from "./engine.ts";
 export { lcmCommandDefinition, registerLcmCommand } from "./command.ts";
 export type { LcmCommandDeps } from "./command.ts";
-export { applyLossless } from "./plugin.ts";
+export { apply, applyLossless, Config, inject, name } from "./plugin.ts";
 export type { LosslessPluginConfig } from "./plugin.ts";
 export { registerRecallTools } from "./tools.ts";
 export type { RecallDeps } from "./tools.ts";
