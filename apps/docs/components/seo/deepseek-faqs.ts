@@ -32,7 +32,7 @@ export const DEEPSEEK_FAQS: readonly LcmFaq[] = [
   {
     question: "How do I use it on the web?",
     answer:
-      "Install both packages into the web profile, enable the host row, and select a Lossless preset for the session. The host switch alone does not reach preset sessions, which keep the shipped backend. To switch back, select a shipped preset again.",
+      "Install both packages into the web profile, restart, and select a Lossless preset for the session. The host switch alone does not reach preset sessions, which keep the shipped backend. To switch back, select a shipped preset again.",
   },
   SHARED_FAQS.caching,
   {

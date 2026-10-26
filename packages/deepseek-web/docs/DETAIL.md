@@ -21,18 +21,8 @@ them.
 
 ## Enable
 
-Enable the host row first, in the profile user layer at
-`~/.dsh/profiles/<name>/cordis.patch.yml`:
-
-```yaml
-- id: compaction-basic
-  disabled: true
-- id: deepseek-lossless
-  config:
-    enabled: true
-```
-
-Then select a Lossless preset for the session. A missing host core fails
-fast naming the host row instead of running split-brain copies. To switch
-back, select a shipped preset again; the base backend returns for those
-sessions.
+No edits needed: the host bundle mounts its row enabled on install, so the
+shared core is up once the profile restarts. Select a Lossless preset for
+the session. A missing or disabled host row fails fast naming it instead of
+running split-brain copies. To switch back, select a shipped preset again;
+the base backend returns for those sessions.
