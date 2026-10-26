@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Context } from "@deepseek-ai/cordis";
 import CommandRuntime from "@deepseek-ai/dsh-commands";
 import { CommandId } from "@deepseek-ai/dsh-commands/brand";
+import { ManualCompactionError } from "@deepseek-ai/dsh-compaction";
 import { createUserMessage } from "@deepseek-ai/dsh-llm";
 import SessionStore, { SessionId } from "@deepseek-ai/dsh-session";
 import type { SessionEvent } from "@deepseek-ai/dsh-session";
@@ -317,6 +318,42 @@ describe("applyLossless", () => {
       expect(carryover).toBe(true);
     } finally {
       dispose();
+    }
+  });
+
+  it("maps every manual compaction failure code to its explained error", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const session = ctx.sessions.create(SessionId("live-codes"), { meta: { cwd: dir } });
+    const cases = [
+      ["busy", "has an active compaction"],
+      ["cancelled", "Compaction cancelled."],
+      ["changed", "changed before it could be replaced"],
+      ["summary", "could not produce a useful summary"],
+      ["commit", "did not finish cleanly"],
+      ["persistence", "could not be saved"],
+    ] as const;
+    for (const [code, phrase] of cases) {
+      (ctx as unknown as { compaction: unknown }).compaction = {
+        compactNow: async () => {
+          throw new ManualCompactionError(code, `test ${code}`);
+        },
+      };
+      const definition = lcmCommandDefinition(ctx, {
+        stores: () => new Map(),
+        sidecarDir: dir,
+        storePathFor: (sessionId) => join(dir, `${sessionId}.sqlite`),
+      });
+      const result = await definition.handler({
+        agent: fakeAgent(session, ROUTE),
+        signal: new AbortController().signal,
+        commandId: CommandId("cmd-compact-codes"),
+        rawInput: "compact",
+        attachments: [],
+      });
+      expect(result.kind).toBe("error");
+      if (result.kind === "error") expect(result.text).toContain(phrase);
     }
   });
 

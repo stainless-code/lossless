@@ -22,8 +22,9 @@ without re-litigation.
   cross-session caps, selectDagRange, lcmCommandDefinition, pressureZone,
   writeDumpTarget, whitespace sentinel, mechanicalToolNameOf split,
   SidecarStores opened handles, scopedGrepAll pushdown, toolScopeMessageIds
-  scope state: all need new shapes (redesigns), so
-  their comments stay and the flags report open (same pass).
+  scope state, liveStems, valueOf arg parsing, healInFlight guard,
+  backfillSession accounting and visited budget: all need new shapes
+  (redesigns), so their comments stay and the flags report open (same pass).
 - UI routing comments stay. Sidebar and harness-nav comments record the
   reference-only constraint and cross-file sync points a reader cannot
   re-derive from the loop (same pass).
@@ -45,12 +46,16 @@ without re-litigation.
 
 ## Deferred
 
-- Recall scope closer (`toolScopeMessageIds` quoted-marker scan),
-  bare `tool <name>` matching, cross-session `offset`/`summary`/`include_removed`
+- Recall scope closer (`toolScopeMessageIds` quoted-marker scan beyond
+  toolResult opening lines), bare `tool <name>` matching, cross-session
+  `offset`/`summary`/`include_removed`
   forwarding, ghost-session read-only open for minimal deps, dispose-then-close
-  for live/healing stores, and `/lcm compact` error-code mapping tests: each
+  for live/healing stores: each
   needs a design decision (sharded past-search semantics, scope state machine,
   lifecycle close scheduling) beyond a polish pass. Recorded open, not fixed.
+  Fixed from this row: `/lcm compact` error-code mapping tests (landed with
+  the failure-code test), and the toolResult-row half of the scope scan
+  (opening-line rule now matches `toolNameOfText`, pinned by regression test).
 - Warm-scan probe cost: a warm remount re-probes every stored row (one indexed
   point lookup each) plus marker derivation, so per-mount work scales with
   history length while only writes and new evaluations are capped. Bounding the

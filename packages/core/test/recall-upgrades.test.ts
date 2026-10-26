@@ -705,6 +705,49 @@ test("toolScope: a user-quoted marker opens no scope but mixed assistant still m
   }
 });
 
+test("toolScope: a result quoting another marker below its opening line stays in scope", () => {
+  const store = new LcmStore(":memory:");
+  try {
+    ingestEntries(store, [
+      {
+        entryId: "a00",
+        role: "assistant",
+        text: 'tool-call: read {"path": "/a"}',
+        timestamp: 1,
+      },
+      {
+        entryId: "r00",
+        role: "toolResult",
+        text: "quoteword body here\n[tool:bash] quoted further down",
+        timestamp: 2,
+      },
+      {
+        entryId: "r01",
+        role: "toolResult",
+        text: "quotecallword body here\ntool-call: bash quoted further down",
+        timestamp: 3,
+      },
+    ]);
+    const byEntry = new Map(store.allMessages().map((m) => [m.entryId, m.id]));
+    const scoped = toolScopeMessageIds(store, "read");
+    assert.ok(scoped.has(byEntry.get("a00")!), "call row opens scope");
+    assert.ok(
+      scoped.has(byEntry.get("r00")!),
+      "quoted bracket marker below the opening line opens no bash scope",
+    );
+    assert.ok(
+      scoped.has(byEntry.get("r01")!),
+      "quoted call below the opening line closes no scope",
+    );
+    const bash = toolScopeMessageIds(store, "bash");
+    assert.equal(bash.size, 0, "no row names bash on its opening line");
+    const kept = hitIds(grepView(store, redactSecrets, { query: "quoteword", toolName: "read" }));
+    assert.deepEqual(kept, ["r00"]);
+  } finally {
+    store.close();
+  }
+});
+
 test("toolScope: an assistant prose-plus-tool-call row opens scope for its tool", () => {
   const store = new LcmStore(":memory:");
   try {

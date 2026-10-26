@@ -96,13 +96,19 @@ function scopeIdsFromRows(rows: readonly StoredMessage[], want: string): Set<num
   const escaped = want.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const bracketTest = new RegExp(`\\[tool:${escaped}\\]`, "i");
   for (const row of rows) {
+    // A result body may quote another tool's marker further down, so only the
+    // opening line can open or close a scope for the tool that produced it.
+    const scopeText =
+      row.role === "toolResult"
+        ? (row.text.split("\n").find((line) => line.trim().length > 0) ?? "")
+        : row.text;
     // toolNameOfText reads the same marker lines without the mechanical
     // tool-only gate, so a call embedded in prose still anchors a scope.
     const scoped = row.role !== "user" && row.role !== "custom";
     const textName = scoped ? toolNameOfText(row.text, row.role) : undefined;
     const namesTool =
       scoped &&
-      (bracketTest.test(row.text) ||
+      (bracketTest.test(scopeText) ||
         mechanicalToolNameOf({ text: row.text, payload: row.payload, role: row.role }) === want ||
         textName === want);
     if (namesTool) {
@@ -112,8 +118,10 @@ function scopeIdsFromRows(rows: readonly StoredMessage[], want: string): Set<num
     }
     if (row.role === "toolResult" && open) {
       const other =
-        mechanicalToolNameOf({ text: row.text, payload: row.payload }) ?? textName ?? "";
-      if ((other.length > 0 && other !== want) || /\[tool:/i.test(row.text)) {
+        mechanicalToolNameOf({ text: row.text, payload: row.payload, role: row.role }) ??
+        textName ??
+        "";
+      if ((other.length > 0 && other !== want) || /\[tool:/i.test(scopeText)) {
         open = false;
         continue;
       }
