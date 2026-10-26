@@ -35,7 +35,7 @@ const buttonClass = compact
 ---
 
 <div
-  class={`flex w-fit max-w-full items-center border ${compact ? "gap-[8px] rounded-lg py-[10px] pr-[8px] pl-3" : tone === "violet" ? "gap-[14px] rounded-[10px] py-3 pr-3 pl-5" : "gap-4 rounded-xl py-2.5 pr-2.5 pl-5"} ${frame}`}
+  class={`flex w-fit max-w-full min-w-0 items-center overflow-hidden border ${compact ? "gap-[8px] rounded-lg py-[10px] pr-[8px] pl-3" : tone === "violet" ? "gap-[14px] rounded-[10px] py-3 pr-3 pl-5" : "gap-4 rounded-xl py-2.5 pr-2.5 pl-5"} ${frame}`}
   data-host-command={hostCommand ? "true" : undefined}
   data-landing-command
 >
