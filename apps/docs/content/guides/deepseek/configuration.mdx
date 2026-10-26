@@ -30,6 +30,11 @@ borrows the host core and fails fast when the directories differ. The rows
 are configured independently, so keep shared policy knobs (thresholds,
 budgets, summarizer chain) aligned on both. Enable `auto` in at most one of
 the two rows so pressure compaction has a single driver per session.
+Lossless presets start from the stock shipped presets: customizations you
+made to a shipped preset do not transfer, so redo them on the Lossless
+preset through the editor, which addresses our rows the same way. A fully
+custom preset of your own keeps the base backend, since no later layer can
+address rows inside it.
 
 The [config reference](/reference/deepseek/config#keys) lists every key with its type, default, and effect. `enabled` is the master flag and only exactly `true` mounts anything. `retainTokens` and `retainRatio` are mutually exclusive. `modelPolicies` entries match an exact provider plus model route and duplicate targets fail load. Seam keys ride the harness config where unknown keys fail load; adapter-only keys (`summarizerTokensPerCall`, `summarizerTokensPerPass`, `summarizerTokensPerHeal`, `healSourceTokens`, `mechanicalTools`) never reach the seam.
 
