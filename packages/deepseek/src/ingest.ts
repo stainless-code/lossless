@@ -40,6 +40,16 @@ export function mirrorEvent(
   if (projected === undefined) {
     return { inserted: 0, skipped: 1, piCompactions: [], files: [], largeInline: [] };
   }
+  return mirrorProjected(store, projected, index);
+}
+
+/** Mirror an already-derived projection. Backfill probes the projection to
+ * account visited budget, then mirrors without deriving twice. */
+function mirrorProjected(
+  store: LcmStore,
+  projected: { entry: IngestibleEntry; messageId: string },
+  index?: MessageIndex,
+): IngestStats {
   const stats = ingestEntries(store, [projected.entry]);
   if (stats.inserted > 0) index?.record(projected.messageId, projected.entry.entryId);
   return stats;
@@ -143,8 +153,8 @@ export interface BackfillOptions {
   /** Per-session inserted-row ceiling. Default BACKFILL_MAX_EVENTS. */
   maxEvents?: number;
   /** Per-session visited-event ceiling. Only unmirrored messages count:
-   * stored rows and non-message events never touch the store on re-read.
-   * Default 4x the effective maxEvents. */
+   * stored rows cost one indexed probe and non-message events short-circuit
+   * before any store call. Default 4x the effective maxEvents. */
   maxVisited?: number;
   /** Metrics recorder; receives one `backfill` row per session. */
   record?: (row: Record<string, unknown>) => void;
@@ -194,12 +204,20 @@ export async function backfillSession(
       // Only unmirrored messages cost visited budget: stored rows need one
       // indexed probe and markers never touch the store, so a warm history
       // still reaches new events instead of stalling on its own prefix.
-      const entryId = entryFor(session, event)?.entryId;
-      if (entryId !== undefined && store.messageByEntryId(entryId) === undefined) visited += 1;
+      const projected = projectedEntry(session, event);
+      if (
+        projected !== undefined &&
+        store.messageByEntryId(projected.entry.entryId) === undefined
+      ) {
+        visited += 1;
+      }
       const seq = Number(event.seq);
       if (fromSeq === -1) fromSeq = seq;
       throughSeq = seq;
-      const stats = mirrorEvent(session, event, store, index);
+      const stats =
+        projected === undefined
+          ? { inserted: 0, skipped: 1, piCompactions: [], files: [], largeInline: [] }
+          : mirrorProjected(store, projected, index);
       ingested += stats.inserted;
       skipped += stats.skipped;
     }

@@ -521,6 +521,35 @@ describe("lcm mutating verbs", () => {
     expect(dflt.text).toContain("nothing eligible");
   });
 
+  it("gc --session collects a fresh sidecar despite the age window", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "gc-live-fresh";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    deps.storeFor!(liveId);
+    const stale = new LcmStore(join(dir, "stale-fresh-a.sqlite"));
+    try {
+      seedMessages(stale, ["history for stale-fresh-a"]);
+    } finally {
+      stale.close();
+    }
+    ageFile(join(dir, "stale-fresh-a.sqlite"), 31);
+    const fresh = new LcmStore(join(dir, "fresh-named.sqlite"));
+    try {
+      seedMessages(fresh, ["history for fresh-named"]);
+    } finally {
+      fresh.close();
+    }
+    const dry = await invoke(ctx, deps, liveId, "gc --session fresh-named --older-than 30d");
+    expect(dry.kind).toBe("success");
+    expect(dry.text).toContain("fresh-named");
+    expect(dry.text).toContain("/lcm gc --apply --session fresh-named");
+    expect(dry.text).not.toContain("--older-than");
+  });
+
   it("gc dry-run hint echoes session and older-than selectors", async () => {
     const { ctx } = setupContext(ROUTE, []);
     await mountBase(ctx);

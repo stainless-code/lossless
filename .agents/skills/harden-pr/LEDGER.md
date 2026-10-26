@@ -38,6 +38,10 @@ without re-litigation.
 - Changesets describe behavior, not just the headline. This repo ships
   detailed per-package entries; the deepseek entry stays behavior-complete
   rather than trimmed to a headline (same pass).
+- backfillSession Budget-type and visitedBudget-function MUST KILLs are
+  rejected. The visited/consumed accounting is five explicit lines with the
+  rule in one comment plus three regression tests; a Budget type would add
+  indirection without removing a branch (2026-10-26 gauntlet).
 
 ## Deferred
 
@@ -47,3 +51,21 @@ without re-litigation.
   for live/healing stores, and `/lcm compact` error-code mapping tests: each
   needs a design decision (sharded past-search semantics, scope state machine,
   lifecycle close scheduling) beyond a polish pass. Recorded open, not fixed.
+- Warm-scan probe cost: a warm remount re-probes every stored row (one indexed
+  point lookup each) plus marker derivation, so per-mount work scales with
+  history length while only writes and new evaluations are capped. Bounding the
+  cheap probes too needs a persisted frontier (resume) design. Progress is
+  guaranteed; the cost is accepted until a frontier design lands.
+- Mount fan-out: one backfill per live session runs under one Promise.all.
+  Live sessions per composition are inherently few, and serializing would slow
+  the common single-session mount. A concurrency cap waits for a composition
+  with enough live sessions to matter.
+- Engine cold rescan: the first span miss re-derives the live log to rebuild
+  the index. That is the documented cold-start path (fail-closed); changing it
+  reshapes documented behavior.
+- dag-commit point mapping: one indexed `messageByEntryId` read per shadowed
+  seq. A range rewrite would change the per-seq fail-closed mapping into
+  filter semantics; indexed point reads stand until a measured need appears.
+- hydrateCheckpoint full load: cold ladder runs read all stored summaries to
+  rebuild one checkpoint. Loading latest-plus-children instead reshapes the
+  resume path; the one-time cold cost stands.
