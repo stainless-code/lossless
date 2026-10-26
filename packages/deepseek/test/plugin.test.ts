@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,9 +18,10 @@ import { LcmStore, SidecarStores } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
 import { lcmCommandDefinition } from "../src/command.ts";
+import { acquireCore, releaseCore } from "../src/core.ts";
 import { LosslessSummarizerEngine } from "../src/engine.ts";
 import type { DshRoute } from "../src/model-host.ts";
-import { apply, applyLossless, Config, inject, name } from "../src/plugin.ts";
+import { apply, applyLossless, buildEngineArgs, Config, inject, name } from "../src/plugin.ts";
 import { fakeAgent } from "./support/agent-fake.ts";
 import { appendConversation } from "./support/conversation.ts";
 import { setupContext, textChunks } from "./support/script-adapter.ts";
@@ -63,28 +65,26 @@ describe("applyLossless", () => {
 
   it("keeps the loader Config keys in sync with the composition options", () => {
     const dict = (Config as unknown as { dict?: Record<string, unknown> }).dict ?? {};
-    for (const key of [
-      "enabled",
+    assert.deepEqual(Object.keys(dict).sort(), [
       "auto",
       "bracketAuto",
-      "sidecarDir",
-      "summaryTokens",
-      "leafChunkTokens",
-      "summarizationProvider",
-      "summarizationModel",
-      "thresholdRatio",
-      "retainTokens",
-      "retainRatio",
+      "enabled",
       "headroomTokens",
-      "modelPolicies",
-      "summarizerTokensPerCall",
-      "summarizerTokensPerPass",
-      "summarizerTokensPerHeal",
       "healSourceTokens",
+      "leafChunkTokens",
       "mechanicalTools",
-    ]) {
-      expect(Object.keys(dict)).toContain(key);
-    }
+      "modelPolicies",
+      "retainRatio",
+      "retainTokens",
+      "sidecarDir",
+      "summarizationModel",
+      "summarizationProvider",
+      "summarizerTokensPerCall",
+      "summarizerTokensPerHeal",
+      "summarizerTokensPerPass",
+      "summaryTokens",
+      "thresholdRatio",
+    ]);
   });
 
   it("delegates the loader entrypoint to the composition on one path", async () => {
@@ -97,6 +97,80 @@ describe("applyLossless", () => {
     expect(existsSync(dir)).toBe(false);
     dispose();
   });
+
+  it("mounts the same composition through apply as through applyLossless", async () => {
+    const { ctx } = setupContext(ROUTE, [textChunks(SUMMARY)], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = apply(ctx, { enabled: true, sidecarDir: dir });
+    try {
+      expect(ctx.compaction).toBeInstanceOf(LosslessSummarizerEngine);
+      expect(ctx.tools.schemas().map((schema) => schema.name)).toContain("lcm_grep");
+      const session = ctx.sessions.create(SessionId("delegate-1"), { meta: { cwd: dir } });
+      appendConversation(session, ROUTE, "delegate notes ".repeat(20));
+      session.append("turn/start", { turn: 3 });
+      expect(
+        (
+          ctx.compaction as unknown as {
+            lossless: { store: (id: string) => unknown };
+          }
+        ).lossless.store("delegate-1"),
+      ).toBeDefined();
+    } finally {
+      dispose();
+    }
+  });
+
+  it("routes auto and bracketAuto to the seam and the engine deps", () => {
+    const dir = tempDir();
+    const core = acquireCore(dir, true);
+    try {
+      const [seam, deps] = buildEngineArgs(
+        { auto: true, bracketAuto: true, thresholdRatio: 0.7 },
+        core,
+      );
+      assert.equal(seam.auto, true);
+      assert.equal(deps.bracketAuto, true);
+      assert.equal(seam.thresholdRatio, 0.7);
+    } finally {
+      releaseCore(core);
+    }
+  });
+  it("shares one core across overlapping mounts and closes only on the last dispose", async () => {
+    const { ctx: first } = setupContext(ROUTE, [textChunks(SUMMARY)], {
+      contextWindow: 1_000_000,
+    });
+    await mountBase(first);
+    const dir = tempDir();
+    const stopFirst = applyLossless(first, { enabled: true, sidecarDir: dir });
+    const { ctx: second } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(second);
+    const stopSecond = applyLossless(second, { enabled: true, sidecarDir: dir });
+    try {
+      const session = second.sessions.create(SessionId("overlap-1"), { meta: { cwd: dir } });
+      appendConversation(session, ROUTE, "overlap notes ".repeat(20));
+      session.append("turn/start", { turn: 3 });
+      stopFirst();
+      // The first dispose released only its ownership: the shared store stays
+      // open and readable through the still-mounted sibling.
+      const shared = (
+        second as unknown as {
+          compaction: { lossless: { store: (id: string) => LcmStore } };
+        }
+      ).compaction.lossless.store("overlap-1");
+      expect(shared.allMessages().length).toBeGreaterThan(0);
+    } finally {
+      stopSecond();
+    }
+    // The last dispose closed the shared handle; the data survived on disk.
+    const reopened = new LcmStore(join(dir, "overlap-1.sqlite"));
+    try {
+      expect(reopened.allMessages().length).toBeGreaterThan(0);
+    } finally {
+      reopened.close();
+    }
+  });
+
   it("registers nothing until enabled", async () => {
     const ctx = new Context();
     await ctx.plugin(SystemPrompt, {});

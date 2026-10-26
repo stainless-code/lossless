@@ -78,6 +78,8 @@ test("publish surface: preset realms live in the web companion package", () => {
 
 test("publish surface: peer ranges admit the pinned prerelease hosts", () => {
   // npm rejects prereleases under "*", so the dsh peers name the rc floor instead.
+  // dsh-session-projection and dsh-system-prompt stay dev-only on purpose:
+  // nothing under src/ imports them (only the test harness mounts them).
   const peers = (manifest as { peerDependencies?: Record<string, string> }).peerDependencies ?? {};
   for (const [name, range] of Object.entries(peers)) {
     if (name === "@deepseek-ai/cordis") {

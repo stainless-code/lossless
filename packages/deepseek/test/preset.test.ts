@@ -10,6 +10,7 @@ import SessionProjectionRegistry from "@deepseek-ai/dsh-session-projection";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
 import TokenMeter from "@deepseek-ai/dsh-token-meter";
 import ToolRuntime from "@deepseek-ai/dsh-tools";
+import { LcmStore } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
 import { LosslessSummarizerEngine } from "../src/engine.ts";
@@ -53,6 +54,9 @@ async function hostContext(
   return { ctx, stop };
 }
 
+// White-box by design: the engine keeps its deps in a private `lossless`
+// field, and these tests pin the cross-entry sharing contract through it.
+// If the field moves, update this helper, not the assertions.
 function engineDepsOf(engine: LosslessSummarizerEngine): {
   store: (id: string) => unknown;
 } {
@@ -89,6 +93,11 @@ describe("preset backend", () => {
     );
   });
 
+  it("shares the loader schema with the host row", async () => {
+    const { Config: hostConfig } = await import("../src/plugin.ts");
+    expect(Config).toBe(hostConfig);
+  });
+
   it("provides the realm backend against the shared host core", async () => {
     const dir = tempDir();
     const { ctx: host, stop: stopHost } = await hostContext(ROUTE, [], dir);
@@ -97,6 +106,7 @@ describe("preset backend", () => {
       // Backend-only: the realm never gets the recall registries, so there
       // is no tools service to even query here.
       expect((realm as unknown as { tools?: unknown }).tools).toBeUndefined();
+      expect((realm as unknown as { commands?: unknown }).commands).toBeUndefined();
       const stopPreset = applyPreset(realm, { enabled: true, sidecarDir: dir });
       try {
         expect((realm as unknown as { compaction?: unknown }).compaction).toBeInstanceOf(
@@ -105,6 +115,9 @@ describe("preset backend", () => {
         expect((host as unknown as { compaction?: unknown }).compaction).toBeInstanceOf(
           LosslessSummarizerEngine,
         );
+        // Still backend-only after mount: no recall tools, no command.
+        expect((realm as unknown as { tools?: unknown }).tools).toBeUndefined();
+        expect((realm as unknown as { commands?: unknown }).commands).toBeUndefined();
       } finally {
         stopPreset();
       }
@@ -125,37 +138,70 @@ describe("preset backend", () => {
       try {
         const hostStore = engineDepsOf(
           (host as unknown as { compaction: LosslessSummarizerEngine }).compaction,
-        ).store("shared-1");
+        ).store("shared-1") as LcmStore;
         const realmStore = engineDepsOf(
           (realm as unknown as { compaction: LosslessSummarizerEngine }).compaction,
         ).store("shared-1");
         expect(realmStore).toBeDefined();
         expect(realmStore).toBe(hostStore);
+        expect(hostStore.allMessages().length).toBeGreaterThan(0);
       } finally {
         stopPreset();
       }
-      // The preset disposer leaves shared handles open; the host still reads.
-      expect(() =>
-        engineDepsOf(
-          (host as unknown as { compaction: LosslessSummarizerEngine }).compaction,
-        ).store("shared-1"),
-      ).not.toThrow();
+      // The preset disposer leaves shared handles open and readable.
+      const kept = engineDepsOf(
+        (host as unknown as { compaction: LosslessSummarizerEngine }).compaction,
+      ).store("shared-1") as LcmStore;
+      expect(kept.allMessages().length).toBeGreaterThan(0);
     } finally {
       stopHost();
     }
   });
 
+  it("holds the core while a realm borrows it, and drops it after", async () => {
+    const dir = tempDir();
+    const { ctx: host, stop: stopHost } = await hostContext(ROUTE, [textChunks(SUMMARY)], dir);
+    const session = host.sessions.create(SessionId("borrowed-1"), { meta: { cwd: dir } });
+    appendConversation(session, ROUTE, "borrowed notes ".repeat(20));
+    session.append("turn/start", { turn: 3 });
+    const realm = realmContext(ROUTE);
+    const stopPreset = applyPreset(realm, { enabled: true, sidecarDir: dir });
+    try {
+      stopHost();
+      // The host dispose released its ownership but skipped every shared
+      // close for the live borrower, so the realm still reads.
+      const kept = engineDepsOf(
+        (realm as unknown as { compaction: LosslessSummarizerEngine }).compaction,
+      ).store("borrowed-1") as LcmStore;
+      expect(kept.allMessages().length).toBeGreaterThan(0);
+      // The entry stays for the borrower: another realm mount still finds it.
+      const realm2 = realmContext(ROUTE);
+      const stopPreset2 = applyPreset(realm2, { enabled: true, sidecarDir: dir });
+      stopPreset2();
+    } finally {
+      stopPreset();
+    }
+  });
+
   it("ignores a stale disposer after a remount on the same directory", async () => {
     const dir = tempDir();
-    const { stop: stopA } = await hostContext(ROUTE, [], dir);
-    stopA();
-    const { stop: stopB } = await hostContext(ROUTE, [], dir);
-    stopA();
+    const first = await hostContext(ROUTE, [], dir);
+    first.stop();
+    const second = await hostContext(ROUTE, [], dir);
+    first.stop();
+    // The replacement host still serves: the stale dispose changed nothing.
+    const session = second.ctx.sessions.create(SessionId("remount-1"), { meta: { cwd: dir } });
+    appendConversation(session, ROUTE, "remount notes ".repeat(20));
+    session.append("turn/start", { turn: 3 });
     const realm = realmContext(ROUTE);
     try {
       expect(() => applyPreset(realm, { enabled: true, sidecarDir: dir })).not.toThrow();
+      const store = engineDepsOf(
+        (second.ctx as unknown as { compaction: LosslessSummarizerEngine }).compaction,
+      ).store("remount-1") as LcmStore;
+      expect(store.allMessages().length).toBeGreaterThan(0);
     } finally {
-      stopB();
+      second.stop();
     }
   });
 
@@ -171,16 +217,30 @@ describe("preset backend", () => {
     }
   });
 
-  it("keeps the host dispose ownership: idle stores close on host dispose", async () => {
+  it("closes idle stores on the last host dispose", async () => {
     const dir = tempDir();
     const { ctx: host, stop: stopHost } = await hostContext(ROUTE, [], dir);
     const session = host.sessions.create(SessionId("owned-1"), { meta: { cwd: dir } });
     appendConversation(session, ROUTE, "owned notes ".repeat(20));
     session.append("turn/start", { turn: 3 });
-    const realm = realmContext(ROUTE);
-    const stopPreset = applyPreset(realm, { enabled: true, sidecarDir: dir });
-    stopPreset();
-    stopHost();
-    expect(existsSync(join(dir, "owned-1.sqlite"))).toBe(true);
+    const originalClose = Reflect.get(LcmStore.prototype, "close") as (this: LcmStore) => void;
+    let closes = 0;
+    Reflect.set(LcmStore.prototype, "close", function (this: LcmStore): void {
+      closes += 1;
+      Reflect.apply(originalClose, this, []);
+    });
+    try {
+      stopHost();
+      expect(closes).toBeGreaterThan(0);
+    } finally {
+      Reflect.set(LcmStore.prototype, "close", originalClose);
+    }
+    // Closed cleanly and the data survived for reopen.
+    const reopened = new LcmStore(join(dir, "owned-1.sqlite"));
+    try {
+      expect(reopened.allMessages().length).toBeGreaterThan(0);
+    } finally {
+      reopened.close();
+    }
   });
 });

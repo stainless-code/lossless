@@ -80,6 +80,7 @@ export interface LosslessPluginConfig {
 import {
   DEFAULT_SIDECAR_DIR,
   acquireCore,
+  isCoreHeld,
   readMechanicalTools,
   releaseCore,
   type LosslessCore,
@@ -134,7 +135,7 @@ export function buildEngineArgs(
   config: LosslessPluginConfig,
   core: LosslessCore,
 ): [
-  seam: ConstructorParameters<typeof LosslessSummarizerEngine>[1],
+  seam: Exclude<ConstructorParameters<typeof LosslessSummarizerEngine>[1], undefined>,
   deps: ConstructorParameters<typeof LosslessSummarizerEngine>[2],
 ] {
   const mechanicalTools = readMechanicalTools(config.mechanicalTools);
@@ -264,15 +265,11 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
     ...(config.headroomTokens === undefined ? {} : { headroomTokens: config.headroomTokens }),
     ...(config.modelPolicies === undefined ? {} : { modelPolicies: config.modelPolicies }),
   });
-  // Once-only release: a stale second call after a remount on the same
-  // directory must not spend the replacement's registry ownership. The
-  // guarded close loop above stays idempotent on its own.
+  // The guarded close below runs only for the last owner, so one mount never
+  // closes stores out from under a still-mounted sibling, and a repeat call
+  // only ever sweeps this mount's own released core.
   let released = false;
-  return () => {
-    stopMirror();
-    stopTools();
-    stopExpandQuery();
-    stopCommand();
+  const closeIdle = (): void => {
     // Dispose-then-use is an error: a live run keeps its store open so the commit can land, and a session under heal repair keeps its store for the same reason.
     const healing = new Set(healInFlightSessions());
     for (const [id, store] of sidecars.storesMap()) {
@@ -280,13 +277,25 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
         if (store.hasLiveRun() || healing.has(id)) continue;
         store.close();
         sidecars.evict(id);
-      } catch {}
+      } catch (error: unknown) {
+        ctx.logger.warn(
+          `lossless dispose skipped closing session "${id}": ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
-    // Once-only: a stale second call after a remount on the same directory
-    // must not spend the replacement's ownership.
+  };
+  return () => {
+    stopMirror();
+    stopTools();
+    stopExpandQuery();
+    stopCommand();
     if (!released) {
       released = true;
-      releaseCore(core);
+      if (releaseCore(core)) closeIdle();
+      return;
     }
+    // Repeat dispose (e.g. after a heal drains): sweep my own released core,
+    // but only when no replacement has taken the directory since.
+    if (!isCoreHeld(core)) closeIdle();
   };
 }

@@ -73,6 +73,14 @@ export function resolveCoreDir(dir: string): string {
   return resolve(dir);
 }
 
+/** Whether this exact core currently occupies the registry. A repeat dispose
+ * uses it to tell a drained-and-deleted core (safe to sweep) from a live
+ * shared or replaced one (hands off). */
+export function isCoreHeld(core: LosslessCore): boolean {
+  const held = cores.get(core.dir);
+  return held !== undefined && held.core === core;
+}
+
 /** Tool names that skip the model. One name or a list; blanks and repeats
  * drop, and an empty result keeps the LLM path. */
 export function readMechanicalTools(raw: unknown): string[] | undefined {
@@ -92,14 +100,14 @@ export function readMechanicalTools(raw: unknown): string[] | undefined {
   return out.length === 0 ? undefined : out;
 }
 
-/** Borrow or create the core for a directory. Host rows pass owner true and
- * take disposal duty. Realm rows pass owner false and fail fast when the host
- * row has not mounted, instead of running a split-brain copy. */
+/** Borrow or create the core for a directory. The first mount creates it;
+ * every mount, host or realm, holds one ownership count. Realm rows fail fast
+ * when no core exists instead of running a split-brain copy. */
 export function acquireCore(dir: string, owner: boolean): LosslessCore {
   const key = resolveCoreDir(dir);
   const held = cores.get(key);
   if (held !== undefined) {
-    if (owner) held.owners += 1;
+    held.owners += 1;
     return held.core;
   }
   if (!owner) {
@@ -119,15 +127,17 @@ export function acquireCore(dir: string, owner: boolean): LosslessCore {
   return core;
 }
 
-/** Release a core. Tied to the acquired core object, not the directory: a
- * stale disposer from a previous mount cannot release the replacement. Each
- * disposer must also call this at most once (guarded at the call site), so a
- * double dispose after a remount cannot spend the replacement's ownership.
- * Realm rows never call it and never touch shared handles. */
-export function releaseCore(core: LosslessCore): void {
+/** Release one ownership of a core. Tied to the acquired core object, not the
+ * directory: a stale disposer from a previous mount cannot release the
+ * replacement. Each disposer must also call this at most once (guarded at the
+ * call site), so a double dispose after a remount cannot spend the
+ * replacement's ownership. Only the host dispose closes stores; realm rows
+ * just release. */
+export function releaseCore(core: LosslessCore): boolean {
   const held = cores.get(core.dir);
-  if (held === undefined || held.core !== core) return;
+  if (held === undefined || held.core !== core || held.owners <= 0) return false;
   held.owners -= 1;
-  if (held.owners > 0) return;
+  if (held.owners > 0) return false;
   cores.delete(core.dir);
+  return true;
 }

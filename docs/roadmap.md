@@ -214,16 +214,18 @@ Each of these was verified in peer source and is worth doing only with a reason.
 
 ## Names
 
-**All four workspace packages are unscoped.** `pi-lossless` is the Pi adapter,
+**All five workspace packages are unscoped.** `pi-lossless` is the Pi adapter,
 `opencode-lossless` is the OpenCode v2 adapter, `deepseek-lossless` is the
-unshipped DeepSeek adapter, and `lossless-core`
+unshipped DeepSeek adapter with its `deepseek-lossless-web` preset companion,
+and `lossless-core`
 is the engine. A `@stainless-code/` scope arrives only on a real collision, and
 then it arrives once, for every package at the same time. `pi-lossless` 0.1.2, `lossless-core` 0.1.2, and
-`opencode-lossless` 0.1.2 are published; `deepseek-lossless` 0.1.0 is unshipped. The unscoped `lossless` on npm is an unrelated published
+`opencode-lossless` 0.1.2 are published; `deepseek-lossless` 0.1.0 and
+`deepseek-lossless-web` 0.1.0 are unshipped. The unscoped `lossless` on npm is an unrelated published
 package, which is what the harness prefix is for; and the docs app is already
 scoped and private (`@stainless-code/lossless-docs`), so scoping stays a
 decision available rather than one made by accident. What would force the scope
-is a squat on any of the four names, or a cost that
+is a squat on any of the five names, or a cost that
 the engine's adjacency to the unrelated `lossless` package inflicts on a consumer
 of the published engine.
 

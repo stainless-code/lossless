@@ -1,6 +1,6 @@
 import type { Context } from "@deepseek-ai/cordis";
 
-import { acquireCore, DEFAULT_SIDECAR_DIR } from "./core.ts";
+import { acquireCore, DEFAULT_SIDECAR_DIR, releaseCore } from "./core.ts";
 import { LosslessSummarizerEngine } from "./engine.ts";
 import { buildEngineArgs, Config, type LosslessPluginConfig } from "./plugin.ts";
 
@@ -15,19 +15,23 @@ export const name = "deepseek-lossless-preset";
  * once against the shared registries. */
 export const inject = ["sessions", "llm", "tokenMeter"];
 
+/** The loader schema, identical to the host row's: the preset row takes the
+ * same composition options, including `enabled` and `sidecarDir`. */
 export { Config };
 export type { LosslessPluginConfig };
 
-/** Realm-only compaction backend for agent presets. Mounts the summarizer
- * engine against the shared host core: same sidecars, same record sink, same
- * checkpoint memory. Registers nothing else, mirrors nothing, and never
- * closes shared handles; the host row owns the core lifetime.
+/** Realm-only compaction backend for agent presets. Pairs with the host
+ * row's `apply`/`applyLossless`, which must mount first: this entry mounts
+ * the summarizer engine against the shared host core (same sidecars, same
+ * record sink, same checkpoint memory) and registers nothing else. It
+ * mirrors nothing and never closes shared handles; the host row owns the
+ * core lifetime.
  *
  * Fails fast when the host row has not mounted, with the fix in the message,
  * instead of running a split-brain copy.
  * @example
  * ```ts
- * const stop = applyPreset(ctx, { enabled: true });
+ * const stop = apply(ctx, { enabled: true });
  * ``` */
 export function apply(ctx: Context, config: LosslessPluginConfig = {}): () => void {
   if (config.enabled !== true) return () => undefined;
@@ -35,5 +39,12 @@ export function apply(ctx: Context, config: LosslessPluginConfig = {}): () => vo
   const core = acquireCore(dir, false);
   const [seamConfig, engineDeps] = buildEngineArgs(config, core);
   void new LosslessSummarizerEngine(ctx, seamConfig, engineDeps);
-  return () => undefined;
+  // Borrowers only release: the host dispose owns every shared close, so a
+  // realm teardown never touches shared handles. Once-only, like the host.
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseCore(core);
+  };
 }

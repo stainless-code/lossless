@@ -6,12 +6,13 @@ stays searchable. Nothing is lost, and the model sees less.
 
 This repository holds the engine and the adapters that consume it:
 
-| Package                                            | Directory           | What it is                                                                                                   |
-| -------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------ |
-| [`pi-lossless`](packages/pi/README.md)             | `packages/pi`       | The Pi extension (`pi install npm:pi-lossless`): recall tools, cockpit, commands.                            |
-| [`opencode-lossless`](packages/opencode/README.md) | `packages/opencode` | The OpenCode v2 plugin: recall tools, lifecycle commands, DAG projection, per-session sidecar.               |
-| [`deepseek-lossless`](packages/deepseek/README.md) | `packages/deepseek` | The DeepSeek composition: recall tools, `/lcm` verbs, DAG bracket, per-session sidecars.                     |
-| [`lossless-core`](packages/core/README.md)         | `packages/core`     | The engine: ingest, compaction, and retrieval behind a two-port host contract, with no agent SDK dependency. |
+| Package                                                    | Directory               | What it is                                                                                                   |
+| ---------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`pi-lossless`](packages/pi/README.md)                     | `packages/pi`           | The Pi extension (`pi install npm:pi-lossless`): recall tools, cockpit, commands.                            |
+| [`opencode-lossless`](packages/opencode/README.md)         | `packages/opencode`     | The OpenCode v2 plugin: recall tools, lifecycle commands, DAG projection, per-session sidecar.               |
+| [`deepseek-lossless`](packages/deepseek/README.md)         | `packages/deepseek`     | The DeepSeek composition: recall tools, `/lcm` verbs, DAG bracket, per-session sidecars.                     |
+| [`deepseek-lossless-web`](packages/deepseek-web/README.md) | `packages/deepseek-web` | Lossless presets for the DeepSeek web surface: the shipped presets with the lossless backend.                |
+| [`lossless-core`](packages/core/README.md)                 | `packages/core`         | The engine: ingest, compaction, and retrieval behind a two-port host contract, with no agent SDK dependency. |
 
 `lossless-core` is a workspace `devDependency` of the three adapters. The packs
 inline it into `dist/index.mjs`, so those packages ship with no runtime
@@ -36,6 +37,7 @@ its summarizer engine as the host's compaction backend.
 | `packages/opencode/test/**`      | adapter tests, the host-shaped doubles, and the host-compat guard                                        |
 | `packages/deepseek/src/**`       | the DeepSeek adapter, the only DeepSeek-aware code in the tree                                           |
 | `packages/deepseek/test/**`      | adapter tests and the host-shaped doubles                                                                |
+| `packages/deepseek-web/**`       | the Lossless web presets bundle (patch, locale, docs) plus its surface test                              |
 | `apps/docs/**`                   | the documentation site (Blume), its generated pages, and the per-harness page source                     |
 | `apps/docs/content/_snippets/**` | shared guide and reference fragments; the per-harness wrappers include them                              |
 | `scripts/**`                     | repo tools: the long-context evaluation, the metrics report, the peer census, and the OpenCode live loop |
@@ -78,18 +80,19 @@ cd apps/docs && bun run build && bun run validate --strict && bun run audit
 
 ## Docs
 
-|                                                                                                                                                                                                                |                                                                  |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| [The docs site](https://stainless-code.com/lossless/)                                                                                                                                                          | How LCM behaves in a session, the config keys, the limits        |
-| [pi-lossless](packages/pi/README.md)                                                                                                                                                                           | Install, the commands, and the three recall tools                |
-| [opencode-lossless](packages/opencode/README.md)                                                                                                                                                               | Install, the commands, the four recall tools, and the live loop  |
-| [lossless-core](packages/core/README.md)                                                                                                                                                                       | The engine's API and the ports a host supplies                   |
-| [pi/comparison.mdx](apps/docs/content/reference/pi/comparison.mdx)                                                                                                                                             | Audited Pi peer comparison, page and source in one file          |
-| [opencode/comparison.mdx](apps/docs/content/reference/opencode/comparison.mdx)                                                                                                                                 | Audited OpenCode v2 peer comparison, page and source in one file |
-| [deepseek/comparison.mdx](apps/docs/content/reference/deepseek/comparison.mdx)                                                                                                                                 | Audited DeepSeek peer comparison, page and source in one file    |
-| [docs/roadmap.md](docs/roadmap.md)                                                                                                                                                                             | Forward-looking work, evidence gates, and rejected items         |
-| [pi CHANGELOG.md](packages/pi/CHANGELOG.md), [core CHANGELOG.md](packages/core/CHANGELOG.md), [opencode CHANGELOG.md](packages/opencode/CHANGELOG.md), [deepseek CHANGELOG.md](packages/deepseek/CHANGELOG.md) | Per-package version history, generated from changesets           |
-| [AGENTS.md](AGENTS.md)                                                                                                                                                                                         | Agent rules, with the skills and lessons under `.agents/`        |
+|                                                                                                                                                                                                                                                                                 |                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [The docs site](https://stainless-code.com/lossless/)                                                                                                                                                                                                                           | How LCM behaves in a session, the config keys, the limits        |
+| [pi-lossless](packages/pi/README.md)                                                                                                                                                                                                                                            | Install, the commands, and the three recall tools                |
+| [opencode-lossless](packages/opencode/README.md)                                                                                                                                                                                                                                | Install, the commands, the four recall tools, and the live loop  |
+| [lossless-core](packages/core/README.md)                                                                                                                                                                                                                                        | The engine's API and the ports a host supplies                   |
+| [pi/comparison.mdx](apps/docs/content/reference/pi/comparison.mdx)                                                                                                                                                                                                              | Audited Pi peer comparison, page and source in one file          |
+| [opencode/comparison.mdx](apps/docs/content/reference/opencode/comparison.mdx)                                                                                                                                                                                                  | Audited OpenCode v2 peer comparison, page and source in one file |
+| [deepseek/comparison.mdx](apps/docs/content/reference/deepseek/comparison.mdx)                                                                                                                                                                                                  | Audited DeepSeek peer comparison, page and source in one file    |
+| [deepseek-lossless-web](packages/deepseek-web/README.md)                                                                                                                                                                                                                        | Install the Lossless presets for the DeepSeek web surface        |
+| [docs/roadmap.md](docs/roadmap.md)                                                                                                                                                                                                                                              | Forward-looking work, evidence gates, and rejected items         |
+| [pi CHANGELOG.md](packages/pi/CHANGELOG.md), [core CHANGELOG.md](packages/core/CHANGELOG.md), [opencode CHANGELOG.md](packages/opencode/CHANGELOG.md), [deepseek CHANGELOG.md](packages/deepseek/CHANGELOG.md), [deepseek-web CHANGELOG.md](packages/deepseek-web/CHANGELOG.md) | Per-package version history, generated from changesets           |
+| [AGENTS.md](AGENTS.md)                                                                                                                                                                                                                                                          | Agent rules, with the skills and lessons under `.agents/`        |
 
 ## License
 

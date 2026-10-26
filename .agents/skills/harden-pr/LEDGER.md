@@ -74,3 +74,13 @@ without re-litigation.
 - hydrateCheckpoint full load: cold ladder runs read all stored summaries to
   rebuild one checkpoint. Loading latest-plus-children instead reshapes the
   resume path; the one-time cold cost stands.
+- Lossless preset forks: each `deepseek-lossless-web` preset is a full copy of
+  the pinned harness preset with only the backend row swapped (2026-10-26
+  harden pass). Generating them from a base-plus-diff or upstreaming a
+  narrower preset-override hook would delete ~400 duplicated lines, but both
+  need a design beyond polish (harness-owned composition shape).
+- Host core registry: the module-level shared core with owner counting could
+  move onto Cordis scoping once a host-provided service is the established
+  pattern for cross-realm sharing. The current shape is explicit and tested;
+  reshaping it would change mount/dispose semantics, so it waits for a design
+  pass with a live web session behind it.
