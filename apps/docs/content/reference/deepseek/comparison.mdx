@@ -40,7 +40,7 @@ Legend: ✅ full · 🟡 partial · ❌ none. Inventory rows name what ships, no
 | Cross-session scope                | ✅ one global sidecar directory; a 20-store, 40-hit, 1.5 s scan with 10 hits per store; reads by session id    | ❌ none; continuity is the prior-checkpoint merge within one session                                                |
 | Child sessions                     | ❌ none; the reader is one streaming call per step, at most 6 steps, inside the calling process             | n/a; the backend makes no reader calls                                                                             |
 | Prefix-cache behavior              | ❌ single-message calls cannot express prefix reuse                                           | ✅ replays the conversation prefix with the instruction last, so the provider's warm prefix cache is reused         |
-| Model-free reduction               | ❌ the ladder is always model-backed, with a mechanical floor as fallback                                   | ✅ a pruner service trims tool results before pressure and overflow measurement, with no model call                 |
+| Model-free reduction               | 🟡 opt-in `mechanicalTools` compacts named spans into deterministic `mechanical` leaves with zero model calls; unset keeps the model-backed ladder | ✅ a pruner service trims tool results before pressure and overflow measurement, with no model call                 |
 | Checkpoint structure               | `[lcm:summary #N]` refs that resolve in the sidecar; resume rebuilds the last checkpoint from stored rows   | ✅ preamble framing, sectioned prompt with a verbatim-quoted goals section, snapshot pricing of the replayed range |
 | Pressure measurement               | seam meter drives pressure; status shows total against window plus thresholds and the last pass             | ✅ per-request uncached, cache-read, and cache-write buckets; pressure includes cache traffic; budgets scale to routed capacity |
 | Summary quality control            | ✅ leaf plus condensed ladder with escalation to a deterministic floor; shrink check on the condensed replace | ✅ one retry after the first compaction when pressure remains; overflow recovery; shrink check on the framed checkpoint |
@@ -72,6 +72,8 @@ Gaps against this backend, each with the reason it stays that way:
 - **No pruner call on the adapter paths.** The seam runs the pruner before its own
   pressure and overflow measurement. The bracket paths summarize the selected span
   as stored; pruning live history would rewrite what the verbatim promise covers.
+  The opt-in `mechanicalTools` tier is different: it compacts stored spans without
+  a model call instead of trimming live history.
 - **No curated goals section.** The checkpoint prompt captures evolving goals as
   prose. This package keeps the full transcript addressable, so goals are
   recoverable by address rather than carried as a section.
