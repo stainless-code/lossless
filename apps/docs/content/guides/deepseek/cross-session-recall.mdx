@@ -11,8 +11,8 @@ sidebar:
   label: "Cross-session recall"
 ---
 
-Recall reads the local sidecars, never the live session. `lcm_grep` searches past sessions and returns the strongest matching event per session. Each hit is a pointer: session id, entry id, and an excerpt. The model then calls `lcm_describe` for the lineage around a hit or `lcm_expand` to read the full verbatim event. `lcm_expand_query` runs a bounded in-process reader over the same store for follow-up questions.
+Recall reads the local sidecars, never the live session. `lcm_grep` searches past sessions, up to 10 hits per past store within 40 hits across 20 stores and a 1.5 s deadline. Each hit is a pointer: session id, entry id, and an excerpt. The model then calls `lcm_describe` for the lineage around a hit or `lcm_expand` to read the full verbatim event. `lcm_expand_query` runs a bounded in-process reader over the same store for follow-up questions.
 
 Scopes stay session aware. A bare query stays in the calling session sidecar. Cross-session scopes search the same global sidecar directory the composition was mounted with, so `sessions` and `all_sessions` match the same set today. Past sessions open read-only; the mount never writes to them.
 
-The [tools reference](/reference/deepseek/tools) lists every tool with its parameters and output shape. Nothing is guessed: only observed events flow through the mirror path with dedup, and unmatched queries fail closed to misses.
+The [tools reference](/reference/deepseek/tools) lists every tool with its parameters and output shape. Only observed events flow through the mirror path with dedup, and unmatched queries fail closed and resolve to misses.

@@ -60,6 +60,43 @@ describe("applyLossless", () => {
     expect(Config).toBeDefined();
     expect(typeof apply).toBe("function");
   });
+
+  it("keeps the loader Config keys in sync with the composition options", () => {
+    const dict = (Config as unknown as { dict?: Record<string, unknown> }).dict ?? {};
+    for (const key of [
+      "enabled",
+      "auto",
+      "bracketAuto",
+      "sidecarDir",
+      "summaryTokens",
+      "leafChunkTokens",
+      "summarizationProvider",
+      "summarizationModel",
+      "thresholdRatio",
+      "retainTokens",
+      "retainRatio",
+      "headroomTokens",
+      "modelPolicies",
+      "summarizerTokensPerCall",
+      "summarizerTokensPerPass",
+      "summarizerTokensPerHeal",
+      "healSourceTokens",
+      "mechanicalTools",
+    ]) {
+      expect(Object.keys(dict)).toContain(key);
+    }
+  });
+
+  it("delegates the loader entrypoint to the composition on one path", async () => {
+    const ctx = new Context();
+    await ctx.plugin(SystemPrompt, {});
+    void new ToolRuntime(ctx);
+    const dir = join(tempDir(), "apply-delegates");
+    const dispose = apply(ctx, { sidecarDir: dir });
+    expect(ctx.tools.schemas().map((schema) => schema.name)).not.toContain("lcm_grep");
+    expect(existsSync(dir)).toBe(false);
+    dispose();
+  });
   it("registers nothing until enabled", async () => {
     const ctx = new Context();
     await ctx.plugin(SystemPrompt, {});
