@@ -145,6 +145,20 @@ describe("preset backend", () => {
     }
   });
 
+  it("ignores a stale disposer after a remount on the same directory", async () => {
+    const dir = tempDir();
+    const { stop: stopA } = await hostContext(ROUTE, [], dir);
+    stopA();
+    const { stop: stopB } = await hostContext(ROUTE, [], dir);
+    stopA();
+    const realm = realmContext(ROUTE);
+    try {
+      expect(() => applyPreset(realm, { enabled: true, sidecarDir: dir })).not.toThrow();
+    } finally {
+      stopB();
+    }
+  });
+
   it("rejects a preset sidecar directory that differs from the host core", async () => {
     const { stop: stopHost } = await hostContext(ROUTE, [], tempDir());
     const realm = realmContext(ROUTE);

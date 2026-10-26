@@ -119,15 +119,15 @@ export function acquireCore(dir: string, owner: boolean): LosslessCore {
   return core;
 }
 
-/** Release a core. The host calls this after its guarded close loop (live runs
- * and in-flight heals stay open exactly as before); the entry leaves the
- * registry so a later mount starts fresh. Realm rows never call it with an
- * owned core and never touch shared handles. */
-export function releaseCore(dir: string): void {
-  const key = resolveCoreDir(dir);
-  const held = cores.get(key);
-  if (held === undefined) return;
+/** Release a core. Tied to the acquired core object, not the directory: a
+ * stale disposer from a previous mount cannot release the replacement. Each
+ * disposer must also call this at most once (guarded at the call site), so a
+ * double dispose after a remount cannot spend the replacement's ownership.
+ * Realm rows never call it and never touch shared handles. */
+export function releaseCore(core: LosslessCore): void {
+  const held = cores.get(core.dir);
+  if (held === undefined || held.core !== core) return;
   held.owners -= 1;
   if (held.owners > 0) return;
-  cores.delete(key);
+  cores.delete(core.dir);
 }

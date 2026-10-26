@@ -264,6 +264,10 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
     ...(config.headroomTokens === undefined ? {} : { headroomTokens: config.headroomTokens }),
     ...(config.modelPolicies === undefined ? {} : { modelPolicies: config.modelPolicies }),
   });
+  // Once-only release: a stale second call after a remount on the same
+  // directory must not spend the replacement's registry ownership. The
+  // guarded close loop above stays idempotent on its own.
+  let released = false;
   return () => {
     stopMirror();
     stopTools();
@@ -278,6 +282,11 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
         sidecars.evict(id);
       } catch {}
     }
-    releaseCore(dir);
+    // Once-only: a stale second call after a remount on the same directory
+    // must not spend the replacement's ownership.
+    if (!released) {
+      released = true;
+      releaseCore(core);
+    }
   };
 }

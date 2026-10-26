@@ -12,7 +12,7 @@ export const DEEPSEEK_FAQS: readonly LcmFaq[] = [
   {
     question: "Do I have to configure anything?",
     answer:
-      "Install into each profile you boot, then enable the row. The defaults (pressure at 80% of the priced window, keep 16% verbatim, summary and leaf budgets of 1500 and 3000 tokens) work with no further options. Configuration is the `deepseek-lossless` row in the profile patch; there is no separate config file. The [configuration guide](/guides/deepseek/configuration) lists every key.",
+      "No. Installing the bundle switches the backend over with no further edits, and the defaults (pressure at 80% of the priced window, keep 16% verbatim, summary and leaf budgets of 1500 and 3000 tokens) work with no further options. Configuration is the `deepseek-lossless` row in the profile patch; there is no separate config file. The [configuration guide](/guides/deepseek/configuration) lists every key.",
   },
   {
     question: "Where does the data live?",

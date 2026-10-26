@@ -33,26 +33,22 @@ appends its package to `dsh.profile.bundles` automatically because both
 declare `dsh.bundle`; without that manifest a package would warn and install
 as a plain dependency with no profile layer.
 
-The bundles ship disabled and the base backends stay active. On a
-host-plane profile, switch the backend over in the profile user layer at
-`~/.dsh/profiles/<name>/cordis.patch.yml`:
+The install switches the backend over with no further edits: the shipped
+patch quiets the base row and mounts our row enabled, matching the manager's
+rule that installation enables a new bundle. Restart the profile, then
+verify with `/lcm status` in a booted session. It reports per-session
+message and summary counts, the meter window, the resolved swap and re-cut
+thresholds, and the last pass outcome. Then run `/lcm compact` once on an
+idle session to prove the manual path: aged turns become summary pointers
+and every verbatim message stays in the local SQLite sidecar.
 
-```yaml
-- id: compaction-basic
-  disabled: true
-- id: deepseek-lossless
-  config:
-    enabled: true
-```
-
-A patch replaces the whole row config, so restating only `enabled: true` is enough: every other key falls back to the bundled schema defaults. Restart the profile after editing. To switch back, remove both rows and restart: the base backend returns and this bundle goes inert without uninstalling.
-
-On a preset-bearing profile, enable the host row the same way, then
-select a Lossless preset for the session instead of a shipped one. The
-preset backend borrows the shared core and fails fast naming the host row
-when it is absent, instead of running a split-brain copy. To switch back,
-select a shipped preset again; the base backend returns for those sessions.
-
-Verify with `/lcm status` in a booted session. It reports per-session message and summary counts, the meter window, the resolved swap and re-cut thresholds, and the last pass outcome. Then run `/lcm compact` once on an idle session to prove the manual path: aged turns become summary pointers and every verbatim message stays in the local SQLite sidecar.
+On a preset-bearing profile, install both packages, restart, then select a
+Lossless preset for the session instead of a shipped one. The preset
+backend borrows the shared core and fails fast naming the host row when it
+is absent, instead of running a split-brain copy. To switch back, select a
+shipped preset again; the base backend returns for those sessions. To switch
+a host-plane profile back, re-enable `compaction-basic` and disable
+`deepseek-lossless` from the Plugins page or the profile patch; removing
+the bundle likewise restores the base row.
 
 Reference holds the full surface: [command](/reference/deepseek/command), [tools](/reference/deepseek/tools), [config](/reference/deepseek/config), and [files](/reference/deepseek/files). Common keys live under the plugin config: `auto` for pressure compaction inside the turn, `sidecarDir` for one SQLite file per session, `summaryTokens` and `leafChunkTokens` for summary budgets, and `mechanicalTools` for spans that compact without a model call. The Plugins page validates them against the bundled schema.

@@ -62,6 +62,14 @@ test("publish surface: the bundle manifest resolves through the profile composer
   }
 });
 
+test("publish surface: the host patch switches the backend on install", () => {
+  const patch = readFileSync(join(PACKAGE_DIR, "cordis.patch.yml"), "utf8");
+  assert.ok(patch.includes("- id: compaction-basic"), "the base row is addressed");
+  assert.ok(patch.includes("disabled: true"), "the base backend goes quiet on install");
+  assert.ok(patch.includes("- id: deepseek-lossless"), "our row is inserted");
+  assert.ok(patch.includes("enabled: true"), "our row mounts enabled");
+});
+
 test("publish surface: preset realms live in the web companion package", () => {
   assert.equal(manifest.dsh?.bundle?.patch, "./cordis.patch.yml");
   const patch = readFileSync(join(PACKAGE_DIR, "cordis.patch.yml"), "utf8");

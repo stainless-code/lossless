@@ -13,7 +13,7 @@ sidebar:
   label: "Configuration"
 ---
 
-There is no separate config file. Options live in the profile patch row for `deepseek-lossless` at `~/.dsh/profiles/<name>/cordis.patch.yml`. A patch replaces the whole row config, so restating only the keys you change is enough: the rest fall back to the bundled schema defaults, which the Plugins page validates.
+There is no separate config file. Options live in the profile patch row for `deepseek-lossless` at `~/.dsh/profiles/<name>/cordis.patch.yml`. A patch replaces the whole row config, so restating only the keys you change is enough: the rest fall back to the bundled schema defaults, which the Plugins page validates. The shipped profile row mounts enabled, so a fresh install needs no edits; the schema default stays off as the code-level safe default for direct composition callers.
 
 ```yaml
 - id: deepseek-lossless

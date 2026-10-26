@@ -24,25 +24,19 @@ dsh plugin --profile web add deepseek-lossless-web
 
 ## Enable
 
-The bundle ships disabled and the base compaction backend stays active.
-To switch a host-plane profile over, disable the base row and enable this one in
-the profile user layer at `~/.dsh/profiles/<name>/cordis.patch.yml`:
+No edits needed: installing the bundle switches the host-plane backend
+over, since the shipped patch quiets the base row and mounts our row
+enabled. The code-level default stays disabled, so direct composition
+callers still opt in explicitly.
 
-```yaml
-- id: compaction-basic
-  disabled: true
-- id: deepseek-lossless
-  config:
-    enabled: true
-```
-
-On a preset-bearing profile, enable the host row the same way, then select
-a Lossless preset for the session. The preset backend borrows the shared
-core and fails fast naming the host row when it is absent.
+On a preset-bearing profile, install the companion, restart, then select a
+Lossless preset for the session. The preset backend borrows the shared core
+and fails fast naming the host row when it is absent.
 
 Restart the profile, then verify with `/lcm status`. To switch back,
-remove both rows and restart: the base backend returns and this bundle
-goes inert without uninstalling.
+re-enable `compaction-basic` and disable `deepseek-lossless` from the
+Plugins page or the profile patch; removing the bundle restores the base
+row the same way.
 
 ## Configure
 
