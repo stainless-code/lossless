@@ -30,6 +30,23 @@ borrows the host core and fails fast when the directories differ. The rows
 are configured independently, so keep shared policy knobs (thresholds,
 budgets, summarizer chain) aligned on both. Enable `auto` in at most one of
 the two rows so pressure compaction has a single driver per session.
+
+If you customized a shipped preset, your edits do not transfer to the
+Lossless twin, which starts from stock content. Either redo them on the
+Lossless preset through the editor, or bring lossless to your preset
+instead: open your customized preset, replace its compaction backend row
+with this block, and keep the host row enabled with a matching
+`sidecarDir`:
+
+```yaml
+- id: deepseek-lossless
+  name: deepseek-lossless/preset
+  config:
+    enabled: true
+```
+
+A fully custom preset of your own keeps the base backend otherwise, since
+no later layer can address rows inside it.
 Lossless presets start from the stock shipped presets: customizations you
 made to a shipped preset do not transfer, so redo them on the Lossless
 preset through the editor, which addresses our rows the same way. A fully
