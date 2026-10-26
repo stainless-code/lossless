@@ -1,7 +1,7 @@
 import { SHARED_FAQS } from "./lcm-faqs.ts";
 import type { LcmFaq } from "./lcm-faqs.ts";
 
-/** Questions that are specific to the DeepSeek adapter. */
+/** Questions that are specific to the DeepSeek bundle. */
 export const DEEPSEEK_FAQS: readonly LcmFaq[] = [
   {
     question: "Does it modify my DeepSeek session record?",

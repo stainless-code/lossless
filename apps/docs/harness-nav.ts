@@ -34,7 +34,7 @@ export const HOSTS: readonly Host[] = [
   {
     id: "deepseek",
     label: "DeepSeek",
-    description: "The DeepSeek adapter",
+    description: "The DeepSeek bundle",
     icon: DEEPSEEK_ICON,
     entry: "/reference/deepseek/tools",
   },
