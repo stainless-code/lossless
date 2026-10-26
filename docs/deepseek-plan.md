@@ -1,7 +1,6 @@
 # DeepSeek plan
 
-Status: active spike. The code lives on `feat/deepseek`, extracted from
-`spike/second-consumer`. OpenCode v2 already shipped alongside Pi; this plan
+Status: active. The code lives on `feat/deepseek`. OpenCode v2 already shipped alongside Pi; this plan
 tracks the DeepSeek adapter. Roadmap item 10 describes the live-proof gate.
 
 Goal: answer whether `lossless-core` can serve the DeepSeek harness as one
@@ -384,7 +383,7 @@ roadmap item 10, not a reason to start the next phase.
   permitted path and is now the backfill), provider window auto-correction
   (no named-window error seam; `tokenMeter.measure` covers steady state).
 
-## Evidence (spike branch `spike/second-consumer`)
+## Evidence (spike baseline)
 
 Target checkout `38286a6cf9` (release `dsh-0.1.7-alpha.2`, vendor `4.0.4`).
 Pins match exactly: `dsh-*@0.1.7-alpha.2`, `cordis@4.0.4`.
