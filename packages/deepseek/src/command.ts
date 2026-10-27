@@ -90,6 +90,9 @@ export function lcmCommandDefinition(ctx: Context, deps: LcmCommandDeps) {
     name: "lcm",
     description:
       "Lossless session memory: status, report, dump, backup, export, import, gc, migrate, heal, diagnose, compact",
+    input: {
+      hint: "[status|report|dump|backup|export|import|gc|migrate|heal|diagnose|compact] ...",
+    },
     handler: (invocation: CommandInvocation): Promise<CommandResult> => {
       const tokens = invocation.rawInput.trim().split(/\s+/).filter(Boolean);
       const verb = tokens[0] ?? "";

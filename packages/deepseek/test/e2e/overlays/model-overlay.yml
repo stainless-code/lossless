@@ -1,0 +1,4 @@
+- id: agent-default-model
+  config:
+    provider: openrouter
+    model: cohere/north-mini-code:free

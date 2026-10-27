@@ -357,3 +357,33 @@ describe("lcm dump verb", () => {
     expect(kept.text).toContain("dump hidden beta");
   });
 });
+
+describe("lcm command shape", () => {
+  it("claims spaced verbs through an input hint and keeps bare dispatch on status", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    ctx.sessions.create(SessionId("shape-1"), { meta: { cwd: dir } });
+    const store = seedStore(dir, "shape-1", ["shape hello"]);
+    const deps = depsFor(dir, new Map([["shape-1", store]]));
+    const definition = lcmCommandDefinition(ctx, deps);
+    expect(definition.name).toBe("lcm");
+    expect(definition.input?.hint).toBe(
+      "[status|report|dump|backup|export|import|gc|migrate|heal|diagnose|compact] ...",
+    );
+    const disposeCommand = ctx.commands.register(definition);
+    try {
+      const bare = await invoke(ctx, deps, "shape-1", "");
+      expect(bare.kind).toBe("success");
+      expect(bare.text).toContain("shape-1");
+      const spaced = await invoke(ctx, deps, "shape-1", " status");
+      expect(spaced.kind).toBe("success");
+      expect(spaced.text).toContain("shape-1");
+      const dump = await invoke(ctx, deps, "shape-1", " dump hello");
+      expect(dump.kind).toBe("success");
+      expect(dump.text).toContain("shape hello");
+    } finally {
+      disposeCommand();
+    }
+  });
+});

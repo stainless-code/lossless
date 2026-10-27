@@ -1,0 +1,13 @@
+# Probe 2 overlay: inject headless rows over lossless-plain base.
+- insert:
+    - id: headless-startup
+      name: "@deepseek-ai/dsh-headless/startup"
+
+    # Reads its task and run options from the ordinary headlessStartup provider.
+    - id: headless-runner
+      name: "@deepseek-ai/dsh-headless"
+      inject: [headlessStartup]
+      config:
+        task: !!js ctx.headlessStartup.task
+        sessionId: !!js ctx.headlessStartup.sessionId
+        json: !!js ctx.headlessStartup.json
