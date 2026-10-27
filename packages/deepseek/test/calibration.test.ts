@@ -6,6 +6,7 @@ import { Context } from "@deepseek-ai/cordis";
 import CommandRuntime from "@deepseek-ai/dsh-commands";
 import { CommandId } from "@deepseek-ai/dsh-commands/brand";
 import type { BasicCompactionConfig } from "@deepseek-ai/dsh-compaction-basic";
+import { ToolCallId, createMessage, createToolResultMessage } from "@deepseek-ai/dsh-llm";
 import SessionStore, { Session, SessionId } from "@deepseek-ai/dsh-session";
 import SessionProjectionRegistry from "@deepseek-ai/dsh-session-projection";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
@@ -247,6 +248,78 @@ describe("mechanical tools", () => {
         ROUTE,
         "mech-listed",
         toolSpan("mech-listed"),
+      );
+      expect(adapter.requests).toHaveLength(0);
+      expect(outcome.leafSummaryIds.length).toBeGreaterThan(0);
+      for (const id of outcome.leafSummaryIds) {
+        expect(store.getSummary(id)?.quality).toBe("mechanical");
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it("keeps a listed result mechanical when ingest mirrors prose plus the call", async () => {
+    const session = Session.create(SessionId("mech-mixed-ingest"));
+    session.append("turn/start", { turn: 1 });
+    const callId = ToolCallId("call-mixed-mech");
+    session.append(
+      "assistant/message",
+      {
+        stream: [],
+        turn: 1,
+        step: 1,
+        message: createMessage({
+          role: "assistant",
+          content: [
+            { type: "text", text: "reading now" },
+            { type: "tool-call", id: callId, name: "noisy-read", arguments: '{"path":"/a"}' },
+          ],
+          source: { kind: "model", provider: ROUTE.provider, model: ROUTE.model },
+        }),
+      },
+      { surfaceOp: "append" },
+    );
+    session.append("tool/call", {
+      turn: 1,
+      step: 1,
+      callId,
+      name: "noisy-read",
+      arguments: '{"path":"/a"}',
+    });
+    const resultEvent = session.append(
+      "tool/result",
+      {
+        turn: 1,
+        step: 1,
+        message: createToolResultMessage({
+          callId,
+          content: [{ type: "text", text: `config body ${"x".repeat(2000)}` }],
+          isError: false,
+        }),
+      },
+      { surfaceOp: "append" },
+    );
+    session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
+    const store = new LcmStore(":memory:");
+    try {
+      const index = new MessageIndex();
+      for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+      const row = store.messageByEntryId(`${session.id}:${resultEvent.seq}`);
+      expect(row?.role).toBe("toolResult");
+      expect(row?.text.startsWith("tool noisy-read\n")).toBe(true);
+      const { ctx, adapter } = setupContext(ROUTE, []);
+      const outcome = await runLadder(
+        ctx,
+        {
+          store: () => store,
+          index: () => index,
+          redact: identity,
+          mechanicalTools: ["noisy-read"],
+        },
+        ROUTE,
+        "mech-mixed-ingest",
+        [{ entryId: row!.entryId, role: row!.role, text: row!.text }],
       );
       expect(adapter.requests).toHaveLength(0);
       expect(outcome.leafSummaryIds.length).toBeGreaterThan(0);

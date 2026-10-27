@@ -4,12 +4,16 @@ import type { Session, SessionEvent, SessionId } from "@deepseek-ai/dsh-session"
 import { ingestEntries } from "lossless-core";
 import type { IngestStats, IngestibleEntry, LcmRole, LcmStore } from "lossless-core";
 
-/** Live projection state: derived message id to sidecar entry id. The engine
- * hook resolves its span through this map instead of matching text; a cold
- * map re-derives entries from the live log on first miss, and only a message
- * with no live event fails closed rather than guessing rows. */
+/** Live projection state: derived message id to sidecar entry id, plus the
+ * tool name per call id. The engine hook resolves its span through this map
+ * instead of matching text; a cold map re-derives entries from the live log
+ * on first miss, and only a message with no live event fails closed rather
+ * than guessing rows. The tool map carries the name from a tool call to its
+ * later result without a history scan, so a result keeps its identity even
+ * when the assistant row that requested it mixes prose with the call. */
 export class MessageIndex {
   private readonly ids = new Map<string, string>();
+  private readonly toolNames = new Map<string, string>();
 
   record(messageId: string, entryId: string): void {
     this.ids.set(messageId, entryId);
@@ -17,6 +21,17 @@ export class MessageIndex {
 
   entryId(messageId: string): string | undefined {
     return this.ids.get(messageId);
+  }
+
+  recordToolCall(callId: string, name: string): void {
+    const id = callId.trim();
+    const tool = name.trim();
+    if (id.length === 0 || tool.length === 0) return;
+    if (!this.toolNames.has(id)) this.toolNames.set(id, tool);
+  }
+
+  toolName(callId: string): string | undefined {
+    return this.toolNames.get(callId.trim());
   }
 }
 
@@ -36,7 +51,7 @@ export function mirrorEvent(
   store: LcmStore,
   index?: MessageIndex,
 ): IngestStats {
-  const projected = projectedEntry(session, event);
+  const projected = projectedEntry(session, event, index);
   if (projected === undefined) {
     return { inserted: 0, skipped: 1, piCompactions: [], files: [], largeInline: [] };
   }
@@ -204,7 +219,7 @@ export async function backfillSession(
       // Only unmirrored messages cost visited budget: stored rows need one
       // indexed probe and markers never touch the store, so a warm history
       // still reaches new events instead of stalling on its own prefix.
-      const projected = projectedEntry(session, event);
+      const projected = projectedEntry(session, event, index);
       if (
         projected !== undefined &&
         store.messageByEntryId(projected.entry.entryId) === undefined
@@ -243,12 +258,28 @@ export async function backfillSession(
 function projectedEntry(
   session: Session,
   event: SessionEvent,
+  index?: MessageIndex,
 ): { entry: IngestibleEntry; messageId: string } | undefined {
+  if (event.type === "tool/call") {
+    const data = event.data as unknown as { callId?: unknown; name?: unknown };
+    if (typeof data.callId === "string" && typeof data.name === "string") {
+      index?.recordToolCall(data.callId, data.name);
+    }
+    return undefined;
+  }
   const message = session.deriveEventMessage(event);
   if (message === null) return undefined;
+  if (message.role === "assistant") {
+    for (const block of message.content) {
+      if (block.type === "tool-call") {
+        index?.recordToolCall(String(block.id), block.name);
+      }
+    }
+  }
   const role = dshRole(message.role);
   if (role === undefined) return undefined;
-  const text = renderText(message);
+  const toolName = message.role === "tool" ? toolNameForResult(message, index) : undefined;
+  const text = renderText(message, toolName);
   if (text === undefined) return undefined;
   return {
     entry: {
@@ -259,6 +290,23 @@ function projectedEntry(
     },
     messageId: message.id,
   };
+}
+
+/** The tool a result answers, from the live call map. The call event and the
+ * assistant tool-call block both record the name ahead of the result, so the
+ * stored row keeps its identity without a history scan. */
+function toolNameForResult(message: Message, index: MessageIndex | undefined): string | undefined {
+  if (message.role !== "tool" || index === undefined) return undefined;
+  const candidates: unknown[] = [
+    (message as { toolCallId?: unknown }).toolCallId,
+    (message as { source?: { callId?: unknown } }).source?.callId,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || candidate.trim().length === 0) continue;
+    const name = index.toolName(candidate);
+    if (name !== undefined && name.trim().length > 0) return name.trim();
+  }
+  return undefined;
 }
 
 function dshRole(role: Message["role"]): LcmRole | undefined {
@@ -280,8 +328,10 @@ function dshRole(role: Message["role"]): LcmRole | undefined {
 /** Verbatim text plus the calls the transcript needs to stay replayable. A
  * message with blocks but no text keeps a descriptor row instead, and blank
  * text keeps a whitespace marker, so every span message holds a sidecar
- * address for compaction to map. */
-function renderText(message: Message): string | undefined {
+ * address for compaction to map. A tool result keeps its tool name on the
+ * opening line, the marker core reads, so a listed tool stays mechanical
+ * even when the assistant row that requested it mixes prose with the call. */
+function renderText(message: Message, toolName?: string): string | undefined {
   if (message.content.length === 0) return undefined;
   const parts: string[] = [];
   for (const block of message.content) {
@@ -289,10 +339,34 @@ function renderText(message: Message): string | undefined {
     else if (block.type === "tool-call") parts.push(`tool-call: ${block.name} ${block.arguments}`);
   }
   const text = parts.join("\n");
-  if (text.trim().length > 0) return text;
-  if (message.content.some((block) => block.type !== "text")) return describeNonText(message);
+  if (text.trim().length > 0) return withToolName(message, text, toolName);
+  if (message.content.some((block) => block.type !== "text")) {
+    return withToolName(message, describeNonText(message), toolName);
+  }
   // Blank text still needs an address or spans wedge; the marker keeps it honest.
-  return `[lcm:whitespace ${text.length} chars]`;
+  return withToolName(message, `[lcm:whitespace ${text.length} chars]`, toolName);
+}
+
+/** Prefix a tool result with its tool marker line. Other roles keep their
+ * text untouched, and a result that already names the same tool keeps its
+ * opening line instead of doubling it. */
+function withToolName(message: Message, text: string, toolName?: string): string {
+  if (message.role !== "tool") return text;
+  const name = toolName?.trim();
+  if (!name) return text;
+  const first = text.split("\n").find((line) => line.trim().length > 0) ?? "";
+  const marker = new RegExp(`^\\s*tool\\s+${escapeRegExp(name)}\\b`, "i");
+  if (marker.test(first)) return text;
+  const callMarker = new RegExp(
+    `^\\s*(?:\\[tool:${escapeRegExp(name)}\\]|tool[_-]?call:\\s*${escapeRegExp(name)}\\b)`,
+    "i",
+  );
+  if (callMarker.test(first)) return text;
+  return `tool ${name}\n${text}`;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Bracketed stand-in mirroring the core file-handle shape: block kinds plus

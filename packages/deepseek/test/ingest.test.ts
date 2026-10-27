@@ -387,12 +387,69 @@ describe("ingest mirror", () => {
     for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
     const row = store.messageByEntryId(`${session.id}:${resultEvent.seq}`);
     expect(row).toBeDefined();
-    expect(row?.text).toBe("[lcm:whitespace 6 chars]");
+    expect(row?.text).toBe("tool read\n[lcm:whitespace 6 chars]");
     for (const message of session.deriveMessages()) {
       const entryId = index.entryId(message.id);
       expect(entryId).toBeDefined();
       if (entryId === undefined) throw new Error(`no sidecar entry for ${message.id}`);
       expect(store.messageByEntryId(entryId)).toBeDefined();
+    }
+  });
+
+  it("keeps the tool name on a result even when the assistant mixes prose with the call", () => {
+    const session = Session.create(SessionId("mirror-mixed-tool"));
+    session.append("turn/start", { turn: 1 });
+    const callId = ToolCallId("call-mixed");
+    session.append(
+      "assistant/message",
+      {
+        stream: [],
+        turn: 1,
+        step: 1,
+        message: createMessage({
+          role: "assistant",
+          content: [
+            { type: "text", text: "reading now" },
+            { type: "tool-call", id: callId, name: "read", arguments: '{"path":"a.txt"}' },
+          ],
+          source: { kind: "model", provider: MODEL, model: MODEL },
+        }),
+      },
+      { surfaceOp: "append" },
+    );
+    session.append("tool/call", {
+      turn: 1,
+      step: 1,
+      callId,
+      name: "read",
+      arguments: '{"path":"a.txt"}',
+    });
+    const resultEvent = session.append(
+      "tool/result",
+      {
+        turn: 1,
+        step: 1,
+        message: createToolResultMessage({
+          callId,
+          content: [{ type: "text", text: "file body here" }],
+          isError: false,
+        }),
+      },
+      { surfaceOp: "append" },
+    );
+    session.append("turn/end", { turn: 1, reason: { kind: "completed" } });
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    try {
+      for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+      const assistantRow = store.allMessages().find((row) => row.role === "assistant");
+      expect(assistantRow?.text).toContain("reading now");
+      expect(assistantRow?.text).toContain("tool-call: read");
+      const resultRow = store.messageByEntryId(`${session.id}:${resultEvent.seq}`);
+      expect(resultRow?.role).toBe("toolResult");
+      expect(resultRow?.text).toBe("tool read\nfile body here");
+    } finally {
+      store.close();
     }
   });
 

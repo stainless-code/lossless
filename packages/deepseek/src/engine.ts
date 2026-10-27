@@ -248,7 +248,15 @@ export class LosslessSummarizerEngine extends BasicCompactionEngine {
       if (!row) {
         throw new Error(`lossless compaction: sidecar holds no row for ${entryId}`);
       }
-      items.push({ seq: seqOfEntry(entryId), entry: { entryId, role: row.role, text: row.text } });
+      items.push({
+        seq: seqOfEntry(entryId),
+        entry: {
+          entryId,
+          role: row.role,
+          text: row.text,
+          ...(row.payload === undefined ? {} : { payload: row.payload }),
+        },
+      });
     }
     if (items.length === 0)
       throw new Error("lossless compaction: no mirrorable messages in the span");

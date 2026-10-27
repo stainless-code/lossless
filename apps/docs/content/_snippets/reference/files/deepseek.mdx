@@ -18,7 +18,7 @@ The adapter writes under `sidecarDir`. Named export and backup paths are the exc
 
 One sidecar per session holds the verbatim mirror, the DAG, and the checkpoint marker. The `.sqlite-wal` and `.sqlite-shm` files belong to it. Disk stems are sanitized session ids. The directory is created 0700; the database, WAL, and shared-memory files are 0600.
 
-The live session log remains the source of truth for the conversation. The adapter does not backfill a deleted sidecar, so deleting one forgets that session's recall. `/lcm export` keeps a portable copy; `/lcm backup` keeps a byte copy.
+The live session log remains the source of truth for the conversation. Deleting a sidecar forgets that session's recall until remount: a session still live at mount backfills from the session history source when the query backend is available, within the paging and cap below. `/lcm export` keeps a portable copy; `/lcm backup` keeps a byte copy.
 
 Sessions already live when the plugin mounts backfill through the same mirror path as the live feed, paged at 50 with a 500 inserted-row per-session cap; re-mirroring inserts nothing. Each backfill writes one `backfill` metrics row with its ingested count and span.
 
@@ -57,7 +57,7 @@ The block carries versions, store facts, the effective options, and this session
 
 ## Footprint
 
-One sidecar per session, so the directory grows with use. `/lcm gc` removes the ones older than 30 days that no live session holds; a deleted sidecar is not rebuilt from the session log.
+One sidecar per session, so the directory grows with use. `/lcm gc` removes the ones older than 30 days that no live session holds; a deleted sidecar stays forgotten unless its session is still live at remount with history available, in which case backfill restores transcript rows within the cap.
 
 ## Config
 

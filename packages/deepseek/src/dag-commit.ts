@@ -384,7 +384,15 @@ function prepareDagCommit(
     const entryId = `${session.id}:${seq}`;
     const row = store.messageByEntryId(entryId);
     if (!row) throw new Error(`lossless dag commit: sidecar holds no row for ${entryId}`);
-    items.push({ seq: seqOfEntry(entryId), entry: { entryId, role: row.role, text: row.text } });
+    items.push({
+      seq: seqOfEntry(entryId),
+      entry: {
+        entryId,
+        role: row.role,
+        text: row.text,
+        ...(row.payload === undefined ? {} : { payload: row.payload }),
+      },
+    });
   }
   items.sort((a, b) => a.seq - b.seq);
   return {
