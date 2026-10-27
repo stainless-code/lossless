@@ -14,7 +14,7 @@ sources:
 
 # opencode-lossless
 
-Passive mirroring starts with zero config: every prompt, assistant reply, and tool exchange lands in a per-session SQLite sidecar. Past the swap point the DAG projection replaces aged history, and on host compaction the adapter hands over the frontier as the checkpoint instead of a summary.
+Passive mirroring starts with no configuration. The adapter stores every prompt, assistant reply, and tool exchange in a per-session SQLite sidecar. Past the swap point the DAG projection replaces aged history, and on host compaction the adapter hands over the frontier as the checkpoint instead of a summary.
 
 ## Install
 
@@ -25,22 +25,24 @@ opencode plugin add opencode-lossless
 Equivalent `opencode.json` entry:
 
 ```json
-{ "plugins": [{ "package": "opencode-lossless", "options": { "sidecarDir": "./.lossless" } }] }
+{ "plugins": [{ "package": "opencode-lossless" }] }
 ```
+
+To keep sidecars inside the project, set `sidecarDir` to `"./.lossless"`.
 
 ## Commands
 
-- `/lossless-status` — message and compaction summary counts per live sidecar.
-- `/lossless-report` — this session's metrics: projection, checkpoint, pass, recall, reader.
-- `/lossless-pass` — run one DAG pass over the aged span now, without waiting for the swap.
-- `/lossless-heal` — dry-run repair of tainted summaries; `--apply` spends model calls.
-- `/lossless-backup` — copy this session's sidecar beside it.
-- `/lossless-export` — write the verbatim transcript and summaries as JSONL (mode 0600).
-- `/lossless-import` — restore rows from an export.
-- `/lossless-diagnose` — redacted, pasteable diagnostics block; `--save` writes it at mode 0600.
-- `/lossless-migrate` — upgrade older-schema sidecars in place (dry-run by default).
-- `/lossless-gc` — list old sidecars, or export and delete them (never the current session).
-- `/lossless-dump` prints a read-only dump of the session sidecar. `--include-removed` keeps removed-branch rows and `--save` writes the output to a file at mode 0600.
+- `/lossless-status`, message and compaction summary counts per live sidecar.
+- `/lossless-report`, this session's metrics: projection, checkpoint, pass, recall, reader.
+- `/lossless-pass`, run one DAG pass over the aged span now, without waiting for the swap.
+- `/lossless-heal`, dry-run repair of tainted summaries. `--apply` spends model calls.
+- `/lossless-backup`, copy this session's sidecar beside it.
+- `/lossless-export`, write the verbatim transcript and summaries as JSONL (mode 0600).
+- `/lossless-import`, restore rows from an export.
+- `/lossless-diagnose`, redacted, pasteable diagnostics block. `--save` writes it at mode 0600.
+- `/lossless-migrate`, upgrade older-schema sidecars in place (dry-run by default).
+- `/lossless-gc`, list old sidecars, or export and delete them (never the current session).
+- `/lossless-dump`, read-only dump of the session sidecar. `--include-removed` keeps removed-branch rows, `--save` writes the output to a file at mode 0600.
 
 ## Recall tools
 
@@ -55,9 +57,11 @@ Equivalent `opencode.json` entry:
 { "enabled": true, "sidecarDir": "./.lossless", "assembly": true }
 ```
 
-- `sidecarDir` holds one SQLite file per session (0700 dir, 0600 files; delete one to forget that session).
-- `assembly: true` (default) owns the context boundary: projection swaps aged history and compaction stores the DAG frontier.
-- Every other key (swap thresholds, summarizer chain and budgets, heal window, reader timeout) lives on the config reference with its default: https://stainless-code.com/lossless/reference/opencode/config
+The example stores sidecars in the project. Without `sidecarDir`, the plugin uses the global auto-detected path, which holds sessions from every project. The config reference lists the exact paths at https://stainless-code.com/lossless/reference/opencode/config
+
+- `sidecarDir` holds one SQLite file per session (0700 dir, 0600 files). Delete one to forget that session. After upgrading a project that used `./.lossless`, keep `sidecarDir` set to `"./.lossless"` to keep that history: `/lossless-migrate` works in place in the configured directory only (dry run by default, moves nothing). To carry history elsewhere, `/lossless-export` each session under the old config and `/lossless-import` into an empty store under the new one, or stop the server first and copy the `.sqlite`, `-wal`, and `-shm` files across and then migrate.
+- `assembly: true` (default) owns the context boundary. Projection swaps aged history and compaction stores the DAG frontier.
+- The config reference documents every other key and its default: swap thresholds, summarizer chain and budgets, heal window, and reader timeout. See https://stainless-code.com/lossless/reference/opencode/config
 
 ## Verify
 
@@ -71,8 +75,8 @@ bun run opencode:compact # compaction gate, makes real model calls
 
 ## Common mistakes
 
-- **`assembly: false` drops `/lossless-pass` and `lcm_expand_query`** — keep the default `true` unless the host must own compaction; with `false`, compaction falls back to the host.
-- **`scope` equivalence** — `scope: "session"` (default) reads this session only; pass `scope: "sessions"` or `"all_sessions"` to reach past sessions.
-- **Reader is session-scoped** — `lcm_expand_query` returns findings only through its child session, never the raw transcript; ask a question it can answer from the sources, not for a dump.
-- **Forgetting is file deletion** — remove that session's sidecar file; there is no delete tool.
-- **Expecting host compaction to summarize** — with assembly on, the checkpoint is the DAG frontier, not a prose summary; read it with `lcm_describe`, not by asking the host.
+- **`assembly: false` drops `/lossless-pass` and `lcm_expand_query`.** Keep the default `true` unless the host must own compaction. With `false`, compaction falls back to the host.
+- **`scope` equivalence.** `scope: "session"` (default) reads this session only. Pass `scope: "sessions"` or `"all_sessions"` to reach past sessions.
+- **Reader is session-scoped.** `lcm_expand_query` returns findings only through its child session, never the raw transcript. Ask a question it can answer from the sources, not for a dump.
+- **Forgetting is file deletion.** Remove that session's sidecar file. There is no delete tool.
+- **Expecting host compaction to summarize.** With assembly on, the checkpoint is the DAG frontier, not a prose summary. Read it with `lcm_describe`, not by asking the host.

@@ -1,9 +1,3 @@
-/** Store lifecycle commands for the OpenCode adapter: backup, export, import,
- * diagnose, migrate, heal, and a manual gc. They all read the same per-session
- * sidecars the recall tools use, so they are registered with or without
- * `assembly`. The cockpit is not here in V2 scope: the host exposes a
- * TUI extension point, so a separate TUI plugin could reuse the same command core later. */
-
 import {
   appendFileSync,
   chmodSync,
@@ -51,19 +45,17 @@ export interface LifecycleOptions extends SummarizerOptions {
   readonly swapAtRatio: number;
   readonly recutAtRatio: number;
   readonly keepRecentTokens: number;
+  /** Where the sidecar dir came from. Diagnose prints it. `explicit` when the option is set, else the default source. */
+  readonly sidecarSource?: string;
   readonly healSourceTokens?: number;
   readonly smartZone?: number;
   readonly zones?: Readonly<Record<string, ThresholdConfig>>;
-  /** Reserved seam for the shared redactor. The lifecycle reader never sets
-   * it, so the adapter always redacts; wiring `false` through will skip. */
   readonly redactSecrets?: boolean;
 }
 
 export interface HealRunRequest {
   readonly sessionID: string;
   readonly store: LcmStore;
-  /** The store's own first and last entry id, which is the span every call in
-   * the run summarizes. */
   readonly span: { readonly first: string; readonly last: string };
   readonly dryRun: boolean;
   readonly maxNodes?: number;
@@ -76,12 +68,7 @@ export interface LifecycleDeps {
   readonly host: () => string;
   readonly prompt: (sessionID: string, text: string) => Promise<unknown>;
   readonly record: (row: Record<string, unknown>) => void;
-  /** Run the bounded repair loop over this session's sidecar. A dry run reads
-   * the plan and must not call a model. */
   readonly heal: (request: HealRunRequest) => Promise<HealOutcome>;
-  /** The session's model, when the host can name it. Diagnose uses it to
-   * report the window and the effective thresholds; the commands still work
-   * without it. */
   readonly model?: (sessionID: string) => Promise<ModelRef | undefined>;
   readonly window?: (model: ModelRef) => Promise<number>;
 }
@@ -105,8 +92,6 @@ function valueOf(args: readonly string[], name: string): string | undefined {
 
 function currentStore(deps: LifecycleDeps, sessionID: string): LcmStore | undefined {
   if (!existsSync(deps.sidecars.pathFor(sessionID))) return undefined;
-  // The adapter's own map owns the handle, so a command does not leak a
-  // store it opened only to read one block.
   return deps.sidecars.for(sessionID);
 }
 
@@ -117,8 +102,7 @@ function chmodFile(path: string): void {
 }
 
 function writeDumpTarget(target: string, text: string): void {
-  // Unique temp with exclusive creation, then an atomic rename: a planted
-  // predictable path is never touched and the destination swaps at once.
+  // Exclusive create plus atomic rename. The code never touches a planted path.
   const dir = dirname(target);
   const base = basename(target);
   let tmp = "";
@@ -133,9 +117,7 @@ function writeDumpTarget(target: string, text: string): void {
       break;
     } catch (error) {
       if ((error as { code?: string })?.code === "EEXIST") continue;
-      // A write can create the private file and then fail (disk full), so
-      // remove the candidate before surfacing the error. EEXIST keeps its
-      // continue above and never unlinks a pre-existing collision.
+      // Only unlink what `wx` created. An EEXIST collision belongs to someone else.
       try {
         unlinkSync(candidate);
       } catch {}
@@ -154,6 +136,15 @@ function writeDumpTarget(target: string, text: string): void {
   }
 }
 
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith("/") || value.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function maskSidecarDir(dir: string, home: string): string {
+  if (dir === home || dir.startsWith(`${home}/`)) return `~${dir.slice(home.length)}`;
+  if (isAbsolutePath(dir)) return "<path>";
+  return dir;
+}
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -260,8 +251,6 @@ export function importCommand(deps: LifecycleDeps): CommandDefinition {
 }
 
 export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
-  // The lifecycle reader never sets `redactSecrets`, so this always redacts;
-  // the flag check lives in the shared adapter, not at each call site.
   const redact = makeRedactConfigAdapter(deps.options);
   return {
     name: "lossless-diagnose",
@@ -291,8 +280,6 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
           liveSidecarPaths: livePaths,
           sidecarExtension: deps.sidecars.extension,
         });
-        // The bundle is a diagnostic, not a probe: a host model lookup that
-        // fails says less, it does not fail the command.
         let model: ModelRef | undefined;
         try {
           model = await deps.model?.(input.sessionID);
@@ -375,6 +362,7 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
           home: homedir(),
         };
         const bundle = buildDiagnoseBundle(inputBundle);
+        const body = `sidecar: ${maskSidecarDir(deps.sidecars.dir, inputBundle.home)} (${deps.options.sidecarSource ?? "explicit"})\n${bundle}`;
         if (args.includes("--save") && !valueOf(args, "--save")) {
           await deps.prompt(
             input.sessionID,
@@ -385,15 +373,15 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
         const save = valueOf(args, "--save");
         if (save !== undefined) {
           const target = resolve(save);
-          writeFileSync(target, `${bundle}\n`, { encoding: "utf8", mode: 0o600 });
+          writeFileSync(target, `${body}\n`, { encoding: "utf8", mode: 0o600 });
           chmodFile(target);
           await deps.prompt(
             input.sessionID,
-            `LCM diagnose: wrote ${Buffer.byteLength(bundle, "utf8")} bytes to ${target} (mode 0600).`,
+            `LCM diagnose: wrote ${Buffer.byteLength(body, "utf8")} bytes to ${target} (mode 0600).`,
           );
           return;
         }
-        await deps.prompt(input.sessionID, bundle);
+        await deps.prompt(input.sessionID, body);
       } catch (error) {
         await deps.prompt(
           input.sessionID,
@@ -411,8 +399,6 @@ export function migrateCommand(deps: LifecycleDeps): CommandDefinition {
     execute: async (input) => {
       const args = argsOf(input.prompt.text);
       const apply = args.includes("--apply");
-      // A store this process holds open is already current: its constructor
-      // migrated it. Opening a second writer would only race the live session.
       const live = new Set(deps.sidecars.ids());
       const currentPath = deps.sidecars.pathFor(input.sessionID);
       const refs = [
@@ -479,14 +465,47 @@ export function migrateCommand(deps: LifecycleDeps): CommandDefinition {
   };
 }
 
+/** A `--session` target younger than this is treated as possibly live in another process. */
+export const GC_RECENCY_GRACE_MINUTES = 60;
+/** Candidates younger than this carry a warning naming up to 5 ids. */
+export const GC_WARN_YOUNG_HOURS = 24;
+const GC_GRACE_MS = GC_RECENCY_GRACE_MINUTES * 60_000;
+const GC_YOUNG_MS = GC_WARN_YOUNG_HOURS * 3_600_000;
+
+function maxSidecarMtime(path: string): { stat: Stats; mtimeMs: number } | undefined {
+  try {
+    const stat = statSync(path);
+    let mtimeMs = stat.mtimeMs;
+    for (const suffix of ["-wal", "-shm"] as const) {
+      try {
+        mtimeMs = Math.max(mtimeMs, statSync(`${path}${suffix}`).mtimeMs);
+      } catch {}
+    }
+    return { stat, mtimeMs };
+  } catch {
+    return undefined;
+  }
+}
+
+function gcYoungWarning(ids: readonly string[]): string | undefined {
+  if (ids.length === 0) return undefined;
+  const shown = ids.slice(0, 5).join(", ");
+  return `Note: ${ids.length} sidecar(s) younger than 24 hour(s): ${shown}${ids.length > 5 ? ", ..." : ""}. Confirm no other opencode process is using them before --apply.`;
+}
+
+function gcSkippedLine(ids: readonly string[]): string {
+  return `Skipped ${ids.length} sidecar(s) active within the last 60 minute(s). Pass --session <id> to target one explicitly: ${ids.join(", ")}.`;
+}
+
 export function gcCommand(deps: LifecycleDeps): CommandDefinition {
   return {
     name: "lossless-gc",
     description:
-      "List old sidecars, or with --apply export and delete them. Never touches this session.",
+      "List old sidecars, or with --apply export and delete them. It never touches this session.",
     execute: async (input) => {
       const args = argsOf(input.prompt.text);
       const apply = args.includes("--apply");
+      const force = args.includes("--force");
       if (args.includes("--session") && valueOf(args, "--session") === undefined) {
         await deps.prompt(input.sessionID, "LCM gc: --session takes a session id.");
         return;
@@ -496,13 +515,19 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         return;
       }
       const sessionId = valueOf(args, "--session");
+      if (force && sessionId === undefined) {
+        await deps.prompt(input.sessionID, "LCM gc: --force needs --session <id>.");
+        return;
+      }
       const live = new Set(deps.sidecars.ids());
-      // Disk stems are sanitized session ids, so compare those, not raw ids.
       const liveStems = new Set([...live].map((id) => sanitizeSidecarId(id)));
-      if (sessionId !== undefined && live.has(sessionId)) {
+      if (
+        sessionId !== undefined &&
+        (live.has(sessionId) || liveStems.has(sanitizeSidecarId(sessionId)))
+      ) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc: session ${sessionId} is open in this process; gc never deletes an open sidecar.`,
+          `LCM gc: session ${sessionId} is open in this process. The command never deletes an open sidecar.`,
         );
         return;
       }
@@ -512,40 +537,169 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         await deps.prompt(input.sessionID, "LCM gc: --older-than takes a number of days.");
         return;
       }
-      const refs = deps.sidecars.list(input.sessionID).filter((ref) => !liveStems.has(ref.id));
-      const selected = sessionId === undefined ? refs : refs.filter((ref) => ref.id === sessionId);
-      if (sessionId !== undefined && selected.length === 0) {
+      if (days <= 0 && sessionId === undefined) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc: no sidecar for session ${sessionId} (the current session is never a candidate).`,
+          "LCM gc: --older-than 0 needs --session <id>. Without --session it would match every other sidecar, including ones live in another process.",
         );
         return;
       }
-      const cutoff = Date.now() - days * 86_400_000;
-      const candidates: Array<{ ref: SidecarRef; stat: Stats; mtimeMs: number }> = [];
+      const refs = deps.sidecars.list(input.sessionID).filter((ref) => !liveStems.has(ref.id));
+      const sanitizedSession = sessionId === undefined ? undefined : sanitizeSidecarId(sessionId);
+      const selected =
+        sanitizedSession === undefined ? refs : refs.filter((ref) => ref.id === sanitizedSession);
+      if (sessionId !== undefined && selected.length === 0) {
+        await deps.prompt(
+          input.sessionID,
+          `LCM gc: no sidecar for session ${sessionId}. The current session is never a candidate.`,
+        );
+        return;
+      }
+      const now = Date.now();
+      const ageMsOf = (mtimeMs: number): number => Math.max(0, now - mtimeMs);
+      const cutoff = now - days * 86_400_000;
+      const entries: Array<{ ref: SidecarRef; stat: Stats; mtimeMs: number }> = [];
       for (const ref of selected) {
-        try {
-          const stat = statSync(ref.path);
-          // A write can land in the WAL while the database file's mtime stays
-          // put. The newest of the three files is the sidecar's last activity.
-          let mtimeMs = stat.mtimeMs;
-          for (const suffix of ["-wal", "-shm"]) {
-            try {
-              mtimeMs = Math.max(mtimeMs, statSync(`${ref.path}${suffix}`).mtimeMs);
-            } catch {}
-          }
-          if (sessionId !== undefined || mtimeMs <= cutoff) {
-            candidates.push({ ref, stat, mtimeMs });
-          }
-        } catch {
-          // A sidecar that vanished between the listing and the stat is not a
-          // candidate.
+        const found = maxSidecarMtime(ref.path);
+        if (found !== undefined) entries.push({ ref, ...found });
+      }
+      if (sessionId !== undefined) {
+        if (entries.length === 0) {
+          await deps.prompt(
+            input.sessionID,
+            `LCM gc: nothing eligible for session ${sessionId} (sidecar unreadable).`,
+          );
+          return;
         }
+        const target = entries[0]!;
+        if (!force && ageMsOf(target.mtimeMs) < GC_GRACE_MS) {
+          deps.record({
+            kind: "gc",
+            action: "skipped",
+            session: target.ref.id,
+            reason: "recency-grace",
+          });
+          const minutes = Math.floor(ageMsOf(target.mtimeMs) / 60_000);
+          await deps.prompt(
+            input.sessionID,
+            `LCM gc: session ${sessionId} was active ${minutes} minute(s) ago. It may be live in another process. Re-run with --session ${sessionId} --force to delete it anyway.`,
+          );
+          return;
+        }
+        const candidates = entries;
+        const lines = candidates.map(({ ref, stat, mtimeMs }) => {
+          const ageDays = Math.max(0, (Date.now() - mtimeMs) / 86_400_000);
+          return `  ${ref.id}: ${(stat.size / 1024).toFixed(0)} KB, ${ageDays.toFixed(1)} day(s) old`;
+        });
+        const young = gcYoungWarning(
+          candidates
+            .filter(({ mtimeMs }) => ageMsOf(mtimeMs) < GC_YOUNG_MS)
+            .map(({ ref }) => ref.id),
+        );
+        if (!apply) {
+          await deps.prompt(
+            input.sessionID,
+            `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}${young === undefined ? "" : `\n${young}`}\nRun \`/lossless-gc --apply\` to export then delete them. Backups are never touched.`,
+          );
+          return;
+        }
+        const fresh = maxSidecarMtime(target.ref.path);
+        if (
+          fresh !== undefined &&
+          !force &&
+          Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS
+        ) {
+          deps.record({
+            kind: "gc",
+            action: "skipped",
+            session: target.ref.id,
+            reason: "recency-grace",
+          });
+          const minutes = Math.floor(Math.max(0, Date.now() - fresh.mtimeMs) / 60_000);
+          await deps.prompt(
+            input.sessionID,
+            `LCM gc: session ${sessionId} was active ${minutes} minute(s) ago. It may be live in another process. Re-run with --session ${sessionId} --force to delete it anyway.`,
+          );
+          return;
+        }
+        const exportTarget = join(deps.sidecars.dir, `lossless-export-gc-${STAMP()}.jsonl`);
+        let removed = 0;
+        let exported = 0;
+        let failed = 0;
+        for (const { ref } of candidates) {
+          let sizeBytes = target.stat.size;
+          try {
+            const fresh = maxSidecarMtime(ref.path);
+            if (fresh === undefined) throw new Error("sidecar unreadable before delete");
+            sizeBytes = fresh.stat.size;
+            if (!force && Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS) {
+              deps.record({
+                kind: "gc",
+                action: "skipped",
+                session: ref.id,
+                reason: "recency-grace",
+              });
+              const minutes = Math.floor(Math.max(0, Date.now() - fresh.mtimeMs) / 60_000);
+              await deps.prompt(
+                input.sessionID,
+                `LCM gc: session ${sessionId} was active ${minutes} minute(s) ago. It may be live in another process. Re-run with --session ${sessionId} --force to delete it anyway.`,
+              );
+              return;
+            }
+            const store = new LcmStore(ref.path, { queryOnly: true });
+            let rows = "";
+            try {
+              rows = exportTranscript(store).toJSONL();
+            } finally {
+              store.close();
+            }
+            if (rows.length > 0) {
+              appendFileSync(exportTarget, `${rows}\n`, { encoding: "utf8", mode: 0o600 });
+              exported++;
+            }
+            deps.sidecars.drop(ref.id);
+            removed++;
+            deps.record({
+              kind: "gc",
+              action: "deleted",
+              session: ref.id,
+              sizeBytes,
+              exportedTo: exportTarget,
+            });
+          } catch (error) {
+            failed++;
+            deps.record({
+              kind: "gc",
+              action: "failed",
+              session: ref.id,
+              error: error instanceof Error ? error.message.slice(0, 300) : String(error),
+            });
+          }
+        }
+        if (exported > 0) chmodFile(exportTarget);
+        await deps.prompt(
+          input.sessionID,
+          `LCM gc: removed ${removed} of ${candidates.length} sidecar(s). ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `. ${failed} skipped. Migrate or inspect first`}.${young === undefined ? "" : ` ${young}`}`,
+        );
+        return;
+      }
+      const candidates = entries.filter(
+        ({ mtimeMs }) => mtimeMs <= cutoff && ageMsOf(mtimeMs) >= GC_GRACE_MS,
+      );
+      const skipped = entries.filter(({ mtimeMs }) => ageMsOf(mtimeMs) < GC_GRACE_MS);
+      const skippedIds = skipped.map(({ ref }) => ref.id);
+      for (const { ref } of skipped) {
+        deps.record({
+          kind: "gc",
+          action: "skipped",
+          session: ref.id,
+          reason: "recency-grace",
+        });
       }
       if (candidates.length === 0) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc: nothing eligible (${refs.length} other sidecar(s), none older than ${days} day(s)).`,
+          `LCM gc: nothing eligible. ${refs.length} other sidecar(s), none older than ${days} day(s).${skippedIds.length === 0 ? "" : ` ${gcSkippedLine(skippedIds)}`}`,
         );
         return;
       }
@@ -553,20 +707,44 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         const ageDays = Math.max(0, (Date.now() - mtimeMs) / 86_400_000);
         return `  ${ref.id}: ${(stat.size / 1024).toFixed(0)} KB, ${ageDays.toFixed(1)} day(s) old`;
       });
+      const young = gcYoungWarning(
+        candidates.filter(({ mtimeMs }) => ageMsOf(mtimeMs) < GC_YOUNG_MS).map(({ ref }) => ref.id),
+      );
       if (!apply) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lossless-gc --apply\` to export then delete them. Backups are never touched.`,
+          `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}${young === undefined ? "" : `\n${young}`}${skipped.length === 0 ? "" : `\n${gcSkippedLine(skippedIds)}`}\nRun \`/lossless-gc --apply\` to export then delete them. Backups are never touched.`,
         );
         return;
       }
       const exportTarget = join(deps.sidecars.dir, `lossless-export-gc-${STAMP()}.jsonl`);
-      // The export file is created on the first real write, so a no-op gc leaves no file.
       let removed = 0;
       let exported = 0;
       let failed = 0;
-      for (const { ref, stat } of candidates) {
+      const restatSkipped: string[] = [];
+      for (const { ref } of candidates) {
         try {
+          const fresh = maxSidecarMtime(ref.path);
+          if (fresh === undefined) {
+            failed++;
+            deps.record({
+              kind: "gc",
+              action: "failed",
+              session: ref.id,
+              error: "sidecar unreadable before delete; skipped",
+            });
+            continue;
+          }
+          if (Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS) {
+            restatSkipped.push(ref.id);
+            deps.record({
+              kind: "gc",
+              action: "skipped",
+              session: ref.id,
+              reason: "recency-grace",
+            });
+            continue;
+          }
           const store = new LcmStore(ref.path, { queryOnly: true });
           let rows = "";
           try {
@@ -584,7 +762,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
             kind: "gc",
             action: "deleted",
             session: ref.id,
-            sizeBytes: stat.size,
+            sizeBytes: fresh.stat.size,
             exportedTo: exportTarget,
           });
         } catch (error) {
@@ -598,9 +776,10 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         }
       }
       if (exported > 0) chmodFile(exportTarget);
+      const allSkipped = [...skippedIds, ...restatSkipped];
       await deps.prompt(
         input.sessionID,
-        `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
+        `LCM gc: removed ${removed} of ${candidates.length} sidecar(s). ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `. ${failed} skipped. Migrate or inspect first`}.${young === undefined ? "" : ` ${young}`}${allSkipped.length === 0 ? "" : ` ${gcSkippedLine(allSkipped)}`}`,
       );
     },
   };
@@ -652,8 +831,6 @@ export function healCommand(deps: LifecycleDeps): CommandDefinition {
   };
 }
 
-/** Read-only dump of this session's sidecar plus its metrics, opened with
- * `queryOnly` so a dump never mutates the store. */
 export function dumpCommand(deps: LifecycleDeps): CommandDefinition {
   const redact = makeRedactConfigAdapter(deps.options);
   return {
@@ -710,8 +887,6 @@ export function dumpCommand(deps: LifecycleDeps): CommandDefinition {
   };
 }
 
-/** The compact result a command prompt carries. No summary or message text
- * leaves the store; the counts are the whole answer. */
 export function healReport(outcome: HealOutcome): string {
   if (outcome.dryRun) {
     return outcome.counts.candidates === 0

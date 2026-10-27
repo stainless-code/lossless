@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -18,6 +20,7 @@ import {
 import { statusCommand, statusLine, passCommand, reportCommand } from "./command.ts";
 import { createCheckpointWriter } from "./compaction.ts";
 import { createContextProjector, type ProjectionOptions } from "./context.ts";
+import { defaultSidecarDir, FALLBACK_SIDECAR_DIR } from "./default-sidecar-dir.ts";
 import type { ModelRef, OpencodeContext, Registration, SessionMessageInfo } from "./host.ts";
 import { compactionMark, mirror, mirrorBusEvent, toolEntry, userEntry } from "./ingest.ts";
 import {
@@ -42,85 +45,49 @@ import { registerExpandQueryTool, registerRecallTools } from "./tools.ts";
 
 export const PLUGIN_ID = "opencode-lossless";
 
-/** Options read from the plugin's `plugins[].options` entry. Every field is
- * optional; an unknown or malformed value keeps its default rather than
- * failing the plugin load. */
 export interface OpencodeLosslessOptions {
-  /** Master flag. Nothing registers, mirrors, or mounts until true, unless
-   * the flag is absent, in which case listing the plugin is intent enough.
-   * @default true */
+  /** @default true */
   readonly enabled?: boolean;
-  /** Directory for one sidecar file per session. Created when missing.
-   * @default "./.lossless" (resolved from the server working directory) */
+  /** @default global sidecar dir, `./.lossless` only as fallback */
   readonly sidecarDir?: string;
-  /** Wire the context projection, the blocking checkpoint, the reader, and the
-   * on-demand `lossless-pass` command. `false` leaves compaction to the host and
-   * registers only the mirror, the three recall tools, and the commands.
-   * @default true
+  /** @default true
    * @example { assembly: false } */
   readonly assembly?: boolean;
-  /** Models the pass tries for its summaries, in order. `auto` is the session
-   * model; this host has no synchronous model lookup, so a concrete id falls
-   * back to the session model.
-   * @default "auto" */
+  /** @default "auto" */
   readonly summarizer?: string | string[];
-  /** Tokens one summarizer request may cost, estimate plus output cap, before
-   * it is refused rather than paid for.
-   * @default 60000 */
+  /** @default 60000 */
   readonly summarizerTokensPerCall?: number;
-  /** Tokens one pass may spend across all of its calls, counted from what the
-   * provider reported.
-   * @default 250000 */
+  /** @default 250000 */
   readonly summarizerTokensPerPass?: number;
-  /** Tokens one `/lossless-heal --apply` run may spend across all of its calls.
-   * A dry run spends nothing.
-   * @default 120000 */
+  /** @default 120000 */
   readonly summarizerTokensPerHeal?: number;
-  /** Tool names whose spans compact without a model call. Empty keeps the
-   * LLM path.
-   * @default [] */
+  /** @default [] */
   readonly mechanicalTools?: readonly string[];
-  /** The occupancy share at which a request swaps in the projection. The
-   * engine clamps it to 0.9 of the window.
-   * @default 0.7 */
+  /** @default 0.7 */
   readonly swapAtRatio?: number;
-  /** The occupancy share at which a new cut replaces the pinned one.
-   * @default 0.85 */
+  /** @default 0.85 */
   readonly recutAtRatio?: number;
-  /** Absolute token count where model quality starts to degrade, used in
-   * place of `swapAtRatio`. The recut is derived from it.
-   * @default unset */
+  /** @default unset */
   readonly smartZone?: number;
-  /** Per-model threshold overrides, keyed `provider/model`. */
   readonly zones?: Readonly<Record<string, ThresholdConfig>>;
-  /** Tokens the projection keeps verbatim after the cut.
-   * @default 20000 */
+  /** @default 20000 */
   readonly keepRecentTokens?: number;
-  /** Tokens one summary aims for.
-   * @default 1500 */
+  /** @default 1500 */
   readonly summaryTokens?: number;
-  /** Estimated tokens one heal node may read as source. Defaults to
-   * `8 * summaryTokens`, clamped to 3,000 through 24,000 and to
-   * `summarizerTokensPerCall`. It is a whole-node window, not a per-message
-   * clip. Raise it to repair summaries over unusually large source messages.
-   * @default 8 x summaryTokens, clamped 3000..24000 */
+  /** @default 8 x summaryTokens, clamped 3000..24000 */
   readonly healSourceTokens?: number;
-  /** Window used when the host catalogue cannot name this model's limit.
-   * @default 128000 */
+  /** @default 128000 */
   readonly contextWindow?: number;
-  /** How long one `lcm_expand_query` child may run before it is interrupted.
-   * @default 120000 */
+  /** @default 120000 */
   readonly readerTimeoutMs?: number;
 }
 
-const DEFAULT_SIDECAR_DIR = "./.lossless";
 const DEFAULT_SWAP_RATIO = 0.7;
 const DEFAULT_RECUT_RATIO = 0.85;
 const DEFAULT_KEEP_RECENT_TOKENS = 20_000;
 const DEFAULT_SUMMARY_TOKENS = 1500;
 const DEFAULT_CONTEXT_WINDOW = 128_000;
 
-/** The extension's own version, from the manifest that ships it. */
 export function pluginVersion(): string {
   return (
     packageVersionNear(fileURLToPath(import.meta.url), "opencode-lossless") ??
@@ -132,28 +99,14 @@ export function pluginLabel(): string {
   return `opencode-lossless ${pluginVersion()}`;
 }
 
-/** Wire lossless memory into an OpenCode v2 plugin context: mirror prompts,
- * assistant text, tool traffic, and compaction boundaries into per-session
- * sidecars, and register the recall tools plus the `/lossless-status`,
- * `/lossless-report`, `/lossless-pass`, and `/lossless-heal` commands. With
- * `assembly` (the default), also register the context projection and the blocking checkpoint
- * (`session.compaction`); `/lossless-pass` runs one DAG pass over the session's
- * stored span on demand. The host stops summarizing for itself once the sidecar
- * covers the aged span: it stores the DAG frontier as its checkpoint, and the
- * next request's projection continues from it. The sidecar keeps every address
- * the reader can name. Resolves to the cleanup that unregisters everything and
- * closes the sidecars. The context is the local structural subset
- * (`./host.ts`), so the real host context flows in without the bundle naming
- * the host SDK. `rawOptions` is validated at runtime; a malformed value
- * degrades to defaults rather than throwing into the host load. */
+/** Wire lossless memory into an OpenCode v2 plugin context: mirror traffic into per-session sidecars and register recall tools plus lifecycle commands. Resolves to the cleanup that unregisters everything and closes the sidecars. */
 export async function setupOpencodeLossless(
   ctx: OpencodeContext,
   rawOptions?: unknown,
 ): Promise<() => Promise<void>> {
   const options = readOptions(rawOptions);
   if (options.enabled === false) return async () => undefined;
-  // The plugin reader never sets `redactSecrets`, so this always redacts;
-  // the flag check lives in the shared adapter, not at each call site.
+  logSidecarDir(options.sidecarDir, options.sidecarSource);
   const redact = makeRedactConfigAdapter(options);
   const sidecars = new Sidecars(options.sidecarDir);
   const registrations: Registration[] = [];
@@ -180,8 +133,6 @@ export async function setupOpencodeLossless(
 
   registrations.push(
     await ctx.session.hook("prompt", (event) => {
-      // A retired reader has no session and no store. Late bus traffic for it
-      // must not reopen the sidecar that was just deleted.
       if (reader.isReader(event.sessionID) && !reader.isActive(event.sessionID)) return;
       try {
         mirror(sidecars.for(event.sessionID), userEntry(event.sessionID, event));
@@ -202,8 +153,6 @@ export async function setupOpencodeLossless(
   );
   registrations.push(
     await ctx.session.hook("compaction", async (event) => {
-      // A reader child is a leaf: its transcript is never compacted and its
-      // sidecar never becomes a checkpoint.
       if (reader.isReader(event.sessionID)) return;
       try {
         mirror(sidecars.for(event.sessionID), compactionMark(event.sessionID, event));
@@ -216,7 +165,6 @@ export async function setupOpencodeLossless(
   registrations.push(
     await ctx.tool.transform((editor) => {
       registerRecallTools(editor, {
-        // A reader child reads the parent's sidecar, never its own.
         store: (sessionId) =>
           sessionId === undefined ? undefined : sidecars.peek(reader.storeSession(sessionId)),
         redact,
@@ -260,6 +208,7 @@ export async function setupOpencodeLossless(
         sidecars,
         options: {
           assembly: options.assembly,
+          sidecarSource: options.sidecarSource,
           swapAtRatio: options.swapAtRatio,
           recutAtRatio: options.recutAtRatio,
           keepRecentTokens: options.keepRecentTokens,
@@ -281,10 +230,9 @@ export async function setupOpencodeLossless(
           if (healingSessions.has(sessionID)) {
             throw new Error("a heal is already running for this session");
           }
-          // A heal can outlive the plugin instance that started it: the host
-          // reloads plugins when its watched files change. Sidecars held by the
-          // plugin are closed on that reload, so the repair owns a separate
-          // connection for the duration of the run.
+          // A heal can outlive the plugin instance that started it. The host
+          // reloads plugins on watched-file changes and closes sidecars, so the run
+          // owns a separate connection for its duration.
           const runStore = new LcmStore(sidecars.pathFor(sessionID));
           if (runStore.hasLiveRun()) {
             runStore.close();
@@ -357,8 +305,8 @@ export async function setupOpencodeLossless(
     const projector = createContextProjector({ ctx, options, sidecars, windowOf });
     registrations.push(
       await ctx.session.hook("context", (event) => {
-        // The reader child gets one system part, its instructions, and nothing
-        // else: the agent prompt and the parent's projection both stay out.
+        // The reader child gets its instructions as the only system part.
+        // The agent prompt and the parent projection stay out.
         if (reader.isReader(event.sessionID)) {
           reader.resetSystem(event.system);
           return;
@@ -383,7 +331,6 @@ export async function setupOpencodeLossless(
               const mapped = storedEntries(sessionID, messages);
               const model = sessionModel(messages);
               if (model === undefined) {
-                // An empty history needs no model and no pass.
                 if (mapped.entries.length === 0) {
                   return { kind: "nothing", reason: "no-entries", ingested: 0 };
                 }
@@ -441,8 +388,6 @@ export async function setupOpencodeLossless(
         data: event.data,
       });
     } catch (error) {
-      // One bad event must not end the subscription for the rest of the
-      // process. The hooks and tools keep working either way.
       if (sessionId !== undefined) failMirror(sessionId, error);
     }
   };
@@ -460,16 +405,14 @@ export async function setupOpencodeLossless(
           handle(next.value);
         }
       } catch {
-        // The host documents the event stream as volatile. Resubscribe below;
-        // assistant text has no other boundary in this host.
+        // The host documents the event stream as volatile. Resubscribe below.
+        // Assistant text has no other boundary in this host.
       } finally {
         current = undefined;
         if (iterator !== undefined) {
           try {
             await iterator.return?.();
-          } catch {
-            // The stream is already gone; the next subscription starts clean.
-          }
+          } catch {}
         }
       }
       if (stopped) return;
@@ -486,10 +429,7 @@ export async function setupOpencodeLossless(
     if (wake !== undefined) clearTimeout(wake);
     try {
       await current?.return?.();
-    } catch {
-      // The pump is stopping either way; a stream that cannot close must not
-      // leave the registrations and stores open.
-    }
+    } catch {}
     for (const registration of registrations.splice(0).reverse()) {
       await registration.dispose();
     }
@@ -500,6 +440,8 @@ export async function setupOpencodeLossless(
 export interface RuntimeOptions extends ProjectionOptions {
   readonly enabled: boolean;
   readonly sidecarDir: string;
+  /** Where the sidecar dir came from. `explicit` when the option is set, else the default source. */
+  readonly sidecarSource: string;
   readonly assembly: boolean;
   readonly readerTimeoutMs: number;
   readonly healSourceTokens?: number;
@@ -517,9 +459,11 @@ export function readOptions(raw: unknown): RuntimeOptions {
   const zones = readZones(record.zones);
   const healSourceTokens = readHealSourceTokens(record.healSourceTokens);
   const mechanicalTools = readMechanicalTools(record.mechanicalTools);
+  const sidecar = readSidecarDir(record.sidecarDir);
   return {
     enabled: typeof record.enabled === "boolean" ? record.enabled : true,
-    sidecarDir: typeof record.sidecarDir === "string" ? record.sidecarDir : DEFAULT_SIDECAR_DIR,
+    sidecarDir: sidecar.dir,
+    sidecarSource: sidecar.source,
     assembly: record.assembly !== false,
     swapAtRatio,
     recutAtRatio,
@@ -541,6 +485,31 @@ export function readOptions(raw: unknown): RuntimeOptions {
   };
 }
 
+function readSidecarDir(raw: unknown): { dir: string; source: string } {
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    return { dir: raw, source: "explicit" };
+  }
+  const resolved = defaultSidecarDir();
+  return { dir: resolved.dir, source: resolved.source };
+}
+
+function logSidecarDir(dir: string, source: string): void {
+  try {
+    console.log(`LCM sidecar dir: ${dir} (${source})`);
+  } catch {}
+  if (source === "explicit" || source === "fallback") return;
+  try {
+    if (resolve(FALLBACK_SIDECAR_DIR) === resolve(dir)) return;
+    const entries = readdirSync(FALLBACK_SIDECAR_DIR);
+    if (entries.length === 0) return;
+    console.warn(
+      `LCM sidecar: legacy ${resolve(FALLBACK_SIDECAR_DIR)} holds ${entries.length} file(s) ` +
+        `and is not read. Sidecars now live in ${dir} (${source}). Nothing was moved. ` +
+        `To keep the old dir set sidecarDir to "./.lossless". See /lossless-migrate.`,
+    );
+  } catch {}
+}
+
 function readSummarizer(raw: unknown): string | string[] | undefined {
   if (typeof raw === "string") return raw.trim().length === 0 ? undefined : raw;
   if (!Array.isArray(raw)) return undefined;
@@ -548,8 +517,6 @@ function readSummarizer(raw: unknown): string | string[] | undefined {
   return chain.length === 0 ? undefined : chain;
 }
 
-/** Tool names that skip the model. One name or a list; blanks and repeats
- * drop, and an empty result keeps the LLM path. */
 function readMechanicalTools(raw: unknown): string[] | undefined {
   const list = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : undefined;
   if (list === undefined) return undefined;
@@ -576,16 +543,12 @@ function positiveInteger(raw: unknown): number | undefined {
   return value !== undefined && Number.isInteger(value) ? value : undefined;
 }
 
-/** A source window above the hard ceiling is a malformed override, not a
- * request for a prompt the summarizer call cap cannot carry. Falling back to
- * the derived default is safer than clamping a typo into a paid call. */
+/** Above the call cap a value is a typo, not a paid call. Fall back instead of clamping. */
 function readHealSourceTokens(raw: unknown): number | undefined {
   const value = positiveInteger(raw);
   return value !== undefined && value <= HEAL_SOURCE_MAX_TOKENS ? value : undefined;
 }
 
-/** A share of the window: above zero and at most one. Anything else keeps the
- * default rather than throwing, the way the other options read. */
 function readRatio(raw: unknown): number | undefined {
   const value = positiveNumber(raw);
   return value !== undefined && value <= 1 ? value : undefined;
@@ -622,9 +585,6 @@ function readZones(raw: unknown): Record<string, ThresholdConfig> | undefined {
   return Object.keys(zones).length === 0 ? undefined : zones;
 }
 
-/** The model the session last ran under, read from the stored messages so the
- * pass needs no extra host call. A model switch or a compaction carries one,
- * and an assistant message carries the one it answered with. */
 function sessionModel(messages: readonly SessionMessageInfo[]): ModelRef | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
     const model = messages[index]?.model;
@@ -643,10 +603,6 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** The plugin definition the host loads. Options come from the config entry,
- * so the default export reads them late, at setup time. The setup parameter
- * is the local context subset; the host's richer context satisfies it, which
- * `test/host-compat.test.ts` pins against the real host types. */
 const definition = {
   id: PLUGIN_ID,
   setup: (ctx: OpencodeContext) => setupOpencodeLossless(ctx, ctx.options),
