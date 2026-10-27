@@ -464,6 +464,36 @@ export function migrateCommand(deps: LifecycleDeps): CommandDefinition {
   };
 }
 
+export const GC_RECENCY_GRACE_MINUTES = 60;
+export const GC_WARN_YOUNG_HOURS = 24;
+const GC_GRACE_MS = GC_RECENCY_GRACE_MINUTES * 60_000;
+const GC_YOUNG_MS = GC_WARN_YOUNG_HOURS * 3_600_000;
+
+function maxSidecarMtime(path: string): { stat: Stats; mtimeMs: number } | undefined {
+  try {
+    const stat = statSync(path);
+    let mtimeMs = stat.mtimeMs;
+    for (const suffix of ["-wal", "-shm"] as const) {
+      try {
+        mtimeMs = Math.max(mtimeMs, statSync(`${path}${suffix}`).mtimeMs);
+      } catch {}
+    }
+    return { stat, mtimeMs };
+  } catch {
+    return undefined;
+  }
+}
+
+function gcYoungWarning(ids: readonly string[]): string | undefined {
+  if (ids.length === 0) return undefined;
+  const shown = ids.slice(0, 5).join(", ");
+  return `Note: ${ids.length} sidecar(s) younger than 24 hour(s): ${shown}${ids.length > 5 ? ", ..." : ""}. Confirm no other opencode process is using them before --apply.`;
+}
+
+function gcSkippedLine(ids: readonly string[]): string {
+  return `Skipped ${ids.length} sidecar(s) active within the last 60 minute(s); pass --session <id> to target one explicitly: ${ids.join(", ")}.`;
+}
+
 export function gcCommand(deps: LifecycleDeps): CommandDefinition {
   return {
     name: "lossless-gc",
@@ -472,6 +502,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
     execute: async (input) => {
       const args = argsOf(input.prompt.text);
       const apply = args.includes("--apply");
+      const force = args.includes("--force");
       if (args.includes("--session") && valueOf(args, "--session") === undefined) {
         await deps.prompt(input.sessionID, "LCM gc: --session takes a session id.");
         return;
@@ -481,9 +512,16 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         return;
       }
       const sessionId = valueOf(args, "--session");
+      if (force && sessionId === undefined) {
+        await deps.prompt(input.sessionID, "LCM gc: --force needs --session <id>.");
+        return;
+      }
       const live = new Set(deps.sidecars.ids());
       const liveStems = new Set([...live].map((id) => sanitizeSidecarId(id)));
-      if (sessionId !== undefined && live.has(sessionId)) {
+      if (
+        sessionId !== undefined &&
+        (live.has(sessionId) || liveStems.has(sanitizeSidecarId(sessionId)))
+      ) {
         await deps.prompt(
           input.sessionID,
           `LCM gc: session ${sessionId} is open in this process; gc never deletes an open sidecar.`,
@@ -496,8 +534,17 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         await deps.prompt(input.sessionID, "LCM gc: --older-than takes a number of days.");
         return;
       }
+      if (days <= 0 && sessionId === undefined) {
+        await deps.prompt(
+          input.sessionID,
+          "LCM gc: --older-than 0 needs --session <id>. Without --session it would match every other sidecar, including ones live in another process.",
+        );
+        return;
+      }
       const refs = deps.sidecars.list(input.sessionID).filter((ref) => !liveStems.has(ref.id));
-      const selected = sessionId === undefined ? refs : refs.filter((ref) => ref.id === sessionId);
+      const sanitizedSession = sessionId === undefined ? undefined : sanitizeSidecarId(sessionId);
+      const selected =
+        sanitizedSession === undefined ? refs : refs.filter((ref) => ref.id === sanitizedSession);
       if (sessionId !== undefined && selected.length === 0) {
         await deps.prompt(
           input.sessionID,
@@ -505,28 +552,125 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         );
         return;
       }
-      const cutoff = Date.now() - days * 86_400_000;
-      const candidates: Array<{ ref: SidecarRef; stat: Stats; mtimeMs: number }> = [];
+      const now = Date.now();
+      const ageMsOf = (mtimeMs: number): number => Math.max(0, now - mtimeMs);
+      const cutoff = now - days * 86_400_000;
+      const entries: Array<{ ref: SidecarRef; stat: Stats; mtimeMs: number }> = [];
       for (const ref of selected) {
-        try {
-          const stat = statSync(ref.path);
-          // A write can go to the WAL while the database file mtime stays unchanged.
-          // The newest of the three files is the sidecar's last activity.
-          let mtimeMs = stat.mtimeMs;
-          for (const suffix of ["-wal", "-shm"]) {
-            try {
-              mtimeMs = Math.max(mtimeMs, statSync(`${ref.path}${suffix}`).mtimeMs);
-            } catch {}
-          }
-          if (sessionId !== undefined || mtimeMs <= cutoff) {
-            candidates.push({ ref, stat, mtimeMs });
-          }
-        } catch {}
+        const found = maxSidecarMtime(ref.path);
+        if (found !== undefined) entries.push({ ref, ...found });
       }
+      if (sessionId !== undefined) {
+        if (entries.length === 0) {
+          await deps.prompt(
+            input.sessionID,
+            `LCM gc: nothing eligible (${refs.length} other sidecar(s), none older than ${days} day(s)).`,
+          );
+          return;
+        }
+        const target = entries[0]!;
+        if (!force && ageMsOf(target.mtimeMs) < GC_GRACE_MS) {
+          const minutes = Math.floor(ageMsOf(target.mtimeMs) / 60_000);
+          await deps.prompt(
+            input.sessionID,
+            `LCM gc: session ${sessionId} was active ${minutes} minute(s) ago. It may be live in another process. Re-run with --session ${sessionId} --force to delete it anyway.`,
+          );
+          return;
+        }
+        const candidates = entries;
+        const lines = candidates.map(({ ref, stat, mtimeMs }) => {
+          const ageDays = Math.max(0, (Date.now() - mtimeMs) / 86_400_000);
+          return `  ${ref.id}: ${(stat.size / 1024).toFixed(0)} KB, ${ageDays.toFixed(1)} day(s) old`;
+        });
+        const young = gcYoungWarning(
+          candidates
+            .filter(({ mtimeMs }) => ageMsOf(mtimeMs) < GC_YOUNG_MS)
+            .map(({ ref }) => ref.id),
+        );
+        if (!apply) {
+          await deps.prompt(
+            input.sessionID,
+            `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}${young === undefined ? "" : `\n${young}`}\nRun \`/lossless-gc --apply\` to export then delete them. Backups are never touched.`,
+          );
+          return;
+        }
+        const fresh = maxSidecarMtime(target.ref.path);
+        if (
+          fresh !== undefined &&
+          !force &&
+          Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS
+        ) {
+          const minutes = Math.floor(Math.max(0, Date.now() - fresh.mtimeMs) / 60_000);
+          await deps.prompt(
+            input.sessionID,
+            `LCM gc: session ${sessionId} was active ${minutes} minute(s) ago. It may be live in another process. Re-run with --session ${sessionId} --force to delete it anyway.`,
+          );
+          return;
+        }
+        const exportTarget = join(deps.sidecars.dir, `lossless-export-gc-${STAMP()}.jsonl`);
+        let removed = 0;
+        let exported = 0;
+        let failed = 0;
+        for (const { ref } of candidates) {
+          let sizeBytes = target.stat.size;
+          try {
+            const fresh = maxSidecarMtime(ref.path);
+            if (fresh === undefined) throw new Error("sidecar unreadable before delete");
+            sizeBytes = fresh.stat.size;
+            if (!force && Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS) {
+              const minutes = Math.floor(Math.max(0, Date.now() - fresh.mtimeMs) / 60_000);
+              await deps.prompt(
+                input.sessionID,
+                `LCM gc: session ${sessionId} was active ${minutes} minute(s) ago. It may be live in another process. Re-run with --session ${sessionId} --force to delete it anyway.`,
+              );
+              return;
+            }
+            const store = new LcmStore(ref.path, { queryOnly: true });
+            let rows = "";
+            try {
+              rows = exportTranscript(store).toJSONL();
+            } finally {
+              store.close();
+            }
+            if (rows.length > 0) {
+              appendFileSync(exportTarget, `${rows}\n`, { encoding: "utf8", mode: 0o600 });
+              exported++;
+            }
+            deps.sidecars.drop(ref.id);
+            removed++;
+            deps.record({
+              kind: "gc",
+              action: "deleted",
+              session: ref.id,
+              sizeBytes,
+              exportedTo: exportTarget,
+            });
+          } catch (error) {
+            failed++;
+            deps.record({
+              kind: "gc",
+              action: "failed",
+              session: ref.id,
+              error: error instanceof Error ? error.message.slice(0, 300) : String(error),
+            });
+          }
+        }
+        if (exported > 0) chmodFile(exportTarget);
+        await deps.prompt(
+          input.sessionID,
+          `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.${young === undefined ? "" : ` ${young}`}`,
+        );
+        return;
+      }
+      const candidates = entries.filter(
+        ({ mtimeMs }) => mtimeMs <= cutoff && ageMsOf(mtimeMs) >= GC_GRACE_MS,
+      );
+      const skipped = entries.filter(({ mtimeMs }) => ageMsOf(mtimeMs) < GC_GRACE_MS);
+      const skippedIds = skipped.map(({ ref }) => ref.id);
       if (candidates.length === 0) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc: nothing eligible (${refs.length} other sidecar(s), none older than ${days} day(s)).`,
+          `LCM gc: nothing eligible (${refs.length} other sidecar(s), none older than ${days} day(s)).${skipped.length === 0 ? "" : ` ${skipped.length} sidecar(s) skipped as active within the last 60 minute(s).`}`,
         );
         return;
       }
@@ -534,10 +678,13 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         const ageDays = Math.max(0, (Date.now() - mtimeMs) / 86_400_000);
         return `  ${ref.id}: ${(stat.size / 1024).toFixed(0)} KB, ${ageDays.toFixed(1)} day(s) old`;
       });
+      const young = gcYoungWarning(
+        candidates.filter(({ mtimeMs }) => ageMsOf(mtimeMs) < GC_YOUNG_MS).map(({ ref }) => ref.id),
+      );
       if (!apply) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lossless-gc --apply\` to export then delete them. Backups are never touched.`,
+          `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}${young === undefined ? "" : `\n${young}`}${skipped.length === 0 ? "" : `\n${gcSkippedLine(skippedIds)}`}\nRun \`/lossless-gc --apply\` to export then delete them. Backups are never touched.`,
         );
         return;
       }
@@ -545,8 +692,24 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       let removed = 0;
       let exported = 0;
       let failed = 0;
-      for (const { ref, stat } of candidates) {
+      const restatSkipped: string[] = [];
+      for (const { ref } of candidates) {
         try {
+          const fresh = maxSidecarMtime(ref.path);
+          if (fresh === undefined) {
+            failed++;
+            deps.record({
+              kind: "gc",
+              action: "failed",
+              session: ref.id,
+              error: "sidecar unreadable before delete; skipped",
+            });
+            continue;
+          }
+          if (Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS) {
+            restatSkipped.push(ref.id);
+            continue;
+          }
           const store = new LcmStore(ref.path, { queryOnly: true });
           let rows = "";
           try {
@@ -564,7 +727,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
             kind: "gc",
             action: "deleted",
             session: ref.id,
-            sizeBytes: stat.size,
+            sizeBytes: fresh.stat.size,
             exportedTo: exportTarget,
           });
         } catch (error) {
@@ -578,9 +741,10 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         }
       }
       if (exported > 0) chmodFile(exportTarget);
+      const allSkipped = [...skippedIds, ...restatSkipped];
       await deps.prompt(
         input.sessionID,
-        `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
+        `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.${young === undefined ? "" : ` ${young}`}${allSkipped.length === 0 ? "" : ` ${gcSkippedLine(allSkipped)}`}`,
       );
     },
   };
