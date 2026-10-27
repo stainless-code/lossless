@@ -5,7 +5,7 @@ license: MIT
 metadata:
   type: composition
   library: "pi-lossless"
-  library_version: "0.1.2"
+  library_version: "0.1.3"
 requires: []
 sources:
   - stainless-code/lossless:packages/pi/src
