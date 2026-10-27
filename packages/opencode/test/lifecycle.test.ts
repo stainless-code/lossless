@@ -30,8 +30,6 @@ function seed(sidecars: Sidecars, sessionID: string, text: string): void {
   ]);
 }
 
-/** A store the adapter has not opened: gc's candidate set is what is on disk,
- * not what this process holds. */
 function seedDetached(sidecars: Sidecars, sessionID: string, text: string): void {
   const store = new LcmStore(sidecars.pathFor(sessionID));
   try {
@@ -147,9 +145,11 @@ describe("lifecycle commands", () => {
       const text = await run(diagnoseCommand, h, "/lossless-diagnose --repair");
       expect(text).toContain("LCM diagnose bundle");
       expect(text).toContain("messages: 1");
+      const [first, ...rest] = text.split("\n");
+      expect(first).toBe(`sidecar: ${h.dir} (explicit)`);
+      expect(rest.join("\n")).not.toContain(h.dir);
       expect(text).toContain("model: test/model, window: 100.0k");
       expect(text).toContain("rebuilt the full-text index");
-      expect(text).not.toContain(h.dir);
     } finally {
       h.sidecars.close();
     }
@@ -178,8 +178,6 @@ describe("lifecycle commands", () => {
     try {
       seed(h.sidecars, SESSION, "the current session");
       seedDetached(h.sidecars, "ses_retained", "the retained session");
-      // Restart: drop every open handle, then diagnose through a fresh cache
-      // that holds only the diagnosing session open.
       h.sidecars.close();
       const fresh = new Sidecars(h.dir);
       try {

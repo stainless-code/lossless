@@ -1,27 +1,27 @@
-The config is the plugin's `options` object in `opencode.json`; there is no separate config file.
+The config is the plugin's `options` object in `opencode.json`. There is no separate config file.
 
 ## Keys
 
 | Key                | Type               | Default         | Range                                 | Effect                                                                                                                                         |
 | ------------------ | ------------------ | --------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `enabled`          | boolean            | `true`          | `true` or `false`                     | Master flag. `false` registers nothing.                                                                                                        |
-| `sidecarDir`       | string             | `"./.lossless"` | any path                              | One SQLite file per session; resolved from the server working directory.                                                                       |
+| `sidecarDir`       | string             | global auto-detected path | any path            | One SQLite file per session. An explicit value overrides the default. A blank value falls back to the default. The default is absolute `XDG_DATA_HOME/opencode/lossless`, else `~/.local/share/opencode/lossless`. On Windows the default is `%LOCALAPPDATA%/opencode/lossless`, else `%APPDATA%/opencode/lossless`, else `<home>/AppData/Local/opencode/lossless`. With no resolvable home, the default is `./.lossless` (source `fallback`). The global default holds sessions from every project. The plugin never moves existing sidecars. |
 | `assembly`         | boolean            | `true`          | `true` or `false`                     | Build the DAG, project the frontier, and return the checkpoint. `false` keeps the mirror and recall tools.                                     |
-| `summarizer`       | string or string[] | `"auto"`        | one id, or an ordered chain           | Summarizer chain. `auto` is the session model; a concrete id falls back to the session model because the host has no synchronous model lookup. |
+| `summarizer`       | string or string[] | `"auto"`        | one id, or an ordered chain           | Summarizer chain. `auto` is the session model. A concrete id falls back to the session model because the host has no synchronous model lookup. |
 | `summarizerTokensPerCall` | number      | `60000`         | `>= 1`                                | Ceiling on one summarizer request, estimate plus output cap, refused before the provider is called.                                            |
 | `summarizerTokensPerPass` | number      | `250000`        | `>= 1`                                | Ceiling on one pass across its calls.                                                                                                          |
 | `summarizerTokensPerHeal` | number      | `120000`        | `>= 1`                                | Ceiling on one `/lossless-heal --apply` repair run.                                                                                            |
-| `swapAtRatio`      | number             | `0.7`           | `> 0`, `<= 1`                         | Swap line as a share of the window; the engine clamps it to 0.9.                                                                               |
+| `swapAtRatio`      | number             | `0.7`           | `> 0`, `<= 1`                         | Swap line as a share of the window. The engine clamps it to 0.9.                                                                               |
 | `recutAtRatio`     | number             | `0.85`          | `> 0`, `<= 1`                         | Re-cut line as a share of the window.                                                                                                          |
-| `smartZone`        | number             | unset           | `> 0`                                 | Swap at this many tokens; re-cut at `x 1.18`.                                                                                                  |
+| `smartZone`        | number             | unset           | `> 0`                                 | Swap at this many tokens. Re-cut at `x 1.18`.                                                                                                  |
 | `zones`            | object             | unset           | map of `provider/model` to thresholds | Per-model threshold overrides.                                                                                                                 |
 | `keepRecentTokens` | number             | `20000`         | `>= 1`                                | Tokens kept verbatim after the cut.                                                                                                            |
 | `summaryTokens`    | number             | `1500`          | `>= 1`                                | Target size of one summary.                                                                                                                    |
 | `healSourceTokens` | number             | derived         | `1` to `24000`                       | Source tokens one heal map window may read. Defaults to `8 x summaryTokens`, clamped to `3000` through `24000` and to `summarizerTokensPerCall`. A larger leaf uses up to eight map windows and one reduce call. |
 | `contextWindow`    | number             | `128000`        | `>= 1`                                | Window used when the host catalogue cannot name the model's limit.                                                                             |
-| `readerTimeoutMs`  | number             | `120000`        | `>= 1`                                | How long one `lcm_expand_query` child may run before it is interrupted.                                                                        |
+| `readerTimeoutMs`  | number             | `120000`        | `>= 1`                                | How long one `lcm_expand_query` child may run before the timeout interrupts it.                                                                        |
 
-`zones` accepts only the five threshold keys: `smartZone`, `swapAtTokens`, `recutAtTokens`, `swapAtRatio`, `recutAtRatio`. Global token pairs are not options; set them per model under `zones`. Anything else is dropped.
+`zones` accepts only the five threshold keys: `smartZone`, `swapAtTokens`, `recutAtTokens`, `swapAtRatio`, `recutAtRatio`. Global token pairs are not options. Set them per model under `zones`. Anything else is dropped.
 
 ## Threshold resolution
 
@@ -35,10 +35,10 @@ Explicit tokens win over `smartZone`, which wins over ratios. Per-model `zones` 
 
 ## Parse rules
 
-- A value of the wrong type or range keeps its default; the plugin load never fails on options.
+- A value of the wrong type or range keeps its default. The plugin load never fails on options.
 - `enabled` disables everything only when it is exactly `false`.
 - `assembly` stays on unless it is exactly `false`.
 - `summarizer` accepts one string or an array of strings. An empty or malformed value falls back to `auto`.
-- The three summarizer token budgets must be positive integers; a malformed value keeps the default.
+- The three summarizer token budgets must be positive integers. A malformed value keeps the default.
 - `zones` entries with no valid threshold key are dropped. `swapAtTokens` and `recutAtTokens` are accepted there only, not at the top level.
 - The options are read once at setup. Edit `opencode.json` and reload the plugin to change them.

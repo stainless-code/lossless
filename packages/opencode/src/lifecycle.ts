@@ -1,9 +1,3 @@
-/** Store lifecycle commands for the OpenCode adapter: backup, export, import,
- * diagnose, migrate, heal, and a manual gc. They all read the same per-session
- * sidecars the recall tools use, so they are registered with or without
- * `assembly`. The cockpit is not here in V2 scope: the host exposes a
- * TUI extension point, so a separate TUI plugin could reuse the same command core later. */
-
 import {
   appendFileSync,
   chmodSync,
@@ -51,19 +45,16 @@ export interface LifecycleOptions extends SummarizerOptions {
   readonly swapAtRatio: number;
   readonly recutAtRatio: number;
   readonly keepRecentTokens: number;
+  readonly sidecarSource?: string;
   readonly healSourceTokens?: number;
   readonly smartZone?: number;
   readonly zones?: Readonly<Record<string, ThresholdConfig>>;
-  /** Reserved seam for the shared redactor. The lifecycle reader never sets
-   * it, so the adapter always redacts; wiring `false` through will skip. */
   readonly redactSecrets?: boolean;
 }
 
 export interface HealRunRequest {
   readonly sessionID: string;
   readonly store: LcmStore;
-  /** The store's own first and last entry id, which is the span every call in
-   * the run summarizes. */
   readonly span: { readonly first: string; readonly last: string };
   readonly dryRun: boolean;
   readonly maxNodes?: number;
@@ -76,12 +67,7 @@ export interface LifecycleDeps {
   readonly host: () => string;
   readonly prompt: (sessionID: string, text: string) => Promise<unknown>;
   readonly record: (row: Record<string, unknown>) => void;
-  /** Run the bounded repair loop over this session's sidecar. A dry run reads
-   * the plan and must not call a model. */
   readonly heal: (request: HealRunRequest) => Promise<HealOutcome>;
-  /** The session's model, when the host can name it. Diagnose uses it to
-   * report the window and the effective thresholds; the commands still work
-   * without it. */
   readonly model?: (sessionID: string) => Promise<ModelRef | undefined>;
   readonly window?: (model: ModelRef) => Promise<number>;
 }
@@ -105,8 +91,6 @@ function valueOf(args: readonly string[], name: string): string | undefined {
 
 function currentStore(deps: LifecycleDeps, sessionID: string): LcmStore | undefined {
   if (!existsSync(deps.sidecars.pathFor(sessionID))) return undefined;
-  // The adapter's own map owns the handle, so a command does not leak a
-  // store it opened only to read one block.
   return deps.sidecars.for(sessionID);
 }
 
@@ -117,8 +101,7 @@ function chmodFile(path: string): void {
 }
 
 function writeDumpTarget(target: string, text: string): void {
-  // Unique temp with exclusive creation, then an atomic rename: a planted
-  // predictable path is never touched and the destination swaps at once.
+  // Exclusive create plus atomic rename. The code never touches a planted path.
   const dir = dirname(target);
   const base = basename(target);
   let tmp = "";
@@ -133,9 +116,7 @@ function writeDumpTarget(target: string, text: string): void {
       break;
     } catch (error) {
       if ((error as { code?: string })?.code === "EEXIST") continue;
-      // A write can create the private file and then fail (disk full), so
-      // remove the candidate before surfacing the error. EEXIST keeps its
-      // continue above and never unlinks a pre-existing collision.
+      // Only unlink what `wx` created. An EEXIST collision belongs to someone else.
       try {
         unlinkSync(candidate);
       } catch {}
@@ -260,8 +241,6 @@ export function importCommand(deps: LifecycleDeps): CommandDefinition {
 }
 
 export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
-  // The lifecycle reader never sets `redactSecrets`, so this always redacts;
-  // the flag check lives in the shared adapter, not at each call site.
   const redact = makeRedactConfigAdapter(deps.options);
   return {
     name: "lossless-diagnose",
@@ -291,8 +270,6 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
           liveSidecarPaths: livePaths,
           sidecarExtension: deps.sidecars.extension,
         });
-        // The bundle is a diagnostic, not a probe: a host model lookup that
-        // fails says less, it does not fail the command.
         let model: ModelRef | undefined;
         try {
           model = await deps.model?.(input.sessionID);
@@ -375,6 +352,7 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
           home: homedir(),
         };
         const bundle = buildDiagnoseBundle(inputBundle);
+        const body = `sidecar: ${deps.sidecars.dir} (${deps.options.sidecarSource ?? "explicit"})\n${bundle}`;
         if (args.includes("--save") && !valueOf(args, "--save")) {
           await deps.prompt(
             input.sessionID,
@@ -385,15 +363,15 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
         const save = valueOf(args, "--save");
         if (save !== undefined) {
           const target = resolve(save);
-          writeFileSync(target, `${bundle}\n`, { encoding: "utf8", mode: 0o600 });
+          writeFileSync(target, `${body}\n`, { encoding: "utf8", mode: 0o600 });
           chmodFile(target);
           await deps.prompt(
             input.sessionID,
-            `LCM diagnose: wrote ${Buffer.byteLength(bundle, "utf8")} bytes to ${target} (mode 0600).`,
+            `LCM diagnose: wrote ${Buffer.byteLength(body, "utf8")} bytes to ${target} (mode 0600).`,
           );
           return;
         }
-        await deps.prompt(input.sessionID, bundle);
+        await deps.prompt(input.sessionID, body);
       } catch (error) {
         await deps.prompt(
           input.sessionID,
@@ -411,8 +389,6 @@ export function migrateCommand(deps: LifecycleDeps): CommandDefinition {
     execute: async (input) => {
       const args = argsOf(input.prompt.text);
       const apply = args.includes("--apply");
-      // A store this process holds open is already current: its constructor
-      // migrated it. Opening a second writer would only race the live session.
       const live = new Set(deps.sidecars.ids());
       const currentPath = deps.sidecars.pathFor(input.sessionID);
       const refs = [
@@ -497,7 +473,6 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       }
       const sessionId = valueOf(args, "--session");
       const live = new Set(deps.sidecars.ids());
-      // Disk stems are sanitized session ids, so compare those, not raw ids.
       const liveStems = new Set([...live].map((id) => sanitizeSidecarId(id)));
       if (sessionId !== undefined && live.has(sessionId)) {
         await deps.prompt(
@@ -526,8 +501,8 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       for (const ref of selected) {
         try {
           const stat = statSync(ref.path);
-          // A write can land in the WAL while the database file's mtime stays
-          // put. The newest of the three files is the sidecar's last activity.
+          // A write can go to the WAL while the database file mtime stays unchanged.
+          // The newest of the three files is the sidecar's last activity.
           let mtimeMs = stat.mtimeMs;
           for (const suffix of ["-wal", "-shm"]) {
             try {
@@ -537,10 +512,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
           if (sessionId !== undefined || mtimeMs <= cutoff) {
             candidates.push({ ref, stat, mtimeMs });
           }
-        } catch {
-          // A sidecar that vanished between the listing and the stat is not a
-          // candidate.
-        }
+        } catch {}
       }
       if (candidates.length === 0) {
         await deps.prompt(
@@ -561,7 +533,6 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         return;
       }
       const exportTarget = join(deps.sidecars.dir, `lossless-export-gc-${STAMP()}.jsonl`);
-      // The export file is created on the first real write, so a no-op gc leaves no file.
       let removed = 0;
       let exported = 0;
       let failed = 0;
@@ -652,8 +623,6 @@ export function healCommand(deps: LifecycleDeps): CommandDefinition {
   };
 }
 
-/** Read-only dump of this session's sidecar plus its metrics, opened with
- * `queryOnly` so a dump never mutates the store. */
 export function dumpCommand(deps: LifecycleDeps): CommandDefinition {
   const redact = makeRedactConfigAdapter(deps.options);
   return {
@@ -710,8 +679,6 @@ export function dumpCommand(deps: LifecycleDeps): CommandDefinition {
   };
 }
 
-/** The compact result a command prompt carries. No summary or message text
- * leaves the store; the counts are the whole answer. */
 export function healReport(outcome: HealOutcome): string {
   if (outcome.dryRun) {
     return outcome.counts.candidates === 0
