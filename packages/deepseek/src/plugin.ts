@@ -243,14 +243,14 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   }
   const stopTools = registerRecallTools(ctx, {
     store: (sessionId) =>
-      sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
+      sessionId === undefined ? undefined : (sidecars.peek(sessionId) ?? undefined),
     redact: redactSecrets,
     record,
     pastSessions: { list: (exclude) => sidecars.list(exclude) },
   });
   const stopExpandQuery = registerExpandQueryTool(ctx, {
     store: (sessionId) =>
-      sessionId === undefined ? undefined : sidecars.entryFor(sessionId).store,
+      sessionId === undefined ? undefined : (sidecars.peek(sessionId) ?? undefined),
     redact: redactSecrets,
     record,
     pastSessions: { list: (exclude) => sidecars.list(exclude) },

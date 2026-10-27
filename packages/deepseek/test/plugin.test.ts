@@ -13,7 +13,7 @@ import type { SessionEvent } from "@deepseek-ai/dsh-session";
 import SessionProjectionRegistry from "@deepseek-ai/dsh-session-projection";
 import SystemPrompt from "@deepseek-ai/dsh-system-prompt";
 import TokenMeter from "@deepseek-ai/dsh-token-meter";
-import ToolRuntime from "@deepseek-ai/dsh-tools";
+import ToolRuntime, { type ToolRunContext } from "@deepseek-ai/dsh-tools";
 import { LcmStore, SidecarStores } from "lossless-core";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -211,6 +211,37 @@ describe("applyLossless", () => {
       expect(status.kind).toBe("success");
       if (status.kind !== "success") throw new Error("status did not succeed");
       expect(status.text).toContain("live-1");
+    } finally {
+      dispose();
+    }
+  });
+
+  it("recall reads without creating an empty sidecar", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+    try {
+      const grep = ctx.tools.get("lcm_grep");
+      expect(grep).toBeDefined();
+      const ghostGrep = {
+        agent: { session: { id: "ghost-recall" } },
+        signal: new AbortController().signal,
+      } as unknown as ToolRunContext;
+      const grepAnswer = await grep?.execute({ query: "anything" }, ghostGrep);
+      expect(grepAnswer).toContain("no stored history");
+      expect(existsSync(join(dir, "ghost-recall.sqlite"))).toBe(false);
+      const expandQuery = ctx.tools.get("lcm_expand_query");
+      expect(expandQuery).toBeDefined();
+      const ghostExpand = {
+        agent: {
+          session: { id: "ghost-expand" },
+          options: { provider: ROUTE.provider, model: ROUTE.model },
+        },
+        signal: new AbortController().signal,
+      } as unknown as ToolRunContext;
+      await expandQuery?.execute({ query: "anything" }, ghostExpand);
+      expect(existsSync(join(dir, "ghost-expand.sqlite"))).toBe(false);
     } finally {
       dispose();
     }

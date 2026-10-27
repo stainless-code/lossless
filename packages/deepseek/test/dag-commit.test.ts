@@ -1,6 +1,6 @@
 import { Context } from "@deepseek-ai/cordis";
 import { isCompactCheckpointSource, ManualCompactionError } from "@deepseek-ai/dsh-compaction";
-import { createSystemMessage, createUserMessage } from "@deepseek-ai/dsh-llm";
+import { createMessage, createSystemMessage, createUserMessage } from "@deepseek-ai/dsh-llm";
 import { Session, SessionId } from "@deepseek-ai/dsh-session";
 import type { SessionEvent } from "@deepseek-ai/dsh-session";
 import SessionProjectionRegistry from "@deepseek-ai/dsh-session-projection";
@@ -10,7 +10,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { commitDagTransaction, selectDagRange } from "../src/dag-commit.ts";
 import type { DagCommitDeps } from "../src/dag-commit.ts";
+import { LosslessSummarizerEngine } from "../src/engine.ts";
 import { MessageIndex, mirrorEvent } from "../src/ingest.ts";
+import { resolveSummarizationTarget, SpanAlreadyMemoryError } from "../src/ladder.ts";
 import type { DshRoute } from "../src/model-host.ts";
 import { fakeAgent } from "./support/agent-fake.ts";
 import { appendConversation } from "./support/conversation.ts";
@@ -424,5 +426,128 @@ describe("commitDagTransaction", () => {
     );
     expect(notes).toBe(1);
     expect(noted).toContain(SUMMARY);
+  });
+
+  it("heals a gapped mirror with one backfill catch-up instead of throwing", async () => {
+    const session = buildSession("catchup notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    const events = session.snapshotEvents();
+    for (const event of events.slice(0, 3)) mirrorEvent(session, event, store, index);
+    expect(store.allMessages().length).toBeGreaterThan(0);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const liveEvents = session.snapshotEvents();
+    (ctx as unknown as Record<string, unknown>).sessionQuery = {
+      observeSession: async () => ({ events: liveEvents }),
+    };
+    const rows: Record<string, unknown>[] = [];
+    const agent = fakeAgent(session, ROUTE);
+    const nodes = session.surface.nodes;
+    const result = await commitDagTransaction(
+      { ...deps(ctx, store, index), record: (row) => rows.push(row) },
+      agent,
+      { start: nodes[1]!, end: nodes[nodes.length - 1]! },
+      { owner: "current-turn", stability: "whole-surface" },
+    );
+    expect(result.summarySeqs).toHaveLength(1);
+    expect(rows.some((row) => row.kind === "backfill")).toBe(true);
+  });
+
+  it("rethrows already-memory on the manual path instead of mapping it to summary", async () => {
+    const session = buildSession("covered live ".repeat(30));
+    session.append(
+      "user/message",
+      createUserMessage({
+        content: [{ type: "text", text: `${"covered live ".repeat(30)} third request` }],
+        source: { kind: "user" },
+      }),
+      { surfaceOp: "append" },
+    );
+    session.append("step/start", { turn: 3, step: 1 });
+    session.append("request/header", {
+      header: { config: { provider: ROUTE.provider, model: ROUTE.model } },
+      reason: "initial",
+    });
+    session.append(
+      "assistant/message",
+      {
+        stream: [],
+        turn: 3,
+        step: 1,
+        message: createMessage({
+          role: "assistant",
+          content: [{ type: "text", text: `${"covered live ".repeat(30)} third response` }],
+          source: { kind: "model", provider: ROUTE.provider, model: ROUTE.model },
+        }),
+      },
+      { surfaceOp: "append" },
+    );
+    session.append("step/end", { turn: 3, step: 1 });
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks("First span."),
+      textChunks("Second span."),
+      textChunks("Third span."),
+    ]);
+    mountMeter(ctx);
+    const agent = fakeAgent(session, ROUTE);
+    const engine = new LosslessSummarizerEngine(
+      ctx,
+      { auto: false },
+      { store: () => store, index: () => index, redact: (text) => text },
+    );
+    const nodes = session.surface.nodes;
+    await engine.compactRegion(nodes[1]!, nodes[2]!, agent);
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const afterFirst = session.surface.nodes;
+    await engine.compactRegion(afterFirst[1]!, afterFirst[3]!, agent);
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    session.append("turn/end", { turn: 3, reason: { kind: "completed" } });
+    const covered = session.surface.nodes;
+    const failure = await commitDagTransaction(
+      deps(ctx, store, index),
+      agent,
+      { start: covered[covered.length - 2]!, end: covered[covered.length - 1]! },
+      { owner: null, stability: "selected-span" },
+    ).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SpanAlreadyMemoryError);
+  });
+});
+
+describe("resolveSummarizationTarget", () => {
+  it("falls back to the agent route when only one field is set", () => {
+    const session = Session.create(SessionId("summ-target-1"));
+    const agent = fakeAgent(session, ROUTE);
+    expect(
+      resolveSummarizationTarget(
+        { summarizationProvider: "cfg-provider", summarizationModel: "cfg-model" },
+        agent,
+      ),
+    ).toEqual({ provider: "cfg-provider", model: "cfg-model" });
+    expect(
+      resolveSummarizationTarget(
+        { summarizationProvider: "cfg-provider", summarizationModel: "" },
+        agent,
+      ),
+    ).toEqual(ROUTE);
+    expect(
+      resolveSummarizationTarget(
+        { summarizationProvider: "", summarizationModel: "cfg-model" },
+        agent,
+      ),
+    ).toEqual(ROUTE);
+    expect(
+      resolveSummarizationTarget({ summarizationProvider: "", summarizationModel: "" }, agent),
+    ).toEqual(ROUTE);
   });
 });

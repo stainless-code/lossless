@@ -18,8 +18,15 @@ import type { Session, SessionEvent } from "@deepseek-ai/dsh-session";
 import type { TokenMeasurement, TokenMeter, TokenSurfaceNode } from "@deepseek-ai/dsh-token-meter";
 import { selectCompactableRange, type CompactionSpanEntry } from "lossless-core";
 
+import { backfillSession, historySourceFrom } from "./ingest.ts";
 import type { LadderOutcome, LosslessEngineDeps } from "./ladder.ts";
-import { resolveSummarizationTarget, runLadder, seqOfEntry, withSummaryRefs } from "./ladder.ts";
+import {
+  SpanAlreadyMemoryError,
+  resolveSummarizationTarget,
+  runLadder,
+  seqOfEntry,
+  withSummaryRefs,
+} from "./ladder.ts";
 import type { DshRoute } from "./model-host.ts";
 
 /** Deps for the DAG bracket: the ladder deps, the composition the ladder
@@ -166,7 +173,7 @@ export async function commitDagTransaction(
   let closing = false;
   let stage: DagStage = "summary";
   try {
-    const prepared = prepareDagCommit(deps, agent, session, validated);
+    const prepared = await prepareDagCommit(deps, agent, session, validated);
     signal?.throwIfAborted();
     const ladder = await runLadder(
       deps.ctx,
@@ -243,6 +250,7 @@ export async function commitDagTransaction(
 /** Classify one closed manual attempt without weakening cancellation
  * precedence. Mirrors throwManualFailure (lib/index.js:523-528). */
 function throwDagFailure(failure: { error: unknown; stage: DagStage }): never {
+  if (failure.error instanceof SpanAlreadyMemoryError) throw failure.error;
   if (failure.stage === "commit") {
     throw new ManualCompactionError("commit", "manual compaction did not commit cleanly", {
       cause: failure.error,
@@ -354,12 +362,12 @@ function validateDagRegion(session: Session, start: SessionSeq, end: SessionSeq)
  * through the sidecar entry ids. Mirrors prepareCompaction
  * (lib/index.js:567-579); the span mapping follows the seam's spanOf through
  * entry ids the mirror records, never through text matching. */
-function prepareDagCommit(
+async function prepareDagCommit(
   deps: DagCommitDeps,
   agent: Agent,
   session: Session,
   validated: DagValidated,
-): DagPrepared {
+): Promise<DagPrepared> {
   const meter = deps.ctx.tokenMeter;
   const measurement = meter.measure(session);
   const selectedNodes = measurement.nodes.slice(validated.startIdx, validated.endIdx + 1);
@@ -386,28 +394,30 @@ function prepareDagCommit(
   }
   const store = deps.store(sessionId);
   if (!store) throw new Error(`lossless compaction: no sidecar store for session ${sessionId}`);
-  // Core reads a span as a storage range, so frontierFrom must name the
-  // seq minimum. Catch-up backfill lands older seqs on newer rows, so
-  // rowid order no longer matches narrative order.
-  const items: Array<{ seq: number; entry: CompactionSpanEntry }> = [];
-  for (const seq of validated.shadowedSeqs) {
-    // Entry ids mirror the ingest projection (ingest.ts projectedEntry), so
-    // the seq maps to its row without touching the live message index.
-    const entryId = `${session.id}:${seq}`;
-    const row = store.messageByEntryId(entryId);
-    if (!row) throw new Error(`lossless dag commit: sidecar holds no row for ${entryId}`);
-    items.push({
-      seq: seqOfEntry(entryId),
-      entry: {
-        entryId,
-        role: row.role,
-        text: row.text,
-        ...(row.payload === undefined ? {} : { payload: row.payload }),
-      },
-    });
-  }
-  items.sort((a, b) => a.seq - b.seq);
-  return {
+  const buildSpan = (): CompactionSpanEntry[] => {
+    // Core reads a span as a storage range, so frontierFrom must name the
+    // seq minimum. Catch-up backfill lands older seqs on newer rows, so
+    // rowid order no longer matches narrative order.
+    const items: Array<{ seq: number; entry: CompactionSpanEntry }> = [];
+    for (const seq of validated.shadowedSeqs) {
+      // Entry ids mirror the ingest projection, so the seq maps to its row without touching the live message index.
+      const entryId = `${session.id}:${seq}`;
+      const row = store.messageByEntryId(entryId);
+      if (!row) throw new Error(`lossless dag commit: sidecar holds no row for ${entryId}`);
+      items.push({
+        seq: seqOfEntry(entryId),
+        entry: {
+          entryId,
+          role: row.role,
+          text: row.text,
+          ...(row.payload === undefined ? {} : { payload: row.payload }),
+        },
+      });
+    }
+    items.sort((a, b) => a.seq - b.seq);
+    return items.map((item) => item.entry);
+  };
+  const base = {
     ...validated,
     sessionId,
     target,
@@ -415,8 +425,30 @@ function prepareDagCommit(
     selectedNodes: [...selectedNodes],
     shadowedTokenCount: selectedNodes.reduce((total, node) => total + node.heuristicTokens, 0),
     shadowedRouteTokenCount: selectedNodes.reduce((total, node) => total + node.tokens, 0),
-    span: items.map((item) => item.entry),
   };
+  try {
+    return { ...base, span: buildSpan() };
+  } catch (error) {
+    if (!isUnmappedSpanError(error)) throw error;
+    const source = historySourceFrom(deps.ctx);
+    if (source === undefined) throw error;
+    await backfillSession(
+      session,
+      store,
+      source,
+      deps.index(sessionId),
+      deps.record === undefined ? {} : { record: deps.record },
+    );
+    return { ...base, span: buildSpan() };
+  }
+}
+
+function isUnmappedSpanError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.message.includes("has no sidecar row; the span is not fully mirrored") ||
+      error.message.includes("sidecar holds no row for "))
+  );
 }
 
 interface CondensedCommit {

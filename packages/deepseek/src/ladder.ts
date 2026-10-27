@@ -186,7 +186,7 @@ export function resolveSummarizationTarget(
   agent: Agent,
 ): DshRoute | undefined {
   const configured =
-    config.summarizationProvider.length > 0
+    config.summarizationProvider.length > 0 && config.summarizationModel.length > 0
       ? { provider: config.summarizationProvider, model: config.summarizationModel }
       : undefined;
   return configured ?? agentRoute(agent);
