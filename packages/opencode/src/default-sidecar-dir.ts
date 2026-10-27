@@ -30,8 +30,8 @@ function nonBlank(value: string | undefined): string | undefined {
   return trimmed.length === 0 ? undefined : trimmed;
 }
 
-function isAbsoluteAny(path: string): boolean {
-  return posix.isAbsolute(path) || win32.isAbsolute(path);
+function isAbsoluteForPlatform(path: string, platform: string): boolean {
+  return platform === "win32" ? win32.isAbsolute(path) : posix.isAbsolute(path);
 }
 
 export function resolveDefaultSidecarDir(
@@ -39,7 +39,7 @@ export function resolveDefaultSidecarDir(
 ): ResolvedDefaultSidecarDir {
   const env = input.env;
   const xdg = nonBlank(env["XDG_DATA_HOME"]);
-  if (xdg !== undefined && isAbsoluteAny(xdg)) {
+  if (xdg !== undefined && isAbsoluteForPlatform(xdg, input.platform)) {
     return { dir: join(xdg, "opencode", "lossless"), source: "default:XDG_DATA_HOME" };
   }
   const home = nonBlank(input.homedir);

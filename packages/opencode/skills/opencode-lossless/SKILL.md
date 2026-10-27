@@ -59,7 +59,7 @@ To keep sidecars inside the project, set `sidecarDir` to `"./.lossless"`.
 
 The example stores sidecars in the project. Without `sidecarDir`, the plugin uses the global auto-detected path, which holds sessions from every project. The config reference lists the exact paths at https://stainless-code.com/lossless/reference/opencode/config
 
-- `sidecarDir` holds one SQLite file per session (0700 dir, 0600 files). Delete one to forget that session. After upgrading a project that used `./.lossless`, run `/lossless-migrate` once in that project.
+- `sidecarDir` holds one SQLite file per session (0700 dir, 0600 files). Delete one to forget that session. After upgrading a project that used `./.lossless`, keep `sidecarDir` set to `"./.lossless"` to keep that history: `/lossless-migrate` works in place in the configured directory only (dry run by default, moves nothing). To carry history elsewhere, `/lossless-export` each session under the old config and `/lossless-import` into an empty store under the new one, or copy the `.sqlite` files across and then migrate.
 - `assembly: true` (default) owns the context boundary. Projection swaps aged history and compaction stores the DAG frontier.
 - The config reference documents every other key and its default: swap thresholds, summarizer chain and budgets, heal window, and reader timeout. See https://stainless-code.com/lossless/reference/opencode/config
 

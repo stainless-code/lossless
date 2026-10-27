@@ -82,7 +82,7 @@ Restores rows from a file written by `/lossless-export`. It refuses the import w
 /lossless-gc --apply          # export each transcript, then delete
 ```
 
-The host plugin API cannot list sessions, so `gc` selects by sidecar age (default 30 days) or an explicit id. It never deletes the current session. It exports each transcript before deleting it.
+The host plugin API cannot list sessions, so `gc` selects by sidecar age (default 30 days) or an explicit id. It never deletes the current session. It exports each transcript before deleting it. It only excludes sidecars open in this process, so against the shared global directory `--apply` can delete a sidecar that is live in another process. Dry run first, and note `--older-than 0` makes every other sidecar eligible.
 
 ## migrate
 

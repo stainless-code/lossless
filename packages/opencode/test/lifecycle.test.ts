@@ -1,5 +1,5 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, utimesSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { LcmStore, ingestEntries } from "lossless-core";
@@ -146,7 +146,10 @@ describe("lifecycle commands", () => {
       expect(text).toContain("LCM diagnose bundle");
       expect(text).toContain("messages: 1");
       const [first, ...rest] = text.split("\n");
-      expect(first).toBe(`sidecar: ${h.dir} (explicit)`);
+      const home = homedir();
+      const maskedDir =
+        h.dir === home || h.dir.startsWith(`${home}/`) ? `~${h.dir.slice(home.length)}` : "<path>";
+      expect(first).toBe(`sidecar: ${maskedDir} (explicit)`);
       expect(rest.join("\n")).not.toContain(h.dir);
       expect(text).toContain("model: test/model, window: 100.0k");
       expect(text).toContain("rebuilt the full-text index");

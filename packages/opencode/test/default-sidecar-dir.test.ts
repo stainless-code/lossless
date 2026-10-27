@@ -46,6 +46,28 @@ describe("resolveDefaultSidecarDir", () => {
     });
   });
 
+  it("ignores a Windows-style XDG_DATA_HOME on posix", () => {
+    expect(resolve({ XDG_DATA_HOME: "C:\\data" }, "/home/u", "linux")).toEqual({
+      dir: join("/home/u", ".local", "share", "opencode", "lossless"),
+      source: "default:home",
+    });
+  });
+
+  it("ignores a relative XDG_DATA_HOME on win32", () => {
+    const home = "C:\\Users\\u";
+    expect(resolve({ XDG_DATA_HOME: "rel\\path" }, home, "win32")).toEqual({
+      dir: join(home, "AppData", "Local", "opencode", "lossless"),
+      source: "default:home",
+    });
+  });
+
+  it("accepts a posix XDG_DATA_HOME on win32 under the win32 rule", () => {
+    expect(resolve({ XDG_DATA_HOME: "/data" }, "C:\\Users\\u", "win32")).toEqual({
+      dir: join("/data", "opencode", "lossless"),
+      source: "default:XDG_DATA_HOME",
+    });
+  });
+
   it("falls back to the home share dir on darwin", () => {
     expect(resolve({}, "/Users/u", "darwin")).toEqual({
       dir: join("/Users/u", ".local", "share", "opencode", "lossless"),

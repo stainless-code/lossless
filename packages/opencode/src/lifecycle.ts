@@ -135,6 +135,15 @@ function writeDumpTarget(target: string, text: string): void {
   }
 }
 
+function isAbsolutePath(value: string): boolean {
+  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function maskSidecarDir(dir: string, home: string): string {
+  if (dir === home || dir.startsWith(`${home}/`)) return `~${dir.slice(home.length)}`;
+  if (isAbsolutePath(dir)) return "<path>";
+  return dir;
+}
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -352,7 +361,7 @@ export function diagnoseCommand(deps: LifecycleDeps): CommandDefinition {
           home: homedir(),
         };
         const bundle = buildDiagnoseBundle(inputBundle);
-        const body = `sidecar: ${deps.sidecars.dir} (${deps.options.sidecarSource ?? "explicit"})\n${bundle}`;
+        const body = `sidecar: ${maskSidecarDir(deps.sidecars.dir, inputBundle.home)} (${deps.options.sidecarSource ?? "explicit"})\n${bundle}`;
         if (args.includes("--save") && !valueOf(args, "--save")) {
           await deps.prompt(
             input.sessionID,
