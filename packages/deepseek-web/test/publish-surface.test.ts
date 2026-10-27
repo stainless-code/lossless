@@ -69,6 +69,22 @@ test("publish surface: the lossless presets mirror the pinned harness presets", 
   );
 });
 
+test("publish surface: every lossless preset declares a description", () => {
+  const patch = readFileSync(join(PACKAGE_DIR, "cordis.presets.patch.yml"), "utf8");
+  for (const preset of ["standard", "ptc", "minimal", "cordis"]) {
+    const head = patch.match(
+      new RegExp(`id: lossless-${preset}\\n([\\s\\S]*?)\\n\\s*plugins:`),
+    )?.[1];
+    assert.ok(head, `lossless ${preset} config head is present`);
+    const description = head.match(/description:\s*(.+)/)?.[1]?.trim();
+    assert.ok(
+      description !== undefined && description.length > 0,
+      `lossless ${preset} declares a non-empty description`,
+    );
+    assert.ok(!description.includes("\u2014"), `lossless ${preset} description has no em dash`);
+  }
+});
+
 test("publish surface: the web companion peers on the host package", () => {
   assert.equal(manifest.peerDependencies?.["deepseek-lossless"], "^0.1.0");
 });

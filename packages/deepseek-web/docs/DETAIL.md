@@ -1,7 +1,8 @@
 # Lossless presets for DeepSeek web
 
-Four agent presets that mirror the shipped web presets with one change: the
-compaction backend is the shared lossless core instead of the base backend.
+Four agent presets that mirror the shipped web presets. The compaction
+backend is the shared lossless core instead of the base backend, with
+punctuation normalized and a preset description added.
 Selecting one is the opt-in; the backend row ships enabled because the
 selection itself is the opt-in.
 

@@ -3,7 +3,8 @@
 Lossless presets for the DeepSeek web surface: Lossless variants of all four
 shipped agent presets (`standard`, `ptc`, `minimal`, `cordis`) whose
 compaction backend runs the shared lossless core. Preset sessions keep their
-catalog; only the backend is swapped.
+catalog; the backend is swapped, with normalized punctuation and a preset
+description added.
 
 ## Install
 
@@ -28,10 +29,11 @@ row when it is absent. To switch back, select a shipped preset again.
 ## Pins
 
 The four presets are byte-for-byte copies of the harness presets at
-dsh v0.2.1-rc.3 (the version our peers admit) except the backend row, plus a
-punctuation normalization the repo requires. Re-sync them when the peer
-floor moves: diff each file against the new harness preset and carry over
-everything except the backend row.
+dsh v0.2.1-rc.3 (the version our peers admit) except the backend row, a
+punctuation normalization the repo requires, and a config.description per
+preset that the UI renders. Re-sync them when the peer floor moves: diff
+each file against the new harness preset and carry over everything except
+the backend row.
 
 ## License
 
