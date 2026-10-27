@@ -573,6 +573,12 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         }
         const target = entries[0]!;
         if (!force && ageMsOf(target.mtimeMs) < GC_GRACE_MS) {
+          deps.record({
+            kind: "gc",
+            action: "skipped",
+            session: target.ref.id,
+            reason: "recency-grace",
+          });
           const minutes = Math.floor(ageMsOf(target.mtimeMs) / 60_000);
           await deps.prompt(
             input.sessionID,
@@ -603,6 +609,12 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
           !force &&
           Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS
         ) {
+          deps.record({
+            kind: "gc",
+            action: "skipped",
+            session: target.ref.id,
+            reason: "recency-grace",
+          });
           const minutes = Math.floor(Math.max(0, Date.now() - fresh.mtimeMs) / 60_000);
           await deps.prompt(
             input.sessionID,
@@ -621,6 +633,12 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
             if (fresh === undefined) throw new Error("sidecar unreadable before delete");
             sizeBytes = fresh.stat.size;
             if (!force && Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS) {
+              deps.record({
+                kind: "gc",
+                action: "skipped",
+                session: ref.id,
+                reason: "recency-grace",
+              });
               const minutes = Math.floor(Math.max(0, Date.now() - fresh.mtimeMs) / 60_000);
               await deps.prompt(
                 input.sessionID,
@@ -670,6 +688,14 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       );
       const skipped = entries.filter(({ mtimeMs }) => ageMsOf(mtimeMs) < GC_GRACE_MS);
       const skippedIds = skipped.map(({ ref }) => ref.id);
+      for (const { ref } of skipped) {
+        deps.record({
+          kind: "gc",
+          action: "skipped",
+          session: ref.id,
+          reason: "recency-grace",
+        });
+      }
       if (candidates.length === 0) {
         await deps.prompt(
           input.sessionID,
@@ -711,6 +737,12 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
           }
           if (Math.max(0, Date.now() - fresh.mtimeMs) < GC_GRACE_MS) {
             restatSkipped.push(ref.id);
+            deps.record({
+              kind: "gc",
+              action: "skipped",
+              session: ref.id,
+              reason: "recency-grace",
+            });
             continue;
           }
           const store = new LcmStore(ref.path, { queryOnly: true });

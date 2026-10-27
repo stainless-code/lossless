@@ -274,6 +274,15 @@ describe("lifecycle commands", () => {
       expect(dry).toContain("ses_gc_fresh");
       expect(existsSync(h.sidecars.pathFor("ses_gc_old"))).toBe(true);
       expect(existsSync(h.sidecars.pathFor("ses_gc_fresh"))).toBe(true);
+      expect(
+        h.records.some(
+          (row) =>
+            row.kind === "gc" &&
+            row.action === "skipped" &&
+            row.session === "ses_gc_fresh" &&
+            row.reason === "recency-grace",
+        ),
+      ).toBe(true);
     } finally {
       h.sidecars.close();
     }
@@ -339,6 +348,15 @@ describe("lifecycle commands", () => {
       expect(existsSync(h.sidecars.pathFor("ses_gc_fresh"))).toBe(true);
       expect(readdirSync(h.dir).some((name) => name.startsWith("lossless-export-gc-"))).toBe(false);
       expect(h.records.some((row) => row.kind === "gc" && row.action === "deleted")).toBe(false);
+      expect(
+        h.records.some(
+          (row) =>
+            row.kind === "gc" &&
+            row.action === "skipped" &&
+            row.session === "ses_gc_fresh" &&
+            row.reason === "recency-grace",
+        ),
+      ).toBe(true);
     } finally {
       h.sidecars.close();
     }
@@ -358,6 +376,8 @@ describe("lifecycle commands", () => {
         "/lossless-gc --session ses_gc_fresh --force --apply",
       );
       expect(applied).toContain("removed 1 of 1");
+      expect(applied).toContain("younger than 24 hour(s)");
+      expect(applied).toContain("ses_gc_fresh");
       expect(existsSync(h.sidecars.pathFor("ses_gc_fresh"))).toBe(false);
       expect(existsSync(h.sidecars.pathFor("ses_gc_other"))).toBe(true);
       const exported = applied.split("exported to ")[1]?.split(" ")[0]?.replace(/\.$/u, "");
@@ -429,10 +449,20 @@ describe("lifecycle commands", () => {
       expect(dry).toContain("Skipped 1 sidecar(s) active within the last 60 minute(s)");
       expect(dry).toContain("ses_gc_fut");
       expect(existsSync(h.sidecars.pathFor("ses_gc_fut"))).toBe(true);
+      expect(
+        h.records.some(
+          (row) =>
+            row.kind === "gc" &&
+            row.action === "skipped" &&
+            row.session === "ses_gc_fut" &&
+            row.reason === "recency-grace",
+        ),
+      ).toBe(true);
 
       const forced = await run(gcCommand, h, "/lossless-gc --session ses_gc_fut --force");
       expect(forced).toContain("ses_gc_fut");
       expect(forced).toContain("0.0 day(s) old");
+      expect(forced).toContain("younger than 24 hour(s)");
       expect(existsSync(h.sidecars.pathFor("ses_gc_fut"))).toBe(true);
     } finally {
       h.sidecars.close();
@@ -453,6 +483,15 @@ describe("lifecycle commands", () => {
       expect(dry).toContain("ses_gc_old");
       expect(dry).toContain("Skipped 1 sidecar(s) active within the last 60 minute(s)");
       expect(dry).toContain("ses_gc_wal");
+      expect(
+        h.records.some(
+          (row) =>
+            row.kind === "gc" &&
+            row.action === "skipped" &&
+            row.session === "ses_gc_wal" &&
+            row.reason === "recency-grace",
+        ),
+      ).toBe(true);
 
       const applied = await run(gcCommand, h, "/lossless-gc --older-than 30 --apply");
       expect(applied).toContain("removed 1 of 1");
