@@ -2,7 +2,7 @@ import type { Context } from "@deepseek-ai/cordis";
 
 import { acquireCore, DEFAULT_SIDECAR_DIR, releaseCore } from "./core.ts";
 import { LosslessSummarizerEngine } from "./engine.ts";
-import { buildEngineArgs, Config, type LosslessPluginConfig } from "./plugin.ts";
+import { buildEngineArgs, closeIdleStores, Config, type LosslessPluginConfig } from "./plugin.ts";
 
 /** Cordis plugin name used by loader diagnostics. Distinct from the host row
  * so host and preset fibers are told apart in activation warnings. */
@@ -24,8 +24,8 @@ export type { LosslessPluginConfig };
  * row's `apply`/`applyLossless`, which must mount first: this entry mounts
  * the summarizer engine against the shared host core (same sidecars, same
  * record sink, same checkpoint memory) and registers nothing else. It
- * mirrors nothing and never closes shared handles; the host row owns the
- * core lifetime.
+ * mirrors nothing, and it closes only idle shared handles when its own
+ * release is the last ownership count left.
  *
  * Fails fast when the host row has not mounted, with the fix in the message,
  * instead of running a split-brain copy.
@@ -39,12 +39,16 @@ export function apply(ctx: Context, config: LosslessPluginConfig = {}): () => vo
   const core = acquireCore(dir, false);
   const [seamConfig, engineDeps] = buildEngineArgs(config, core);
   void new LosslessSummarizerEngine(ctx, seamConfig, engineDeps);
-  // Borrowers only release: the host dispose owns every shared close, so a
-  // realm teardown never touches shared handles. Once-only, like the host.
+  // Borrowers release like owners: when this release drops the last
+  // ownership count, sweep the shared idle stores so repeated mounts cannot
+  // accumulate open handles. Live and healing stores stay open. Once-only,
+  // like the host.
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    releaseCore(core);
+    if (releaseCore(core)) {
+      closeIdleStores(core, (message) => ctx.logger.warn(message));
+    }
   };
 }

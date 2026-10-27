@@ -126,7 +126,7 @@ describe("preset backend", () => {
     }
   });
 
-  it("shares sidecar handles with the host core and never closes them", async () => {
+  it("leaves shared handles open while the host still holds the core", async () => {
     const dir = tempDir();
     const { ctx: host, stop: stopHost } = await hostContext(ROUTE, [textChunks(SUMMARY)], dir);
     try {
@@ -202,6 +202,30 @@ describe("preset backend", () => {
       expect(store.allMessages().length).toBeGreaterThan(0);
     } finally {
       second.stop();
+    }
+  });
+
+  it("closes idle shared stores when the preset release is the last one", async () => {
+    const dir = tempDir();
+    const { ctx: host, stop: stopHost } = await hostContext(ROUTE, [textChunks(SUMMARY)], dir);
+    const session = host.sessions.create(SessionId("shared-last-1"), { meta: { cwd: dir } });
+    appendConversation(session, ROUTE, "shared last ".repeat(20));
+    session.append("turn/start", { turn: 3 });
+    const realm = realmContext(ROUTE);
+    const stopPreset = applyPreset(realm, { enabled: true, sidecarDir: dir });
+    const originalClose = Reflect.get(LcmStore.prototype, "close") as (this: LcmStore) => void;
+    let closes = 0;
+    Reflect.set(LcmStore.prototype, "close", function (this: LcmStore): void {
+      closes += 1;
+      Reflect.apply(originalClose, this, []);
+    });
+    try {
+      stopHost();
+      expect(closes).toBe(0);
+      stopPreset();
+      expect(closes).toBeGreaterThan(0);
+    } finally {
+      Reflect.set(LcmStore.prototype, "close", originalClose);
     }
   });
 

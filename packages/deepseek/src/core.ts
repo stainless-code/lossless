@@ -131,8 +131,8 @@ export function acquireCore(dir: string, owner: boolean): LosslessCore {
  * directory: a stale disposer from a previous mount cannot release the
  * replacement. Each disposer must also call this at most once (guarded at the
  * call site), so a double dispose after a remount cannot spend the
- * replacement's ownership. Only the host dispose closes stores; realm rows
- * just release. */
+ * replacement's ownership. Returns true when this release dropped the last
+ * count; the caller then runs the shared guarded close. */
 export function releaseCore(core: LosslessCore): boolean {
   const held = cores.get(core.dir);
   if (held === undefined || held.core !== core || held.owners <= 0) return false;

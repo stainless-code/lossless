@@ -44,6 +44,6 @@ export const DEEPSEEK_FAQS: readonly LcmFaq[] = [
   {
     question: "How do I remove it?",
     answer:
-      "Remove both rows from the profile patch and restart to switch back to the base backend, then run `dsh plugin --profile <name> remove deepseek-lossless` and, on preset-bearing profiles, `dsh plugin --profile <name> remove deepseek-lossless-web`, and delete the configured `sidecarDir`. `/lcm backup` copies a sidecar, `/lcm export` writes a JSONL transcript, and `/lcm gc --apply` exports and deletes retired sidecars.",
+      "Run `dsh plugin --profile <name> remove deepseek-lossless` and restart to restore the base backend, then delete the configured `sidecarDir`. To switch back without uninstalling, re-enable `compaction-basic` and disable `deepseek-lossless` from the Plugins page or the profile patch. On preset-bearing profiles, also remove `deepseek-lossless-web` or select a shipped preset again. `/lcm backup` copies a sidecar, `/lcm export` writes a JSONL transcript, and `/lcm gc --apply` exports and deletes retired sidecars.",
   },
 ];

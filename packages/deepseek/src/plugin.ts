@@ -86,6 +86,27 @@ import {
   type LosslessCore,
 } from "./core.ts";
 
+/** Close and evict every idle sidecar store in a core. Stores with a live run
+ * or an in-flight heal stay open so the commit or repair can land; failures
+ * are reported through `warn` instead of thrown so one bad store never blocks
+ * the rest. Runs on whichever dispose releases the last ownership count, host
+ * or realm. */
+export function closeIdleStores(core: LosslessCore, warn: (message: string) => void): void {
+  // Dispose-then-use is an error: a live run keeps its store open so the commit can land, and a session under heal repair keeps its store for the same reason.
+  const healing = new Set(healInFlightSessions());
+  for (const [id, store] of core.sidecars.storesMap()) {
+    try {
+      if (store.hasLiveRun() || healing.has(id)) continue;
+      store.close();
+      core.sidecars.evict(id);
+    } catch (error: unknown) {
+      warn(
+        `lossless dispose skipped closing session "${id}": ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+}
+
 /** Cordis plugin name used by loader diagnostics. */
 export const name = "deepseek-lossless";
 
@@ -270,19 +291,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   // only ever sweeps this mount's own released core.
   let released = false;
   const closeIdle = (): void => {
-    // Dispose-then-use is an error: a live run keeps its store open so the commit can land, and a session under heal repair keeps its store for the same reason.
-    const healing = new Set(healInFlightSessions());
-    for (const [id, store] of sidecars.storesMap()) {
-      try {
-        if (store.hasLiveRun() || healing.has(id)) continue;
-        store.close();
-        sidecars.evict(id);
-      } catch (error: unknown) {
-        ctx.logger.warn(
-          `lossless dispose skipped closing session "${id}": ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
+    closeIdleStores(core, (message) => ctx.logger.warn(message));
   };
   return () => {
     stopMirror();
