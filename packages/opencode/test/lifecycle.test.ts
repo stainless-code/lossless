@@ -229,7 +229,7 @@ describe("lifecycle commands", () => {
     }
   });
 
-  it("lists and deletes an old sidecar, exporting it first", async () => {
+  it("gc lists an old sidecar and deletes it after export", async () => {
     const h = harness();
     try {
       seed(h.sidecars, SESSION, "the current session");
@@ -259,7 +259,7 @@ describe("lifecycle commands", () => {
     }
   });
 
-  it("gc grace skips a recently active store while an old one stays listed", async () => {
+  it("gc grace skips a recently active store and lists an old one", async () => {
     const h = harness();
     try {
       seed(h.sidecars, SESSION, "the current session");
@@ -389,7 +389,7 @@ describe("lifecycle commands", () => {
     }
   });
 
-  it("gc warns about candidates younger than 24 hours and stays quiet for older ones", async () => {
+  it("gc warns about candidates younger than 24 hours and omits the warning for older ones", async () => {
     const young = harness();
     try {
       seed(young.sidecars, SESSION, "the current session");
@@ -417,7 +417,7 @@ describe("lifecycle commands", () => {
     }
   });
 
-  it("gc treats future mtimes as age 0: skipped by sweep, listed as 0.0 with --force", async () => {
+  it("gc skips future mtimes in sweeps and lists them as 0.0 days with --force", async () => {
     const h = harness();
     try {
       seed(h.sidecars, SESSION, "the current session");
@@ -426,7 +426,8 @@ describe("lifecycle commands", () => {
 
       const dry = await run(gcCommand, h, "/lossless-gc --older-than 30");
       expect(dry).toContain("nothing eligible");
-      expect(dry).toContain("skipped as active within the last 60 minute(s)");
+      expect(dry).toContain("Skipped 1 sidecar(s) active within the last 60 minute(s)");
+      expect(dry).toContain("ses_gc_fut");
       expect(existsSync(h.sidecars.pathFor("ses_gc_fut"))).toBe(true);
 
       const forced = await run(gcCommand, h, "/lossless-gc --session ses_gc_fut --force");
@@ -462,12 +463,13 @@ describe("lifecycle commands", () => {
     }
   });
 
-  it("gc docs state the grace, the refusal, and the force ladder", async () => {
+  it("gc docs state the grace, the refusal, and the force rule", async () => {
     const { readFileSync: read } = await import("node:fs");
     const { join: joinPath } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
     const doc = read(
       joinPath(
-        new URL(".", import.meta.url).pathname,
+        fileURLToPath(new URL(".", import.meta.url)),
         "../../../apps/docs/content/_snippets/reference/command/opencode.mdx",
       ),
       "utf8",
@@ -479,6 +481,6 @@ describe("lifecycle commands", () => {
     expect(doc).toContain("--older-than 0");
     expect(doc).toContain("--force");
     expect(doc).toContain("24 hours");
-    expect(doc).toContain("Reopen the guard decision");
+    expect(doc).toContain("Revisit these guards");
   });
 });

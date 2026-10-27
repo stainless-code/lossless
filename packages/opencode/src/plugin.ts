@@ -99,6 +99,7 @@ export function pluginLabel(): string {
   return `opencode-lossless ${pluginVersion()}`;
 }
 
+/** Wire lossless memory into an OpenCode v2 plugin context: mirror traffic into per-session sidecars and register recall tools plus lifecycle commands. Resolves to the cleanup that unregisters everything and closes the sidecars. */
 export async function setupOpencodeLossless(
   ctx: OpencodeContext,
   rawOptions?: unknown,
@@ -439,6 +440,7 @@ export async function setupOpencodeLossless(
 export interface RuntimeOptions extends ProjectionOptions {
   readonly enabled: boolean;
   readonly sidecarDir: string;
+  /** Where the sidecar dir came from. `explicit` when the option is set, else the default source. */
   readonly sidecarSource: string;
   readonly assembly: boolean;
   readonly readerTimeoutMs: number;

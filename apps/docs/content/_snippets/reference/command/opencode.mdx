@@ -83,16 +83,16 @@ Restores rows from a file written by `/lossless-export`. It refuses the import w
 /lossless-gc --session <id> --apply --force   # delete one recently active store
 ```
 
-The host plugin API cannot list sessions, so `gc` selects by sidecar age (default 30 days) or an explicit id. It never deletes the current session. It exports each transcript before deleting it. It only excludes sidecars open in this process, so against the shared global directory `--apply` can delete a sidecar that is live in another process. Dry run first, and note `--older-than 0` makes every other sidecar eligible.
+The host plugin API cannot list sessions, so `gc` selects by sidecar age (default 30 days) or an explicit id. It never deletes the current session. It exports each transcript before deleting it. It only excludes sidecars open in this process, so against the shared global directory `--apply` can delete a sidecar that is live in another process. Run a dry run first, and bare `--older-than 0` without `--session` is refused.
 
-Safety facts. The default sweep never deletes a store active within the last 60 minutes, measured by the newest mtime across the `.sqlite`, `-wal`, and `-shm` files; future mtimes count as age 0. Bare `--older-than 0` without `--session` is refused before any I/O. `--session <id>` on a store active within 60 minutes is refused unless `--force` is also passed; `--force` without `--session` is refused. Candidates younger than 24 hours carry a one-line warning naming up to 5 ids. Every sweep re-stats each candidate immediately before export plus delete, and a store that received a write in between is skipped and named. Skipped stores are counted and named in dry-run and apply output.
+The default sweep applies these guards. It never deletes a store active within the last 60 minutes, measured by the newest mtime across the `.sqlite`, `-wal`, and `-shm` files. Future mtimes count as age 0. Bare `--older-than 0` without `--session` is refused before any I/O. `--session <id>` on a store active within 60 minutes is refused unless `--force` is also passed. `--force` without `--session` is refused. Candidates younger than 24 hours carry a one-line warning naming up to 5 ids. Every sweep re-stats each candidate immediately before export then delete. The sweep skips a store that received a write in between and names it. Skipped stores are counted and named in dry-run and apply output.
 
-Reopen the guard decision if any one of the following arrives:
+Revisit these guards if any of the following holds:
 
-1. A real incident report: gc deleted a live second-process sidecar and the export plus import path did not recover it cleanly.
-2. A reliable liveness primitive: the host API gains session listing or leases, or the engine adopts a cross-process lock both writers honor.
-3. Telemetry or user reports showing `--older-than 0` or `--session` used routinely in multi-server setups.
-4. A change that makes the default unsafe: for example lowering the default cutoff toward hours, running gc on a timer without an operator reading output, or sharing one sidecar directory across machines over a network filesystem.
+1. A real incident report shows gc deleted a live second-process sidecar and the export and import path did not recover it cleanly.
+2. A reliable liveness check exists. The host API gains session listing or leases, or the engine adopts a cross-process lock that both writers honor.
+3. Telemetry or user reports show `--older-than 0` or `--session` used routinely in multi-server setups.
+4. A change makes the default unsafe. For example, the default cutoff drops toward hours, gc runs on a timer without an operator reading output, or one sidecar directory is shared across machines over a network filesystem.
 
 ## migrate
 

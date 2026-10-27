@@ -45,6 +45,7 @@ export interface LifecycleOptions extends SummarizerOptions {
   readonly swapAtRatio: number;
   readonly recutAtRatio: number;
   readonly keepRecentTokens: number;
+  /** Where the sidecar dir came from. Diagnose prints it. `explicit` when the option is set, else the default source. */
   readonly sidecarSource?: string;
   readonly healSourceTokens?: number;
   readonly smartZone?: number;
@@ -136,7 +137,7 @@ function writeDumpTarget(target: string, text: string): void {
 }
 
 function isAbsolutePath(value: string): boolean {
-  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
+  return value.startsWith("/") || value.startsWith("\\\\") || /^[A-Za-z]:[\\/]/.test(value);
 }
 
 function maskSidecarDir(dir: string, home: string): string {
@@ -464,7 +465,9 @@ export function migrateCommand(deps: LifecycleDeps): CommandDefinition {
   };
 }
 
+/** A `--session` target younger than this is treated as possibly live in another process. */
 export const GC_RECENCY_GRACE_MINUTES = 60;
+/** Candidates younger than this carry a warning naming up to 5 ids. */
 export const GC_WARN_YOUNG_HOURS = 24;
 const GC_GRACE_MS = GC_RECENCY_GRACE_MINUTES * 60_000;
 const GC_YOUNG_MS = GC_WARN_YOUNG_HOURS * 3_600_000;
@@ -491,14 +494,14 @@ function gcYoungWarning(ids: readonly string[]): string | undefined {
 }
 
 function gcSkippedLine(ids: readonly string[]): string {
-  return `Skipped ${ids.length} sidecar(s) active within the last 60 minute(s); pass --session <id> to target one explicitly: ${ids.join(", ")}.`;
+  return `Skipped ${ids.length} sidecar(s) active within the last 60 minute(s). Pass --session <id> to target one explicitly: ${ids.join(", ")}.`;
 }
 
 export function gcCommand(deps: LifecycleDeps): CommandDefinition {
   return {
     name: "lossless-gc",
     description:
-      "List old sidecars, or with --apply export and delete them. Never touches this session.",
+      "List old sidecars, or with --apply export and delete them. It never touches this session.",
     execute: async (input) => {
       const args = argsOf(input.prompt.text);
       const apply = args.includes("--apply");
@@ -524,7 +527,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       ) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc: session ${sessionId} is open in this process; gc never deletes an open sidecar.`,
+          `LCM gc: session ${sessionId} is open in this process. The command never deletes an open sidecar.`,
         );
         return;
       }
@@ -548,7 +551,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       if (sessionId !== undefined && selected.length === 0) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc: no sidecar for session ${sessionId} (the current session is never a candidate).`,
+          `LCM gc: no sidecar for session ${sessionId}. The current session is never a candidate.`,
         );
         return;
       }
@@ -564,7 +567,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         if (entries.length === 0) {
           await deps.prompt(
             input.sessionID,
-            `LCM gc: nothing eligible (${refs.length} other sidecar(s), none older than ${days} day(s)).`,
+            `LCM gc: nothing eligible for session ${sessionId} (sidecar unreadable).`,
           );
           return;
         }
@@ -658,7 +661,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
         if (exported > 0) chmodFile(exportTarget);
         await deps.prompt(
           input.sessionID,
-          `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.${young === undefined ? "" : ` ${young}`}`,
+          `LCM gc: removed ${removed} of ${candidates.length} sidecar(s). ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `. ${failed} skipped. Migrate or inspect first`}.${young === undefined ? "" : ` ${young}`}`,
         );
         return;
       }
@@ -670,7 +673,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       if (candidates.length === 0) {
         await deps.prompt(
           input.sessionID,
-          `LCM gc: nothing eligible (${refs.length} other sidecar(s), none older than ${days} day(s)).${skipped.length === 0 ? "" : ` ${skipped.length} sidecar(s) skipped as active within the last 60 minute(s).`}`,
+          `LCM gc: nothing eligible. ${refs.length} other sidecar(s), none older than ${days} day(s).${skippedIds.length === 0 ? "" : ` ${gcSkippedLine(skippedIds)}`}`,
         );
         return;
       }
@@ -744,7 +747,7 @@ export function gcCommand(deps: LifecycleDeps): CommandDefinition {
       const allSkipped = [...skippedIds, ...restatSkipped];
       await deps.prompt(
         input.sessionID,
-        `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.${young === undefined ? "" : ` ${young}`}${allSkipped.length === 0 ? "" : ` ${gcSkippedLine(allSkipped)}`}`,
+        `LCM gc: removed ${removed} of ${candidates.length} sidecar(s). ${exported} transcript(s) exported to ${exportTarget}${failed === 0 ? "" : `. ${failed} skipped. Migrate or inspect first`}.${young === undefined ? "" : ` ${young}`}${allSkipped.length === 0 ? "" : ` ${gcSkippedLine(allSkipped)}`}`,
       );
     },
   };

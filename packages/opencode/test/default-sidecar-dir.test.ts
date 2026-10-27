@@ -112,6 +112,24 @@ describe("resolveDefaultSidecarDir", () => {
     });
   });
 
+  it("treats a relative LOCALAPPDATA as unset on win32", () => {
+    const roaming = "C:\\Users\\u\\AppData\\Roaming";
+    expect(
+      resolve({ LOCALAPPDATA: "rel\\path", APPDATA: roaming }, "C:\\Users\\u", "win32"),
+    ).toEqual({
+      dir: join(roaming, "opencode", "lossless"),
+      source: "default:APPDATA",
+    });
+  });
+
+  it("treats relative win32 env dirs as unset and uses home AppData Local", () => {
+    expect(
+      resolve({ LOCALAPPDATA: "rel\\local", APPDATA: "rel\\roaming" }, "C:\\Users\\u", "win32"),
+    ).toEqual({
+      dir: join("C:\\Users\\u", "AppData", "Local", "opencode", "lossless"),
+      source: "default:home",
+    });
+  });
   it("uses home AppData Local on win32 when no env dir is set", () => {
     expect(resolve({}, "C:\\Users\\u", "win32")).toEqual({
       dir: join("C:\\Users\\u", "AppData", "Local", "opencode", "lossless"),
