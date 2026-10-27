@@ -12,12 +12,12 @@ export const OPENCODE_FAQS: readonly LcmFaq[] = [
   {
     question: "Do I have to configure anything?",
     answer:
-      "No. The defaults (swap at 70%, re-cut at 85%, keep 20,000 tokens verbatim) work with no options. Configuration is the plugin's `options` in `opencode.json`; there is no separate config file or interactive settings panel. `sidecarDir` defaults to `./.lossless`, resolved from the server working directory.",
+      'No. The defaults (swap at 70%, re-cut at 85%, keep 20,000 tokens verbatim) work with no options. Configuration is the plugin\'s `options` in `opencode.json`. There is no separate config file or interactive settings panel. `sidecarDir` defaults to a global auto-detected path (see [Config](/reference/opencode/config)). Set it to `"./.lossless"` to keep sidecars inside the project.',
   },
   {
     question: "Where does the data live?",
     answer:
-      "One SQLite sidecar per session under `sidecarDir` (default `./.lossless`, resolved from the OpenCode server working directory). The directory is 0700; the database, WAL, and shared-memory files are 0600. Nothing leaves the machine except the provider calls the summarizer and reader make.",
+      "One SQLite sidecar per session under `sidecarDir`. The default is a global auto-detected path. [Config](/reference/opencode/config) lists the exact paths. The directory is 0700. The database, WAL, and shared-memory files are 0600. Nothing leaves the machine except the provider calls the summarizer and reader make.",
   },
   {
     question: "Does it replace OpenCode compaction?",
@@ -32,7 +32,7 @@ export const OPENCODE_FAQS: readonly LcmFaq[] = [
   {
     question: "Can the model read a past OpenCode session?",
     answer:
-      'Yes. `lcm_grep` scans the global sidecar directory, so `"sessions"` and `"all_sessions"` are equivalent today. The reader runs in a child session limited to the recall tools, and its transcript sidecar is removed after it answers.',
+      'Yes. `lcm_grep` scans the global sidecar directory, so `"sessions"` and `"all_sessions"` are equivalent today. The reader runs in a child session limited to the recall tools, and the plugin removes its transcript sidecar after it answers.',
   },
   SHARED_FAQS.caching,
   {

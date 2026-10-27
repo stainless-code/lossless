@@ -2,12 +2,12 @@
 
 **Lossless Context Management (LCM) for OpenCode v2. Long sessions keep working past the point where the model would forget, and every verbatim message stays searchable and readable.**
 
-Install it, and the adapter mirrors every prompt, assistant reply, and tool exchange into a per-session SQLite sidecar. The model reads that history back through `lcm_grep`, `lcm_describe`, and `lcm_expand`; with `assembly` true (the default) it also gets `lcm_expand_query`, which answers through a child session without pulling the originals into the parent. With assembly on, the adapter also owns the context boundary: past the swap point the DAG projection replaces the aged history, and when the host compacts, the adapter hands it the frontier as the checkpoint instead of letting it summarize.
+Install it, and the adapter mirrors every prompt, assistant reply, and tool exchange into a per-session SQLite sidecar. The model reads that history back through `lcm_grep`, `lcm_describe`, and `lcm_expand`. With `assembly` true (the default) it also gets `lcm_expand_query`, which answers through a child session without pulling the originals into the parent. With assembly on, the adapter also owns the context boundary. Past the swap point the DAG projection replaces the aged history, and when the host compacts, the adapter hands it the frontier as the checkpoint instead of letting it summarize.
 
 This package is the OpenCode v2 adapter over
 [`lossless-core`](https://npmx.dev/package/lossless-core), the engine that
 ingests the history and builds the summaries. Verified against OpenCode v2 in
-live sessions: the plugin loads from its directory, all mirrored text matches
+live sessions. The plugin loads from its directory, all mirrored text matches
 verbatim, and host compactions store the DAG frontier as their checkpoint.
 
 ## Install
@@ -20,14 +20,16 @@ The equivalent entry in `opencode.json`:
 
 ```json
 {
-  "plugins": [{ "package": "opencode-lossless", "options": { "sidecarDir": "./.lossless" } }]
+  "plugins": [{ "package": "opencode-lossless" }]
 }
 ```
 
+To keep sidecars inside the project, set `sidecarDir` to `"./.lossless"`.
+
 ## Quick start
 
-Zero config required: passive mirroring starts immediately, and swaps begin
-once context crosses the swap point. Eleven commands, all `lossless-*`:
+The plugin needs no configuration. Passive mirroring starts immediately, and swaps begin
+once context crosses the swap point. The commands all start with `lossless-*`:
 
 ```sh
 /lossless-status    # message and compaction summary counts per live sidecar
@@ -43,7 +45,7 @@ once context crosses the swap point. Eleven commands, all `lossless-*`:
 /lossless-dump      # read-only dump of this session's sidecar; --include-removed keeps removed rows, --save writes mode 0600
 ```
 
-The model gets four recall tools: `lcm_grep` (search this session, `scope`
+The model gets recall tools: `lcm_grep` (search this session, `scope`
 reaches past sessions, `role`, `date_start`, `date_end`, and `tool_name`
 filter rows), `lcm_describe` (inspect one summary without expanding
 it), `lcm_expand` (read the originals a summary covers, `anchor` centers
@@ -61,12 +63,12 @@ originals never enter the parent's context).
 }
 ```
 
-`sidecarDir` holds one SQLite file per session (0700 dir, 0600 files; delete
-one to forget that session). `assembly: false` leaves compaction to the host
-and drops `/lossless-pass` and `lcm_expand_query`. Every other key (thresholds,
-summarizer chain and budgets, heal window, reader timeout) lives on the
+The example stores sidecars in the project. Without `sidecarDir`, the plugin uses the global auto-detected path, which holds sessions from every project. The [config reference](https://stainless-code.com/lossless/reference/opencode/config) lists the exact default paths. `sidecarDir` holds one SQLite file per session (0700 dir, 0600 files).
+Delete one file to forget that session. `assembly: false` leaves compaction to the host
+and drops `/lossless-pass` and `lcm_expand_query`. The
 [config reference](https://stainless-code.com/lossless/reference/opencode/config)
-with its default.
+documents every other key and its default: thresholds,
+summarizer chain and budgets, heal window, and reader timeout.
 
 ## Verify
 

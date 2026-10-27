@@ -8,14 +8,14 @@
 /lossless-import <path>
 /lossless-diagnose [--save <path>] [--repair]
 /lossless-migrate [--apply]
-/lossless-gc [--older-than <days>] [--session <id>] [--apply]
+/lossless-gc [--older-than <days>] [--session <id>] [--force] [--apply]
 ```
 
-Ten commands. `/lossless-pass` is absent with `assembly: false`; `/lossless-heal` stays available.
+There are ten commands. `/lossless-pass` is absent with `assembly: false`. `/lossless-heal` stays available.
 
 ## Settings
 
-There is no interactive settings panel in V2 scope; the host exposes a TUI extension point, so a separate TUI plugin could reuse the same command core later. Edit the plugin's `options` in `opencode.json` and reload the plugin. [Config](/reference/opencode/config) lists every key.
+There is no interactive settings panel in V2 scope. The host exposes a TUI extension point, so a separate TUI plugin could reuse the same command core later. Edit the plugin's `options` in `opencode.json` and reload the plugin. [Config](/reference/opencode/config) lists every key.
 
 ## status
 
@@ -23,7 +23,7 @@ There is no interactive settings panel in V2 scope; the host exposes a TUI exten
 /lossless-status
 ```
 
-Message and compaction-summary counts for the live sidecars. A command cannot return text directly, so the status arrives as a prompt the loop answers from.
+Message and compaction-summary counts for the live sidecars. A command cannot return text directly, so the status arrives as a prompt that the loop answers.
 
 ## report
 
@@ -31,7 +31,7 @@ Message and compaction-summary counts for the live sidecars. A command cannot re
 /lossless-report
 ```
 
-Projection, checkpoint, pass, summary, heal, recall, and reader rows for this session. It says so when the session has no rows.
+Projection, checkpoint, pass, summary, heal, recall, and reader rows for this session. When the session has no rows, it says so.
 
 ## pass
 
@@ -39,7 +39,7 @@ Projection, checkpoint, pass, summary, heal, recall, and reader rows for this se
 /lossless-pass
 ```
 
-One DAG pass over the stored span, on demand. Mounted only with `assembly` on.
+It runs one DAG pass over the stored span on demand. The plugin mounts it only with `assembly` on.
 
 ## heal
 
@@ -49,7 +49,7 @@ One DAG pass over the stored span, on demand. Mounted only with `assembly` on.
 /lossless-heal --apply --max-nodes 8
 ```
 
-A non-clean summary is a candidate. A mechanical level-3 node starts with `[lcm:truncated]`; a clipped leaf or a derived parent may not. Heal reads the exact source rows that node points at, re-summarizes the tainted node, then recomputes every ancestor whose child changed. It rejects another level-3 answer, an empty answer, or an answer over twice the target, so a failed repair keeps the old text. `--max-nodes` bounds one run; `summarizerTokensPerHeal` bounds its spend. The dry run makes no provider call.
+A non-clean summary is a candidate. A mechanical level-3 node starts with `[lcm:truncated]`. A clipped leaf or a derived parent may not. Heal reads the exact source rows that node points at, re-summarizes the tainted node, then recomputes every ancestor whose child changed. It rejects another level-3 answer, an empty answer, or an answer over twice the target, so a failed repair keeps the old text. `--max-nodes` bounds one run. `summarizerTokensPerHeal` bounds its spend. The dry run makes no provider call.
 
 ## backup
 
@@ -65,7 +65,7 @@ Copies this session's sidecar to `<sidecar>.backup-<timestamp>`, or to the path 
 /lossless-export [path]
 ```
 
-Writes the verbatim transcript and summaries as JSONL at mode 0600. The default lands beside the sidecars.
+Writes the verbatim transcript and summaries as JSONL at mode 0600. Without a path, it writes beside the sidecars.
 
 ## import
 
@@ -73,16 +73,26 @@ Writes the verbatim transcript and summaries as JSONL at mode 0600. The default 
 /lossless-import <path>
 ```
 
-Restores rows from a file written by `/lossless-export`. Refused while a pass is running, or into a store that already holds foreign messages.
+Restores rows from a file written by `/lossless-export`. It refuses the import while a pass is running or when the store already holds foreign messages.
 
 ## gc
 
 ```text
 /lossless-gc                  # dry-run list
 /lossless-gc --apply          # export each transcript, then delete
+/lossless-gc --session <id> --apply --force   # delete one recently active store
 ```
 
-The host plugin API cannot list sessions, so `gc` selects by sidecar age (default 30 days) or an explicit id. It never touches the current session and exports each transcript before deleting it.
+The host plugin API cannot list sessions, so `gc` selects by sidecar age (default 30 days) or an explicit id. It never deletes the current session. It exports each transcript before deleting it. It only excludes sidecars open in this process, so against the shared global directory `--apply` can delete a sidecar that is live in another process. Run a dry run first, and bare `--older-than 0` without `--session` is refused.
+
+The default sweep applies these guards. It never deletes a store active within the last 60 minutes, measured by the newest mtime across the `.sqlite`, `-wal`, and `-shm` files. mtime measures activity, not liveness; a session open in another process but idle over 60 minutes is still eligible. Future mtimes count as age 0. Bare `--older-than 0` without `--session` is refused before any I/O. `--session <id>` on a store active within 60 minutes is refused unless `--force` is also passed. `--force` without `--session` is refused. `--force` means the operator checked that no other process is using the target. Candidates younger than 24 hours carry a one-line warning naming up to 5 ids. Every sweep re-stats each candidate immediately before export then delete. The sweep skips a store that received a write in between and names it. Skipped stores are counted and named in dry-run and apply output.
+
+Revisit these guards if any of the following holds:
+
+1. A real incident report shows gc deleted a live second-process sidecar and the export and import path did not recover it cleanly.
+2. A reliable host owned liveness primitive exists, such as session listing or leases from the host API. An owner scoped lockfile is a separate engine decision with its own design note, so this trigger does not assume the engine already solves cross-process coordination.
+3. Telemetry or user reports show `--older-than 0` or `--session` used routinely in multi-server setups.
+4. A change makes the default unsafe. For example, the default cutoff drops toward hours, gc runs on a timer without an operator reading output, or one sidecar directory is shared across machines over a network filesystem.
 
 ## migrate
 
@@ -91,7 +101,7 @@ The host plugin API cannot list sessions, so `gc` selects by sidecar age (defaul
 /lossless-migrate --apply     # upgrade them in place
 ```
 
-The only path that writes to a past session's sidecar, and the reason cross-session search can read sidecars written by older builds.
+It is the only path that writes to a past session's sidecar. It lets cross-session search read sidecars written by older builds.
 
 ## diagnose
 
@@ -101,4 +111,4 @@ The only path that writes to a past session's sidecar, and the reason cross-sess
 /lossless-diagnose --repair           # rebuild the index and repair integrity
 ```
 
-One redacted, pasteable block: versions, store facts, the effective options, and this session's metrics. `--save` writes the exact bytes at mode 0600; `--repair` rebuilds the index and repairs integrity before the bundle is built.
+One redacted, pasteable block: versions, store facts, the effective options, and this session's metrics. Its first line names the sidecar directory and its source (`explicit`, `fallback`, or the `default:*` auto-detected source). `--save` writes the exact bytes at mode 0600. `--repair` rebuilds the index and repairs integrity before the bundle is built.

@@ -17,7 +17,7 @@ export const SHARED_FAQS = {
   lossy: {
     question: "Is it lossy?",
     answer:
-      "The projection is lossy by construction, because the model sees a smaller view. The store is not. Every message is held whole, and `lcm_expand_query` reads the stored bytes back by address.",
+      "The projection is lossy by construction, because the model sees a smaller view. The store is not. The store holds every message whole, and `lcm_expand_query` reads the stored bytes back by address.",
   },
   caching: {
     question: "Does it break provider prompt caching?",
@@ -55,7 +55,7 @@ export const LCM_FAQS: readonly LcmFaq[] = [
   {
     question: "Where does the data live?",
     answer:
-      "One SQLite file per session in the adapter's sidecar directory. Pi uses `~/.pi/agent/lcm/`; OpenCode uses the configured `sidecarDir` (default `./.lossless`, resolved from the server working directory). The directory is 0700; the database, WAL, and shared-memory files are 0600. Metrics sit beside the stores. Nothing leaves the machine except the provider calls the summarizer and reader make.",
+      "One SQLite file per session in the adapter's sidecar directory. Pi uses `~/.pi/agent/lcm/`. OpenCode uses the configured `sidecarDir`. The default is a global auto-detected path. [Config](/reference/opencode/config) lists the exact paths. The directory is 0700. The database, WAL, and shared-memory files are 0600. Metrics files are beside the stores. Nothing leaves the machine except the provider calls the summarizer and reader make.",
   },
   SHARED_FAQS.caching,
   {
