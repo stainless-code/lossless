@@ -503,7 +503,9 @@ describe("LosslessSummarizerEngine", () => {
       );
       expect(result).not.toBeNull();
       expect(result?.shadowedSeqs.length).toBeGreaterThan(0);
-      expect(result?.summarySeqs).toHaveLength((result?.leafSeqs.length ?? 0) + 1);
+      expect(result?.summarySeqs).toHaveLength(1);
+      expect(result?.leafSeqs).toHaveLength(0);
+      expect(result?.leafSummaryIds.length ?? 0).toBeGreaterThan(0);
       expect(result?.summarySeq).toBe(result?.summarySeqs[0]);
       expect(session.deriveMessages().length).toBeLessThan(before);
       const events = session.snapshotEvents();
@@ -666,7 +668,7 @@ describe("LosslessSummarizerEngine", () => {
       const summaries = session
         .snapshotEvents()
         .filter((event) => event.type === "compaction/summary");
-      expect(summaries.length).toBeGreaterThan(1);
+      expect(summaries.length).toBe(1);
     });
 
     it("lets a ladder failure through unwrapped on the auto path", async () => {

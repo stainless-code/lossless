@@ -371,7 +371,7 @@ describe("applyLossless", () => {
           (event): event is Extract<SessionEvent, { type: "compaction/summary" }> =>
             event.type === "compaction/summary",
         );
-      expect(logSummaries.length).toBeGreaterThan(1);
+      expect(logSummaries.length).toBe(1);
       expect(new Set(logSummaries.map((summary) => summary.data.compactionId)).size).toBe(1);
       const summaries = sidecarMap(dir).get("live-2")?.allSummaries() ?? [];
       expect(summaries.length).toBeGreaterThan(0);

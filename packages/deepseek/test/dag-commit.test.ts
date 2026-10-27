@@ -91,7 +91,7 @@ describe("selectDagRange", () => {
 });
 
 describe("commitDagTransaction", () => {
-  it("commits one condensed replace plus log-only leaf records in a single bracket", async () => {
+  it("commits one condensed summary in a single bracket with leaves sidecar only", async () => {
     const session = buildSession("working notes ".repeat(20));
     const store = new LcmStore(":memory:");
     const index = new MessageIndex();
@@ -113,8 +113,11 @@ describe("commitDagTransaction", () => {
       { owner: "current-turn", stability: "whole-surface" },
     );
     expect(result.compactionId.length).toBeGreaterThan(0);
-    expect(result.summarySeqs).toHaveLength(result.leafSeqs.length + 1);
-    expect(result.leafSeqs.length).toBeGreaterThan(0);
+    expect(result.summarySeqs).toHaveLength(1);
+    expect(result.summarySeqs[0]).toBe(result.summarySeq);
+    expect(result.leafSeqs).toHaveLength(0);
+    expect(result.leafSummaryIds.length).toBeGreaterThan(0);
+    expect(result.leafSummaryIds.length + result.condensedSummaryIds.length).toBeGreaterThan(0);
     expect(result.startSeq).toBeLessThan(result.summarySeqs[0]!);
     expect(result.summarySeqs[result.summarySeqs.length - 1]!).toBeLessThan(result.endSeq);
     const events = session.snapshotEvents();
@@ -126,6 +129,7 @@ describe("commitDagTransaction", () => {
     expect(ends[0]?.data.compactionId).toBe(result.compactionId);
     expect(ends[0]?.data.error).toBeUndefined();
     const summaries = ofType(events, "compaction/summary");
+    expect(summaries).toHaveLength(1);
     expect(summaries).toHaveLength(result.summarySeqs.length);
     for (const summary of summaries) {
       expect(summary.data.compactionId).toBe(result.compactionId);
@@ -143,7 +147,50 @@ describe("commitDagTransaction", () => {
     expect(depth).toBe(0);
   });
 
-  it("emits one compaction-checkpoint row carrying the committed seqs", async () => {
+  it("writes exactly one session log summary per bracket across two compactions", async () => {
+    const session = buildSession("repeat notes ".repeat(20));
+    const store = new LcmStore(":memory:");
+    const index = new MessageIndex();
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const { ctx } = setupContext(ROUTE, [
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+      textChunks(SUMMARY),
+    ]);
+    mountMeter(ctx);
+    const agent = fakeAgent(session, ROUTE);
+    const firstNodes = session.surface.nodes;
+    const first = await commitDagTransaction(
+      deps(ctx, store, index),
+      agent,
+      { start: firstNodes[1]!, end: firstNodes[2]! },
+      { owner: "current-turn", stability: "whole-surface" },
+    );
+    for (const event of session.snapshotEvents()) mirrorEvent(session, event, store, index);
+    const pre = [...session.surface.nodes];
+    const second = await commitDagTransaction(
+      deps(ctx, store, index),
+      agent,
+      { start: pre[1]!, end: pre[pre.length - 1]! },
+      { owner: "current-turn", stability: "whole-surface" },
+    );
+    const events = session.snapshotEvents();
+    const summaries = ofType(events, "compaction/summary");
+    expect(summaries).toHaveLength(2);
+    expect(new Set(summaries.map((summary) => summary.data.compactionId)).size).toBe(2);
+    expect(summaries.map((summary) => summary.seq)).toEqual([first.summarySeq, second.summarySeq]);
+    expect(first.summarySeqs).toHaveLength(1);
+    expect(second.summarySeqs).toHaveLength(1);
+    expect(first.leafSeqs).toHaveLength(0);
+    expect(second.leafSeqs).toHaveLength(0);
+  });
+
+  it("emits one compaction-checkpoint row carrying the committed seq plus sidecar ids", async () => {
     const session = buildSession("checkpoint notes ".repeat(20));
     const store = new LcmStore(":memory:");
     const index = new MessageIndex();
@@ -171,7 +218,14 @@ describe("commitDagTransaction", () => {
       session: "dag-commit-1",
       summarySeqs: [...result.summarySeqs],
       leafSeqs: [...result.leafSeqs],
+      leaf: result.leafSummaryIds.length,
+      condensed: result.condensedSummaryIds.length,
+      leafSummaryIds: [...result.leafSummaryIds],
+      condensedSummaryIds: [...result.condensedSummaryIds],
     });
+    expect(result.summarySeqs).toHaveLength(1);
+    expect(result.leafSeqs).toHaveLength(0);
+    expect(result.leafSummaryIds.length).toBeGreaterThan(0);
     expect(typeof checkpoints[0]?.ts).toBe("number");
   });
 

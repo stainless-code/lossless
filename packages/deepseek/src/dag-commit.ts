@@ -50,10 +50,13 @@ export interface DagCommitOptions {
 }
 
 /** Bracket result: the seam's CompactionResult fields plus the DAG node
- * records. The singular summary fields name the condensed metering record
- * (the event directly before the checkpoint); summarySeqs lists it first,
- * then one log-only record per stored leaf. The seam shape is kept so the
- * engine override and the /lcm command read this result unchanged. */
+ * records. The singular summary fields name the condensed record (the event
+ * directly before the checkpoint). The session log holds exactly one
+ * compaction/summary per bracket; leaves stay sidecar only. summarySeqs
+ * holds the single condensed seq, leafSeqs remains empty for the seam shape,
+ * and the sidecar leaf and condensed ids stay on the result for metrics. The
+ * seam shape is kept so the engine override and the /lcm command read this
+ * result unchanged. */
 export interface DagCommitResult {
   readonly compactionId: CompactionId;
   readonly sourceCommandId?: CommandId;
@@ -64,9 +67,14 @@ export interface DagCommitResult {
   readonly shadowedRange: { readonly start: SessionSeq; readonly end: SessionSeq };
   readonly shadowedSeqs: SessionSeq[];
   readonly shadowedTokenCount: number;
-  /** Condensed record first, then one log-only record per stored leaf. */
+  /** Single condensed seq; the only compaction/summary in the session log. */
   readonly summarySeqs: readonly SessionSeq[];
+  /** Always empty: leaves stay sidecar only, never session log records. */
   readonly leafSeqs: readonly SessionSeq[];
+  /** Sidecar ids stored by the ladder run, kept for metrics. */
+  readonly leafSummaryIds: readonly number[];
+  /** Sidecar ids stored by the ladder run, kept for metrics. */
+  readonly condensedSummaryIds: readonly number[];
 }
 
 /** Stability failure inside the bracket: the span moved under the ladder.
@@ -109,8 +117,8 @@ type DagStage = "summary" | "commit";
 
 /** One custom compaction transaction: the seam's bracket (lock check, open,
  * stability, shrink check, commit, close, failure taxonomy) with the
- * lossless ladder as the summarizer and one log-only summary record per
- * stored DAG node. Structure mirrors compactSurfaceRegion line for line
+ * lossless ladder as the summarizer and a single condensed summary record.
+ * Structure mirrors compactSurfaceRegion line for line
  * (dsh-compaction-basic@0.1.7-alpha.2 lib/index.js:449-521); the two
  * deliberate divergences are marked B1 below. */
 export async function commitDagTransaction(
@@ -214,9 +222,9 @@ export async function commitDagTransaction(
     );
   }
   if (result === undefined) throw new Error("compaction committed without a result");
-  // One row per bracket commit: a single compaction-checkpoint row carrying
-  // the condensed summary seqs plus the leaf seqs, so the checkpoint shape
-  // stays countable in the metrics log.
+  // One row per bracket commit: the condensed seq plus the sidecar leaf and
+  // condensed ids, so the checkpoint stays countable in the metrics log
+  // without leaf records in the session log.
   deps.record?.({
     ts: Date.now(),
     event: "lcm",
@@ -224,6 +232,10 @@ export async function commitDagTransaction(
     session: String(agent.session.id),
     summarySeqs: [...result.summarySeqs],
     leafSeqs: [...result.leafSeqs],
+    leaf: result.leafSummaryIds.length,
+    condensed: result.condensedSummaryIds.length,
+    leafSummaryIds: [...result.leafSummaryIds],
+    condensedSummaryIds: [...result.condensedSummaryIds],
   });
   return result;
 }
@@ -410,13 +422,12 @@ function prepareDagCommit(
 interface CondensedCommit {
   readonly checkpointMessage: ReturnType<typeof createUserMessage>;
   readonly condensedText: string;
-  readonly leafTexts: readonly string[];
   readonly condensedBlocks: ContentBlock[];
 }
 
-/** Frame the condensed checkpoint, resolve every stored leaf text, and run
- * the shrink check. Mirrors the framing half of summarizeCompaction
- * (lib/index.js:581-606). */
+/** Frame the condensed checkpoint and run the shrink check. Mirrors the
+ * framing half of summarizeCompaction (lib/index.js:581-606); leaves stay
+ * sidecar only, so no leaf record is read or written here. */
 function frameCondensed(
   deps: DagCommitDeps,
   prepared: DagPrepared,
@@ -428,12 +439,6 @@ function frameCondensed(
     ...ladder.leafSummaryIds,
     ...ladder.condensedSummaryIds,
   ]);
-  const store = deps.store(prepared.sessionId);
-  const leafTexts = ladder.leafSummaryIds.map((id) => {
-    const text = store?.getSummary(id)?.text;
-    if (text === undefined) throw new Error(`lossless dag commit: sidecar holds no summary #${id}`);
-    return text;
-  });
   const condensedBlocks: ContentBlock[] = [{ type: "text", text: condensedText }];
   const checkpointMessage = createUserMessage({
     content: [
@@ -449,16 +454,14 @@ function frameCondensed(
       `summary is not smaller than the shadowed content (${framedSummaryTokenCount} estimated framed tokens >= ${prepared.shadowedRouteTokenCount})`,
     );
   }
-  return { checkpointMessage, condensedText, leafTexts, condensedBlocks };
+  return { checkpointMessage, condensedText, condensedBlocks };
 }
 
-/** Append the condensed summary record, one log-only record per stored
- * leaf, and the replacement body without yielding. The leaf records come
- * first so the condensed metering event sits directly before the checkpoint,
- * preserving the seam's shadow-price adjacency contract
- * (lib/index.js:627-675 and the compaction/summary doc at types/types.d.ts).
- * The seam commits one summary record; the bracket commits the stored
- * leaves alongside it. */
+/** Append the single condensed summary record and the replacement body
+ * without yielding, preserving the seam's shadow-price adjacency contract
+ * (lib/index.js:627-675; compaction/summary doc at types/types.d.ts).
+ * Leaves stay sidecar only: the condensed text cites their ids, so a
+ * harness reload sees exactly one summary per bracket. */
 function commitDagBody(
   session: Session,
   startEvent: StartEvent,
@@ -471,18 +474,6 @@ function commitDagBody(
     startEvent.data.sourceCommandId === undefined
       ? {}
       : { sourceCommandId: startEvent.data.sourceCommandId };
-  const leafEvents = condensed.leafTexts.map((text) =>
-    session.append("compaction/summary", {
-      compactionId,
-      ...sourceCommandId,
-      summary: [{ type: "text", text }],
-      shadowedRange: { start: prepared.start, end: prepared.end },
-      shadowedSeqs: [...prepared.shadowedSeqs],
-      shadowedTokenCount: prepared.shadowedTokenCount,
-      provider: ladder.provider,
-      model: ladder.model,
-    }),
-  );
   const summaryEvent = session.append("compaction/summary", {
     compactionId,
     ...sourceCommandId,
@@ -497,14 +488,8 @@ function commitDagBody(
   });
   session.append("user/message", condensed.checkpointMessage, {
     surfaceOp: { op: "replace", startSeq: prepared.start, endSeq: prepared.end },
-    sourceEventSeqs: [
-      startEvent.seq,
-      summaryEvent.seq,
-      ...leafEvents.map((event) => event.seq),
-      ...prepared.shadowedSeqs,
-    ],
+    sourceEventSeqs: [startEvent.seq, summaryEvent.seq, ...prepared.shadowedSeqs],
   });
-  const leafSeqs = leafEvents.map((event) => event.seq);
   return {
     compactionId,
     ...sourceCommandId,
@@ -514,8 +499,10 @@ function commitDagBody(
     shadowedRange: { start: prepared.start, end: prepared.end },
     shadowedSeqs: [...prepared.shadowedSeqs],
     shadowedTokenCount: prepared.shadowedTokenCount,
-    summarySeqs: [summaryEvent.seq, ...leafSeqs],
-    leafSeqs,
+    summarySeqs: [summaryEvent.seq],
+    leafSeqs: [],
+    leafSummaryIds: [...ladder.leafSummaryIds],
+    condensedSummaryIds: [...ladder.condensedSummaryIds],
   };
 }
 
