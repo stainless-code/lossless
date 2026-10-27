@@ -1,5 +1,17 @@
 # opencode-lossless
 
+## 0.1.3
+
+### Patch Changes
+
+- 9c0fdc5: Harden `lossless-gc` against deleting sidecars that are live in another process. Sweeps skip stores active within the last 60 minutes and name them. Bare `--older-than 0` without `--session` is refused. `--session` on a store active within 60 minutes needs `--force`. Candidates younger than 24 hours carry a warning.
+- 470a7b7: Verify file bytes and sha256 against the linked message text before inserting file rows on import. A repeated entry id with different text, or a file row whose text differs from the stored message, also refuses the import without writing. Existing rows stay untouched.
+- 470a7b7: Add a mechanical tier for noisy tools. Name tools in `mechanicalTools` in summarizer-config, `/lcm` config, or the OpenCode plugin options. Their spans compact into deterministic `mechanical` leaves with zero summarizer spend at compaction time. Every message stays stored verbatim and covered, so the integrity coverage check passes, and heal re-derives a skipped leaf from provenance on demand. There is no ingest filtering.
+- 9c0fdc5: Change the default `sidecarDir` to the auto-detected global path. The plugin uses `XDG_DATA_HOME` with a `~/.local/share` fallback, uses `LOCALAPPDATA` with an `APPDATA` fallback and then a `<home>/AppData/Local` fallback on Windows, and uses `./.lossless` when no home resolves. To keep per-project storage, set `"sidecarDir": "./.lossless"`. After upgrading a project that used `./.lossless`, keep that setting to keep its history: `/lossless-migrate` upgrades in place in the configured directory only (dry run by default) and moves nothing, so it cannot recover history left in `./.lossless`. To carry history across, export per session under the old config and import into an empty store under the new one, or stop the server first and copy the `.sqlite`, `-wal`, and `-shm` files across and then migrate. The plugin never moves sidecars.
+- 470a7b7: Report orphan sidecars in doctor. `integritySnapshot` now lists sidecar files and stale `wal` and `shm` files with no live session (`.sqlite` by default, `.db` for Pi). `checkIntegrity` reports them as a read-only `orphan-sidecar` finding through `lcm doctor` and the diagnose bundle. Report only. Deletion stays manual.
+- 470a7b7: Upgrade recall search. `lcm_grep` takes `role`, `date_start`/`date_end`, and `tool_name` filters. Role and time are SQL predicates on the stored columns with a covering index. Tool scope is an FTS rewrite against `[tool:Name]` markers with no new table or index. `lcm_expand` takes an `anchor` entry id that centers the listing window with edge clamping. The recall manifest and the retrieval brief order by stop-word stripped query-word overlap over summary headers. A read-only files view lists each linked file once with an incomplete-coverage flag and a `large-inline` mark. No migration and no new writer.
+- 470a7b7: Add a read-only static sidecar dump. `/lcm dump` and `/lossless-dump` open the session sidecar `queryOnly` and reuse the recall views and metric rows. The dump redacts displayed seams, labels removed rows, and reports old generations as named skips. Output is capped at 16 KB.
+
 ## 0.1.2
 
 ### Patch Changes
