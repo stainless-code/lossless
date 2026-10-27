@@ -1,9 +1,10 @@
 /** Shared token and window math every harness adapter uses. The estimator
  * counts four characters per token, the overflow parser reads the window a
  * provider named, and the lookup and key helpers name a model the same way
- * in config zones and metric rows. Pi already reads the estimator and the
- * parser from the core entry; OpenCode reads the lookup and the key from
- * here through its thin wrappers, so the two adapters cannot drift. */
+ * in config zones and metric rows. Pi reads the estimator and the parser
+ * from the core entry; OpenCode and DeepSeek read the lookup, the key, and
+ * the range selector through their thin wrappers, so the adapters cannot
+ * drift from the contract stated here. */
 
 /** Token math shared with adapters: `tokensFromChars` counts chars at four per token, `scaledBudget` calibrates a budget. */
 export { scaledBudget, tokensFromChars } from "../estimate-tokens.ts";
@@ -112,6 +113,51 @@ export function createWindowLookup<M extends WindowModel = WindowModel>(
     const window = info?.limit.context;
     return typeof window === "number" && Number.isFinite(window) && window > 0 ? window : fallback;
   };
+}
+
+/** One priced surface position the range selector reads. */
+export interface CompactableNode<S> {
+  readonly seq: S;
+  readonly tokens: number;
+}
+
+/** Inclusive seq range to compact. */
+export interface CompactableRange<S> {
+  readonly start: S;
+  readonly end: S;
+}
+
+/** The next range starting at `firstIdx` while retaining a priced recent tail
+ * and never splitting a tool-call/result pair. Adapters keep host-side
+ * checks beside their session; the accumulation, the admission, and the
+ * boundary walk live here. Null means no safe useful range exists: no nodes,
+ * the retained tail already reaches the head, or no balanced boundary is
+ * left. */
+export function selectCompactableRange<S>(
+  nodes: readonly CompactableNode<S>[],
+  firstIdx: number,
+  retainTokens: number,
+  isBalanced: (seq: S) => boolean,
+): CompactableRange<S> | null {
+  if (nodes.length === 0) return null;
+  let accumulated = 0;
+  let keepFromIdx = nodes.length;
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    accumulated += nodes[index]?.tokens ?? 0;
+    keepFromIdx = index;
+    if (accumulated >= retainTokens) break;
+  }
+  if (keepFromIdx <= firstIdx) return null;
+  while (keepFromIdx > firstIdx) {
+    const seq = nodes[keepFromIdx]?.seq;
+    if (seq !== undefined && isBalanced(seq)) break;
+    keepFromIdx -= 1;
+  }
+  if (keepFromIdx <= firstIdx) return null;
+  const start = nodes[firstIdx]?.seq;
+  const end = nodes[keepFromIdx - 1]?.seq;
+  if (start === undefined || end === undefined) return null;
+  return { start, end };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

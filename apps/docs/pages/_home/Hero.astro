@@ -23,7 +23,8 @@ const hosts = [
     id: "deepseek",
     label: "DeepSeek",
     icon: "/logos/deepseek.svg",
-    next: true,
+    command: "dsh plugin --profile headless add deepseek-lossless",
+    start: "/guides/deepseek/getting-started",
   },
 ];
 
@@ -64,29 +65,21 @@ const idleChip = "border-border font-medium text-muted-foreground hover:text-for
               aria-pressed={host.id === "pi" ? "true" : "false"}
               class:list={[
                 "inline-flex h-7 items-center gap-1.5 rounded-full border px-3 text-xs transition-colors",
-                host.next
-                  ? "border-border font-medium text-[var(--landing-faint)]"
-                  : host.id === "pi"
-                    ? selectedChip
-                    : idleChip,
+                host.id === "pi" ? selectedChip : idleChip,
               ]}
               data-command={host.command}
               data-host-switch={host.id}
-              data-start-href={host.start ? contentHref(host.start) : undefined}
-              disabled={host.next}
+              data-start-href={contentHref(host.start)}
               type="button"
             >
               <Icon name={host.icon} size={13} />
               <span>{host.label}</span>
-              {host.next && (
-                <span class="font-mono text-[9px] tracking-[0.08em]">NEXT</span>
-              )}
             </button>
           ))
         }
       </div>
 
-      <div aria-live="polite">
+      <div aria-live="polite" class="flex w-full max-w-full justify-center">
         <CopyCommand command="pi install npm:pi-lossless" hostCommand />
       </div>
     </div>

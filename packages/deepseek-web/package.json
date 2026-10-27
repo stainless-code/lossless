@@ -1,0 +1,52 @@
+{
+  "name": "deepseek-lossless-web",
+  "version": "0.1.0",
+  "description": "Lossless presets for the DeepSeek web surface: Lossless variants of every shipped agent preset whose compaction backend runs the shared lossless core.",
+  "keywords": [
+    "coding-agent",
+    "context",
+    "deepseek",
+    "dsh-plugin",
+    "lcm",
+    "memory"
+  ],
+  "homepage": "https://github.com/stainless-code/lossless#readme",
+  "bugs": {
+    "url": "https://github.com/stainless-code/lossless/issues"
+  },
+  "license": "MIT",
+  "author": "stainless-code",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stainless-code/lossless.git",
+    "directory": "packages/deepseek-web"
+  },
+  "files": [
+    "cordis.presets.patch.yml",
+    "CHANGELOG.md",
+    "icon.svg",
+    "locale/*.json",
+    "docs/DETAIL.md"
+  ],
+  "type": "module",
+  "exports": {
+    "./package.json": "./package.json",
+    "./cordis.presets.patch.yml": "./cordis.presets.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "scripts": {
+    "prepublishOnly": "vp check"
+  },
+  "peerDependencies": {
+    "deepseek-lossless": "^0.1.0"
+  },
+  "icon": "./icon.svg",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.presets.patch.yml"
+    }
+  }
+}

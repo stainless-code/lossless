@@ -4,8 +4,9 @@ Forward-looking work only. What the current release does is in the
 [README](../README.md) and on the
 [docs site](https://stainless-code.com/lossless/); behavior lives in the code,
 and the peer comparisons with their verified cells are in
-[`pi/comparison.mdx`](../apps/docs/content/reference/pi/comparison.mdx) for Pi and
-[`opencode/comparison.mdx`](../apps/docs/content/reference/opencode/comparison.mdx) for OpenCode v2. Each item below names the evidence
+[`pi/comparison.mdx`](../apps/docs/content/reference/pi/comparison.mdx) for Pi,
+[`opencode/comparison.mdx`](../apps/docs/content/reference/opencode/comparison.mdx) for OpenCode v2, and
+[`deepseek/comparison.mdx`](../apps/docs/content/reference/deepseek/comparison.mdx) for DeepSeek. Each item below names the evidence
 that would close it and what it costs. Nothing here is built before it has a
 measurement or a defect behind it.
 
@@ -127,12 +128,13 @@ Where this implementation departs from the paper, and what it does not claim:
 10. **A third consumer: DeepSeek.** OpenCode v2 shipped on its own adapter
     (`packages/opencode`); the live gate and the two host limits (a child-session
     reader, estimated summarizer usage) are recorded in that package's README.
-    The next consumer is the DeepSeek harness. It stays on the spike branch
-    until it is proven live and extracted on its own branch; the open questions
-    are its plugin surface, its reader substitute, and whether its summarizer
-    reports usage. The comparison has an audited page for each shipping adapter,
-    [Pi](../apps/docs/content/reference/pi/comparison.mdx) and
-    [OpenCode v2](../apps/docs/content/reference/opencode/comparison.mdx).
+    The DeepSeek harness adapter lives on `feat/deepseek` with live proof
+    recorded in `docs/deepseek-plan.md`; the remaining step is the merge
+    decision. The open questions are its plugin surface, its reader substitute,
+    and whether its summarizer reports usage. The comparison has an audited page
+    for each adapter, [Pi](../apps/docs/content/reference/pi/comparison.mdx),
+    [OpenCode v2](../apps/docs/content/reference/opencode/comparison.mdx), and
+    [DeepSeek](../apps/docs/content/reference/deepseek/comparison.mdx).
 11. **The gallery asset.** A `video` (mp4, hover-autoplay) or
     `image` field per the Pi packages documentation: a long session, context
     filling, the swap notification, then `lcm_expand_query` recovering verbatim
@@ -183,18 +185,47 @@ Each of these was verified in peer source and is worth doing only with a reason.
   today: every writer of provider text uses `error`, which is on the list. The
   item becomes live the first time a metrics writer puts foreign text under a new
   key.
+- **Four grafts from the DeepSeek harness, none touching the DAG.** Cache-aligned
+  ladder inputs (ordered span replay, instruction trailing, so calls ride the
+  provider prefix cache); structured rung prompts (sectioned shape with verbatim
+  quoting rules inside the existing thorough/terse levels); untrusted framing
+  for past-history answers (labelled, immutable, never instructions); provider
+  usage reuse in estimation (believe reported usage over chars-per-token math,
+  worked under item 5). Each passes the three-property test: verbatim originals
+  stay reachable, child pointers never break, the model sees less. The merge
+  half of structured prompts carries one hard constraint: merging prose must
+  never drop child pointers. Deliberately not grafted: surface pruning (rewrites
+  live history this package promises verbatim; externalization already covers
+  the need) and goals/objectives (a second product, not a better memory).
+- **Arena verdict on the grafts (three-lens viability pass, order 4, 3, 2, 1).**
+  Usage reuse first: it denominates every later spend claim in believed tokens,
+  through calibration gates only, never synthesized, stale-report guard stays.
+  Untrusted framing second: past-session answers only (same-session use would
+  train the model to ignore it), one or two sentences mirroring proven wording,
+  cosmetic until a live misread. Structured prompts third: section wording under
+  fidelity and oversize gates, merge as text concatenation with id-set equality
+  green, deterministic prepend stays the default. Cache inputs last, with a
+  correction to the entry above: deterministic ordering ships as hygiene, but
+  cache-riding claims need a message-replay prototype plus measured cacheRead
+  share plus a live key, because the single-message `complete()` envelope cannot
+  express prefix reuse. Kill gates: cacheRead share under 10 pct, oversize rate
+  up over 5 points, any orphan-child or fidelity regression, calibration null
+  rate above baseline.
 
 ## Names
 
-**All three packages are unscoped.** `pi-lossless` is the Pi adapter,
-`opencode-lossless` is the OpenCode v2 adapter, and `lossless-core`
+**All five workspace packages are unscoped.** `pi-lossless` is the Pi adapter,
+`opencode-lossless` is the OpenCode v2 adapter, `deepseek-lossless` is the
+unshipped DeepSeek adapter with its `deepseek-lossless-web` preset companion,
+and `lossless-core`
 is the engine. A `@stainless-code/` scope arrives only on a real collision, and
-then it arrives once, for every package at the same time. `pi-lossless` 0.1.0 and `lossless-core` 0.1.0 are
-published; `opencode-lossless` is pending its first release. The unscoped `lossless` on npm is an unrelated published
+then it arrives once, for every package at the same time. `pi-lossless` 0.1.2, `lossless-core` 0.1.2, and
+`opencode-lossless` 0.1.2 are published; `deepseek-lossless` 0.1.0 and
+`deepseek-lossless-web` 0.1.0 are unshipped. The unscoped `lossless` on npm is an unrelated published
 package, which is what the harness prefix is for; and the docs app is already
 scoped and private (`@stainless-code/lossless-docs`), so scoping stays a
 decision available rather than one made by accident. What would force the scope
-is a squat on any of the four names, or a cost that
+is a squat on any of the five names, or a cost that
 the engine's adjacency to the unrelated `lossless` package inflicts on a consumer
 of the published engine.
 

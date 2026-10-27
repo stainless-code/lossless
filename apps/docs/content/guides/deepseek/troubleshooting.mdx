@@ -1,0 +1,18 @@
+---
+title: "Troubleshooting for DeepSeek"
+description: "DeepSeek: what to run when compactions do not happen, when the backend stays inert, and how to file a useful report."
+search:
+  tags: ["guide", "troubleshooting"]
+related:
+  - /reference/deepseek/files
+  - /concepts/limits
+  - /reference/deepseek/command
+sidebar:
+  label: "Troubleshooting"
+---
+
+Start with `/lcm status`. It reports per-session message and summary counts, the meter window, the resolved swap and re-cut thresholds with a `(clamped)` marker when the clamp pulled a line back, and the last pass outcome. When compactions do not happen, check three things in order: the bundle is installed and its row is enabled (it ships enabled; the Plugins page shows otherwise), the base `compaction-basic` row is disabled in the same composition, and the profile was restarted after any hand edit. On a preset-bearing profile, also confirm the session uses a Lossless preset: the host switch alone does not reach preset sessions, which keep the shipped backend. With the row disabled the bundle mounts no `/lcm` surface at all, so a missing `/lcm` command means the bundle is still inert; the harness `/compact` path follows whichever compaction service the profile mounts. If you run a third-party compaction backend of your own, ours conflicts with it at boot: disable the `deepseek-lossless` row and keep yours.
+
+When the window gauge disagrees with the harness, compare the thresholds section of `/lcm status` against the routed model window. `thresholdRatio`, `retainRatio`, and `headroomTokens` ride the seam, and the clamp pulls an unusable line back with a `(clamped)` marker.
+
+To file a useful report, run `/lcm diagnose --save <file>`. It builds a redacted bundle without secrets. Include the profile name, the thresholds section from `/lcm status`, and the files list from the [files reference](/reference/deepseek/files). Limits live under [limits](/concepts/limits): what LCM does not do.

@@ -1,4 +1,5 @@
 ---
+"deepseek-lossless": patch
 "lossless-core": patch
 "pi-lossless": patch
 "opencode-lossless": patch

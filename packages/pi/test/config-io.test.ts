@@ -147,6 +147,7 @@ test("config-io: pass conditions default to what the pass reads", () => {
     leafChunkTokens: 3000,
     maxAsyncChunks: 24,
     redactSecrets: true,
+    mechanicalTools: "[]",
   });
 });
 
@@ -178,6 +179,7 @@ test("config-io: every pass condition is compared, and only those", () => {
     leafChunkTokens: 2000,
     maxAsyncChunks: 6,
     redactSecrets: false,
+    mechanicalTools: ["noisy-read"],
   });
   assert.deepEqual(changedPassConditions(passConditions({}), moved), [
     "summarizer",
@@ -185,6 +187,7 @@ test("config-io: every pass condition is compared, and only those", () => {
     "leafChunkTokens",
     "maxAsyncChunks",
     "redactSecrets",
+    "mechanicalTools",
   ]);
   assert.deepEqual(
     passConditions({ swapAtRatio: 0.95, keepRecentTokens: 1000, assemblyEnabled: false }),
@@ -210,6 +213,7 @@ test("config-io: each setting can make a pass stale, and the row can name it", (
     ["leafChunkTokens", { leafChunkTokens: 2000 }],
     ["maxAsyncChunks", { maxAsyncChunks: 6 }],
     ["redactSecrets", { redactSecrets: false }],
+    ["mechanicalTools", { mechanicalTools: ["noisy-read"] }],
   ];
   for (const [key, config] of moved) {
     assert.deepEqual(staleReason(identity("one/model", {}), identity("one/model", config)), {

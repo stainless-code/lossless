@@ -66,6 +66,7 @@ export interface PassConditions {
   leafChunkTokens: number;
   maxAsyncChunks: number;
   redactSecrets: boolean;
+  mechanicalTools: string;
 }
 
 const PASS_CONDITION_KEYS = [
@@ -74,6 +75,7 @@ const PASS_CONDITION_KEYS = [
   "leafChunkTokens",
   "maxAsyncChunks",
   "redactSecrets",
+  "mechanicalTools",
 ] as const satisfies readonly (keyof PassConditions)[];
 
 export function passConditions(config: LcmConfig): PassConditions {
@@ -83,6 +85,7 @@ export function passConditions(config: LcmConfig): PassConditions {
     leafChunkTokens: config.leafChunkTokens ?? 3000,
     maxAsyncChunks: config.maxAsyncChunks ?? 24,
     redactSecrets: config.redactSecrets !== false,
+    mechanicalTools: JSON.stringify(config.mechanicalTools ?? []),
   };
 }
 

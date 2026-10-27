@@ -1,0 +1,120 @@
+```text
+/lcm status
+/lcm report
+/lcm dump [query] [--include-removed] [--save <file>]
+/lcm backup [file]
+/lcm export [file]
+/lcm import <file>
+/lcm gc [--apply] [--session <id>] [--older-than <days>]
+/lcm migrate [--apply]
+/lcm heal [--apply] [--max-nodes N]
+/lcm diagnose [--save <file>]
+/lcm compact
+```
+
+Eleven verbs on one `/lcm` command.
+
+## Settings
+
+There is no settings panel. Edit the capability `config` in the composition and restart it. [Config](/reference/deepseek/config) lists every key.
+
+## status
+
+```text
+/lcm status
+```
+
+Message and compaction-summary counts for the live sidecars, plus the meter window with thresholds and the last pass outcome for this session.
+
+## report
+
+```text
+/lcm report
+```
+
+Pass, checkpoint, backfill, recall, and retrieval rows for this session. With no rows, it reports that the session has none.
+
+## dump
+
+```text
+/lcm dump [query]
+/lcm dump [query] --include-removed
+/lcm dump --save <file>      # or --save=<file>
+```
+
+Read-only sidecar dump: store facts, history, summaries, message samples, and this session's metrics, redacted. Free-text args sample one FTS5 query; `--include-removed` keeps removed rows; `--save` writes the dump at mode 0600 instead of printing it.
+
+## backup
+
+```text
+/lcm backup [file]
+```
+
+Copies this session's sidecar to `<sidecar>.backup-<timestamp>`, or to a named path, at mode 0600.
+
+## export
+
+```text
+/lcm export [file]
+```
+
+Writes the verbatim transcript and summaries as JSONL at mode 0600. The default lands beside the sidecars.
+
+## import
+
+```text
+/lcm import <file>
+```
+
+Restores rows from a file written by `/lcm export`. Re-importing the same file inserts nothing and reports the skips. Refused without a file argument, or into a store that already holds foreign messages.
+
+## gc
+
+```text
+/lcm gc                  # dry-run list
+/lcm gc --apply          # export each transcript, then delete
+/lcm gc --session <id>   # narrow to one sidecar
+```
+
+Collects sidecars older than 30 days that no live session holds (`--older-than` sets the window). It never touches a live session's sidecar and exports each transcript before deleting it. A no-op apply writes no export file.
+
+## migrate
+
+```text
+/lcm migrate             # dry-run list of older-schema sidecars
+/lcm migrate --apply     # upgrade them in place
+```
+
+Generation-gated: sidecars older than the current schema version are listed, then upgraded in place. Sidecars of live sessions are excluded.
+
+## heal
+
+```text
+/lcm heal                  # dry-run: count the tainted nodes and their ancestors
+/lcm heal --apply          # re-summarize them from their stored source
+/lcm heal --apply --max-nodes 8
+```
+
+A non-clean summary is a candidate. Heal reads the exact source rows that node points at, re-summarizes the tainted node, then recomputes every ancestor whose child changed. `--max-nodes` bounds one run; `summarizerTokensPerHeal` bounds its spend. The dry run makes no provider call. Refused while a compaction pass is in flight, or while a repair already runs for the session.
+
+## diagnose
+
+```text
+/lcm diagnose
+/lcm diagnose --save <path>      # or --save=<path>
+```
+
+One redacted, pasteable block: versions, store facts, the effective options, and this session's metrics. `--save` writes the exact bytes at mode 0600 instead of printing them.
+
+## compact
+
+```text
+/lcm compact
+```
+
+Runs one manual compaction immediately. Returns null with "No compactable history yet" when no safe useful range exists. Automatic pressure stays on the harness seam unless `bracketAuto` is set.
+
+## Related
+
+- [Config](/reference/deepseek/config): the keys and thresholds behind these verbs.
+- [Files](/reference/deepseek/files): where backup, export, and gc write.
