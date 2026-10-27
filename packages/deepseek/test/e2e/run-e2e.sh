@@ -6,7 +6,8 @@
 # base + headless overlay), and probe 3 (lossless bundle pong + sidecar
 # list). Each dsh call is guarded with `timeout 60`. Takes no arguments,
 # exits nonzero on the first failure, and prints EXIT codes plus sidecar
-# paths. Probes run with CWD=/tmp so sidecars land in /tmp/.lossless.
+# paths. Probes export DSH_HOME=/tmp/e2e-dsh so sidecars land in
+# /tmp/e2e-dsh/lossless.
 #
 # Usage: ./packages/deepseek/test/e2e/run-e2e.sh
 set -uo pipefail
@@ -14,6 +15,8 @@ set -uo pipefail
 E2E_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OVERLAYS_DIR="$E2E_DIR/overlays"
 OUT_DIR="/tmp"
+export DSH_HOME="/tmp/e2e-dsh"
+SIDECAR_DIR="$DSH_HOME/lossless"
 TASK="reply with exactly: pong"
 
 export DSH_PERMISSION_MODE=danger-full-access
@@ -23,6 +26,7 @@ if ! command -v dsh >/dev/null 2>&1; then
   exit 1
 fi
 
+mkdir -p "$SIDECAR_DIR" || exit 1
 cd "$OUT_DIR" || exit 1
 
 check_pong() {
@@ -57,12 +61,12 @@ echo "probe3 EXIT=$rc"
 [ "$rc" -eq 0 ] || { echo "probe3: FAIL: dsh exited $rc" >&2; exit 1; }
 check_pong "probe3" "$OUT_DIR/e2e-lossless.json"
 
-echo "--- sidecars in /tmp/.lossless ---"
+echo "--- sidecars in $SIDECAR_DIR ---"
 shopt -s nullglob
-sidecars=(/tmp/.lossless/*.sqlite)
+sidecars=("$SIDECAR_DIR"/*.sqlite)
 shopt -u nullglob
 if [ "${#sidecars[@]}" -eq 0 ]; then
-  echo "probe3: FAIL: no sidecar sqlite files in /tmp/.lossless" >&2
+  echo "probe3: FAIL: no sidecar sqlite files in $SIDECAR_DIR" >&2
   exit 1
 fi
 printf '%s\n' "${sidecars[@]}"

@@ -182,6 +182,42 @@ describe("applyLossless", () => {
     dispose();
   });
 
+  it("reports the sidecar dir through the logger, never stdout", async () => {
+    const { ctx } = setupContext(ROUTE, [], { contextWindow: 1_000_000 });
+    await mountBase(ctx);
+    const dir = tempDir();
+    const logged: unknown[][] = [];
+    const originalInfo = ctx.logger.info;
+    ctx.logger.info = (format: any, ...rest: any[]) => {
+      logged.push([format, ...rest]);
+    };
+    const logs: unknown[][] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      logs.push(args);
+    };
+    const written: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: unknown) => {
+      written.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      const dispose = applyLossless(ctx, { enabled: true, sidecarDir: dir });
+      try {
+        expect(logs.length).toBe(0);
+        expect(written.some((chunk) => chunk.includes("LCM sidecar dir"))).toBe(false);
+        expect(logged.some((args) => args[0] === `LCM sidecar dir: ${dir} (explicit)`)).toBe(true);
+      } finally {
+        dispose();
+      }
+    } finally {
+      console.log = originalLog;
+      process.stdout.write = originalWrite;
+      ctx.logger.info = originalInfo;
+    }
+  });
+
   it("mounts the engine, the tools, and the live mirror", async () => {
     const { ctx } = setupContext(ROUTE, [textChunks(SUMMARY)], { contextWindow: 1_000_000 });
     await mountBase(ctx);

@@ -117,7 +117,9 @@ patch) and rerun the probe.
 
 `run-e2e.sh` executes probes 1 to 3 in order with `timeout 60` guards,
 asserts the pong final event in each output file, and lists the sidecar
-files. It takes no arguments and stops nonzero on the first failure:
+files. It exports `DSH_HOME=/tmp/e2e-dsh` so sidecars land in
+`/tmp/e2e-dsh/lossless`, matching the scratch dir above. It takes no
+arguments and stops nonzero on the first failure:
 
 ```sh
 ./packages/deepseek/test/e2e/run-e2e.sh

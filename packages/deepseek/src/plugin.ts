@@ -215,7 +215,7 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
   if (config.enabled !== true) return () => undefined;
   const sidecar = readSidecarDir(config.sidecarDir);
   const dir = sidecar.dir;
-  logSidecarDir(sidecar.dir, sidecar.source);
+  logSidecarDir(sidecar.dir, sidecar.source, (message) => ctx.logger.info(message));
   const core = acquireCore(dir, true);
   const { sidecars, record } = core;
   const stopMirror = ctx.on("session/event", (live, event) => {
@@ -321,8 +321,8 @@ export function readSidecarDir(raw: unknown): { dir: string; source: string } {
   return { dir: resolved.dir, source: resolved.source };
 }
 
-function logSidecarDir(dir: string, source: string): void {
+function logSidecarDir(dir: string, source: string, info: (message: string) => void): void {
   try {
-    console.log(`LCM sidecar dir: ${dir} (${source})`);
+    info(`LCM sidecar dir: ${dir} (${source})`);
   } catch {}
 }
