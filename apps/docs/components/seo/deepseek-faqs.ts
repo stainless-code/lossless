@@ -6,7 +6,7 @@ export const DEEPSEEK_FAQS: readonly LcmFaq[] = [
   {
     question: "Does it modify my DeepSeek session record?",
     answer:
-      "No. The harness session record stays the source of truth; the adapter mirrors into a per-session SQLite sidecar under the configured `sidecarDir` (default `./.lossless`). Deleting a sidecar does not edit the session, but it does forget that session's recall.",
+      "No. The harness session record stays the source of truth; the adapter mirrors into a per-session SQLite sidecar under the configured `sidecarDir` (default `$DSH_HOME/lossless`, else `~/.dsh/lossless`, else `./.lossless`). Deleting a sidecar does not edit the session, but it does forget that session's recall.",
   },
   SHARED_FAQS.lossy,
   {
@@ -17,7 +17,7 @@ export const DEEPSEEK_FAQS: readonly LcmFaq[] = [
   {
     question: "Where does the data live?",
     answer:
-      "One SQLite sidecar per session under `sidecarDir` (default `./.lossless`). The directory is 0700; the database, WAL, and shared-memory files are 0600. Metrics sit beside the stores. Nothing leaves the machine except the provider calls the summarizer and reader make.",
+      "One SQLite sidecar per session under `sidecarDir` (default `$DSH_HOME/lossless`, else `~/.dsh/lossless`, else `./.lossless`). The directory is 0700; the database, WAL, and shared-memory files are 0600. Metrics sit beside the stores. Nothing leaves the machine except the provider calls the summarizer and reader make.",
   },
   {
     question: "Does it replace DeepSeek compaction?",

@@ -43,7 +43,7 @@ row the same way.
 All options ride the plugin config. The Plugins page validates them against the bundled schema. Common keys:
 
 - `auto`: automatic pressure compaction inside the turn.
-- `sidecarDir`: one SQLite file per session. Defaults to `./.lossless`.
+- `sidecarDir`: one SQLite file per session. Defaults to `$DSH_HOME/lossless` when `DSH_HOME` names an absolute path, else `~/.dsh/lossless`, else `./.lossless`.
 - `summaryTokens`, `leafChunkTokens`: summary budgets.
 - `mechanicalTools`: tool names whose spans compact without a model call.
 

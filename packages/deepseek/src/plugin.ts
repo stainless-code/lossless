@@ -4,6 +4,7 @@ import z from "@deepseek-ai/schemastery";
 import { redactSecrets } from "lossless-core";
 
 import { registerLcmCommand } from "./command.ts";
+import { defaultSidecarDir } from "./default-sidecar-dir.ts";
 import { LosslessSummarizerEngine } from "./engine.ts";
 import { backfillSession, historySourceFrom, mirrorEvent } from "./ingest.ts";
 import { healInFlightSessions } from "./lifecycle.ts";
@@ -22,7 +23,7 @@ export interface LosslessPluginConfig {
    * @default false */
   readonly bracketAuto?: boolean;
   /** Directory for one sidecar file per session. Created when missing.
-   * @default "./.lossless" */
+   * @default global sidecar dir, "./.lossless" only as fallback */
   readonly sidecarDir?: string;
   /** Tokens one summary aims for. Rides the engine deps, not the seam.
    * @default 1500 */
@@ -78,7 +79,6 @@ export interface LosslessPluginConfig {
 }
 
 import {
-  DEFAULT_SIDECAR_DIR,
   acquireCore,
   isCoreHeld,
   readMechanicalTools,
@@ -122,7 +122,7 @@ export const Config = z.object({
   enabled: z.boolean().default(false),
   auto: z.boolean().default(false),
   bracketAuto: z.boolean().default(false),
-  sidecarDir: z.string().default(DEFAULT_SIDECAR_DIR),
+  sidecarDir: z.string(),
   summaryTokens: z.number().step(1).min(1).default(1500),
   leafChunkTokens: z.number().step(1).min(1).default(3000),
   summarizationProvider: z.string(),
@@ -213,7 +213,9 @@ export function buildEngineArgs(
  * ``` */
 export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): () => void {
   if (config.enabled !== true) return () => undefined;
-  const dir = config.sidecarDir ?? DEFAULT_SIDECAR_DIR;
+  const sidecar = readSidecarDir(config.sidecarDir);
+  const dir = sidecar.dir;
+  logSidecarDir(sidecar.dir, sidecar.source);
   const core = acquireCore(dir, true);
   const { sidecars, record } = core;
   const stopMirror = ctx.on("session/event", (live, event) => {
@@ -307,4 +309,20 @@ export function applyLossless(ctx: Context, config: LosslessPluginConfig = {}): 
     // but only when no replacement has taken the directory since.
     if (!isCoreHeld(core)) closeIdle();
   };
+}
+
+/** Resolve the sidecar dir an explicit option wins, else the global default.
+ * Exported so the preset row shares the host fallback without the log line. */
+export function readSidecarDir(raw: unknown): { dir: string; source: string } {
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    return { dir: raw, source: "explicit" };
+  }
+  const resolved = defaultSidecarDir();
+  return { dir: resolved.dir, source: resolved.source };
+}
+
+function logSidecarDir(dir: string, source: string): void {
+  try {
+    console.log(`LCM sidecar dir: ${dir} (${source})`);
+  } catch {}
 }

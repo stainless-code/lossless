@@ -43,26 +43,26 @@ const stop = applyLossless(ctx, { enabled: true });
 
 ## Config
 
-| Key                       | Default                                        |
-| ------------------------- | ---------------------------------------------- |
-| `enabled`                 | unset (stays off)                              |
-| `auto`                    | `false`                                        |
-| `bracketAuto`             | `false`                                        |
-| `sidecarDir`              | `./.lossless`                                  |
-| `summaryTokens`           | `1500`                                         |
-| `leafChunkTokens`         | `3000`                                         |
-| `summarizationProvider`   | routed model                                   |
-| `summarizationModel`      | routed model                                   |
-| `thresholdRatio`          | `0.8`                                          |
-| `retainTokens`            | unset                                          |
-| `retainRatio`             | `0.16`                                         |
-| `headroomTokens`          | `65536`                                        |
-| `modelPolicies`           | unset                                          |
-| `summarizerTokensPerCall` | `60000`                                        |
-| `summarizerTokensPerPass` | `250000`                                       |
-| `summarizerTokensPerHeal` | `120000`                                       |
-| `healSourceTokens`        | `8` x `summaryTokens`, clamped `3000`..`24000` |
-| `mechanicalTools`         | `[]` (empty keeps the LLM path)                |
+| Key                       | Default                                                          |
+| ------------------------- | ---------------------------------------------------------------- |
+| `enabled`                 | unset (stays off)                                                |
+| `auto`                    | `false`                                                          |
+| `bracketAuto`             | `false`                                                          |
+| `sidecarDir`              | `$DSH_HOME/lossless`, else `~/.dsh/lossless`, else `./.lossless` |
+| `summaryTokens`           | `1500`                                                           |
+| `leafChunkTokens`         | `3000`                                                           |
+| `summarizationProvider`   | routed model                                                     |
+| `summarizationModel`      | routed model                                                     |
+| `thresholdRatio`          | `0.8`                                                            |
+| `retainTokens`            | unset                                                            |
+| `retainRatio`             | `0.16`                                                           |
+| `headroomTokens`          | `65536`                                                          |
+| `modelPolicies`           | unset                                                            |
+| `summarizerTokensPerCall` | `60000`                                                          |
+| `summarizerTokensPerPass` | `250000`                                                         |
+| `summarizerTokensPerHeal` | `120000`                                                         |
+| `healSourceTokens`        | `8` x `summaryTokens`, clamped `3000`..`24000`                   |
+| `mechanicalTools`         | `[]` (empty keeps the LLM path)                                  |
 
 ## `/lcm`
 

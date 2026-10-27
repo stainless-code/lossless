@@ -1,8 +1,14 @@
 import type { Context } from "@deepseek-ai/cordis";
 
-import { acquireCore, DEFAULT_SIDECAR_DIR, releaseCore } from "./core.ts";
+import { acquireCore, releaseCore } from "./core.ts";
 import { LosslessSummarizerEngine } from "./engine.ts";
-import { buildEngineArgs, closeIdleStores, Config, type LosslessPluginConfig } from "./plugin.ts";
+import {
+  buildEngineArgs,
+  closeIdleStores,
+  Config,
+  readSidecarDir,
+  type LosslessPluginConfig,
+} from "./plugin.ts";
 
 /** Cordis plugin name used by loader diagnostics. Distinct from the host row
  * so host and preset fibers are told apart in activation warnings. */
@@ -35,7 +41,7 @@ export type { LosslessPluginConfig };
  * ``` */
 export function apply(ctx: Context, config: LosslessPluginConfig = {}): () => void {
   if (config.enabled !== true) return () => undefined;
-  const dir = config.sidecarDir ?? DEFAULT_SIDECAR_DIR;
+  const dir = readSidecarDir(config.sidecarDir).dir;
   const core = acquireCore(dir, false);
   const [seamConfig, engineDeps] = buildEngineArgs(config, core);
   void new LosslessSummarizerEngine(ctx, seamConfig, engineDeps);

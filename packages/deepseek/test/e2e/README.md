@@ -2,9 +2,10 @@
 
 Live harness probes for `deepseek-lossless`. These are manual recipes plus a
 runner script, not unit tests: each probe boots a real `dsh` profile, calls a
-real model over OpenRouter, and writes a real sidecar. Do not run them from the
-repo root: run from `/tmp` so sidecar files land in `/tmp/.lossless` instead of
-the repo (the headless sidecar directory defaults to `CWD/.lossless`).
+real model over OpenRouter, and writes a real sidecar. The sidecar directory
+defaults to the global dsh home path (`$DSH_HOME/lossless`, else
+`~/.dsh/lossless`), so point `DSH_HOME` at a scratch dir to keep sidecars out
+of the repo: `export DSH_HOME=/tmp/e2e-dsh`.
 
 ## Scratch profiles
 
@@ -62,7 +63,7 @@ model, and the bundle:
 ```sh
 cd /tmp
 DSH_PERMISSION_MODE=danger-full-access timeout 60 dsh --profile lossless-e2e headless --json "reply with exactly: pong" > /tmp/e2e-lossless.json
-ls /tmp/.lossless/*.sqlite
+ls /tmp/e2e-dsh/lossless/*.sqlite
 ```
 
 ## Expected pong output shape
@@ -85,8 +86,8 @@ because raw `curl` to the same OpenRouter model answered in about one second.
 
 After a passing probe 3, these exist:
 
-- `/tmp/.lossless/*.sqlite` (one per headless session)
-- `/tmp/.lossless/metrics.jsonl`
+- `/tmp/e2e-dsh/lossless/*.sqlite` (one per headless session)
+- `/tmp/e2e-dsh/lossless/metrics.jsonl`
 
 ## Recall note
 
