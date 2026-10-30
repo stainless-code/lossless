@@ -145,6 +145,31 @@ Where this implementation departs from the paper, and what it does not claim:
     in [the OpenCode comparison](../apps/docs/content/reference/opencode/comparison.mdx).
     A separate TUI plugin could reuse the same command core. Evidence gate: a
     live session changes one option through a TUI and persists it without a restart.
+13. **A human DAG visualizer plus console (`packages/viz`, opt-in).** A side
+    package that reads stores read only and shows the DAG a human can click,
+    plus a console that runs the same views the recall tools run. Base shape:
+    zero runtime dep CLI with `dump` (one self contained HTML file, inline
+    SVG under 2,000 nodes else canvas, vanilla JS filters), `snapshot`
+    (machine JSON), `console` (readline REPL over grep, describe, expand,
+    files, stats, doctor, export), and `doctor` (text rollup). Scope resolves
+    through existing discovery (`listSessions` and `sessionsForScope` for Pi,
+    `SidecarStores` and `listSidecarRefs` for OpenCode) with session,
+    sessions, all_sessions, path, and dir modes; cross session search reuses
+    `searchSessions` caps. Filters compose: role, date range, toolName through
+    `toolScopeMessageIds`, FTS query with phrase fallback or regex pattern,
+    quality, depth, kind, removed flag. The snapshot envelope is versioned
+    (v1, qualified node ids, direct provenance edges only, thorough tier as a
+    badge plus token count, budgets with truncated plus cursor). Read only by
+    default; heal apply, repair, import, and config set need `--write` or
+    `write on`, and the package ships no model client. Safety: readOnly then
+    queryOnly opens, stale stores counted as skipped never migrated, redact
+    before clip and before embed, basenames only, atomic 0600 writes, size
+    guard with exit codes. Later graft: an optional loopback serve mode for
+    live clicking (per request open and close, 403 without write, token only
+    behind allow remote). Evidence gate: one fixture session dumped to HTML
+    with node and edge counts matching store provenance, no fixture secret in
+    the file, and the tree green. Deleting `packages/viz` removes the
+    feature; core stays untouched.
 
 ## Considered and deferred
 
