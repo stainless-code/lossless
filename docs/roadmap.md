@@ -186,10 +186,28 @@ Where this implementation departs from the paper, and what it does not claim:
     (trailing debounce with ceiling, staggered resync, `degraded` flag on
     failure), but only the version tuple asserts change; and a periodic
     fingerprint re-compare closes the counter-only blind spot for in-place
-    committed rewrites. Evidence gate: one fixture session dumped to HTML
-    with node and edge counts matching store provenance, no fixture secret in
-    the file, a two sweep watch run with no writes between performing no
-    second write, and the tree green. Deleting `packages/viz` removes the
+    committed rewrites. Navigation contract (Glance / Explore / Forensics):
+    one page, three explicit modes with visible control budgets 6 / 12 / 24,
+    counted without the switcher, the read-only badge, or keyboard-only
+    affordances. Glance is the first-run default and answers whether
+    everything is fine plus what changed, in plain words, with pause and
+    skipped-note controls only. Explore holds the graph canvas plus one
+    reading pane, filters in a single collapsed disclosure with a count
+    badge. Forensics holds scope pills, full tables, console, doctor, events,
+    watch interval, and export, grouped so the total stays 24; a twenty-fifth
+    control demotes an existing one into the palette or a disclosure.
+    Switching is instant, client side, and never automatic; selection, scope,
+    session, filters, and zoom persist across modes, last mode restores on
+    return, deep links win. Jargon tiers with the mode: plain words in
+    Glance, translation beside the term in Explore, full internals plus
+    glossary in Forensics. Glance ranks what matters now with reasons
+    (frontier, needs attention, biggest change) plus contextual next actions,
+    and health reads as a verdict card. Evidence gate: one fixture session
+    dumped to HTML with node and edge counts matching store provenance, no
+    fixture secret in the file, a two sweep watch run with no writes between
+    performing no second write, a first-time user reaching what a summary
+    covers in two clicks with no docs, a control count test holding the
+    budgets, and the tree green. Deleting `packages/viz` removes the
     feature; core stays untouched.
 
 ## Considered and deferred
