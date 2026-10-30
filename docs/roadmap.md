@@ -164,11 +164,32 @@ Where this implementation departs from the paper, and what it does not claim:
     `write on`, and the package ships no model client. Safety: readOnly then
     queryOnly opens, stale stores counted as skipped never migrated, redact
     before clip and before embed, basenames only, atomic 0600 writes, size
-    guard with exit codes. Later graft: an optional loopback serve mode for
+    guard with exit codes. Later grafts: an optional loopback serve mode for
     live clicking (per request open and close, 403 without write, token only
-    behind allow remote). Evidence gate: one fixture session dumped to HTML
+    behind allow remote), and live updates as polling rather than push. A
+    `--watch` flag on `dump` and `snapshot` re-sweeps on a `--poll-interval`
+    (default 5 s, floor 1 s) using file stat then a one statement
+    committed-only version read per store, and rewrites the output atomically
+    only when a version tuple moved; an unchanged sweep performs no write.
+    The page and the serve UI share one badge vocabulary (`live`, `as-of`,
+    `refreshing`, `behind`, `compacting`, `stale`, `unknown`, `skipped` with
+    reason), always paired with an absolute as-of timestamp. Serve mode adds
+    `GET /api/versions` (per session version tuples in one round trip) and
+    `GET /api/version` (single session with the `hasLiveRun` compaction
+    verdict), plus ETag and 304 on the graph family so idle polls cost
+    headers only. Polls open read only and close per sweep, never migrate,
+    count `StaleStoreError` as skipped, and never claim `live` without a
+    version compare inside `--stale-after`. Per session intervals back off
+    when idle (the selected session stays pinned at the base rate) and harder
+    on error; a sweep that exceeds its deadline marks unprobed sessions
+    `unknown`. An optional directory watcher may schedule an early sweep
+    (trailing debounce with ceiling, staggered resync, `degraded` flag on
+    failure), but only the version tuple asserts change; and a periodic
+    fingerprint re-compare closes the counter-only blind spot for in-place
+    committed rewrites. Evidence gate: one fixture session dumped to HTML
     with node and edge counts matching store provenance, no fixture secret in
-    the file, and the tree green. Deleting `packages/viz` removes the
+    the file, a two sweep watch run with no writes between performing no
+    second write, and the tree green. Deleting `packages/viz` removes the
     feature; core stays untouched.
 
 ## Considered and deferred
