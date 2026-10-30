@@ -202,7 +202,14 @@ Where this implementation departs from the paper, and what it does not claim:
     Glance, translation beside the term in Explore, full internals plus
     glossary in Forensics. Glance ranks what matters now with reasons
     (frontier, needs attention, biggest change) plus contextual next actions,
-    and health reads as a verdict card. Evidence gate: one fixture session
+    and health reads as a verdict card. Visual contract (sourced, no new
+    controls): near-black canvas with 1px borders drawn once, two text levels
+    plus a quiet tertiary, 13/14px copy with 12px tabular secondary, 6px radii
+    with 9999px reserved for pills, one restrained accent, text-safe status hues
+    always paired with words and shape, direct on-node labels, 2px primary edges
+    with 30 percent dim isolation, sourced motion tokens only with reduced motion
+    honored, 2px focus rings, and four empty states each carrying a primary
+    action. Evidence gate: one fixture session
     dumped to HTML with node and edge counts matching store provenance, no
     fixture secret in the file, a two sweep watch run with no writes between
     performing no second write, a first-time user reaching what a summary
