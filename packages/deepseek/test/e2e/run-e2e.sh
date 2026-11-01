@@ -27,6 +27,10 @@ if ! command -v dsh >/dev/null 2>&1; then
 fi
 
 mkdir -p "$SIDECAR_DIR" || exit 1
+# Fresh scratch every run: stale sidecars from a previous pass must not mask
+# a regression that stops writing them.
+rm -rf "$SIDECAR_DIR" || exit 1
+mkdir -p "$SIDECAR_DIR" || exit 1
 cd "$OUT_DIR" || exit 1
 
 check_pong() {
@@ -55,6 +59,7 @@ echo "probe2 EXIT=$rc"
 check_pong "probe2" "$OUT_DIR/e2e-probe2.json"
 
 echo "--- probe 3: lossless bundle pong ---"
+touch "$OUT_DIR/e2e-probe3-start"
 timeout 60 dsh --profile lossless-e2e headless --json "$TASK" > "$OUT_DIR/e2e-lossless.json"
 rc=$?
 echo "probe3 EXIT=$rc"
@@ -70,5 +75,17 @@ if [ "${#sidecars[@]}" -eq 0 ]; then
   exit 1
 fi
 printf '%s\n' "${sidecars[@]}"
+# Freshness: the sidecar must postdate probe 3, not a previous run.
+if ! find "$SIDECAR_DIR" -name '*.sqlite' -newer "$OUT_DIR/e2e-probe3-start" | grep -q .; then
+  echo "probe3: FAIL: no sidecar written during this run in $SIDECAR_DIR" >&2
+  exit 1
+fi
+echo "probe3: fresh sidecar OK"
+# Metrics: the recipe promises a metrics log beside the sidecars.
+if [ ! -s "$SIDECAR_DIR/metrics.jsonl" ]; then
+  echo "probe3: FAIL: no metrics in $SIDECAR_DIR/metrics.jsonl" >&2
+  exit 1
+fi
+echo "probe3: metrics OK ($SIDECAR_DIR/metrics.jsonl)"
 
 echo "ALL PROBES PASSED"

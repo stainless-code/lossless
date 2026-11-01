@@ -186,6 +186,45 @@ describe("lcm mutating verbs", () => {
     expect(gcExports.length).toBe(1);
   });
 
+  it("gc skips a sidecar held open by another process and refuses it by name", async () => {
+    const { ctx } = setupContext(ROUTE, []);
+    await mountBase(ctx);
+    const dir = tempDir();
+    const liveId = "live.session:1";
+    ctx.sessions.create(SessionId(liveId), { meta: { cwd: dir } });
+    const stores = new Map<string, LcmStore>();
+    const deps = depsFor(dir, stores);
+    // Open but never registered: simulates another profile holding the file.
+    const foreignPath = join(dir, "foreign.sqlite");
+    const foreign = new LcmStore(foreignPath);
+    seedMessages(foreign, ["foreign history stays"]);
+    const stalePath = join(dir, "stale-old.sqlite");
+    const staleDetached = new LcmStore(stalePath);
+    try {
+      seedMessages(staleDetached, ["stale history goes"]);
+    } finally {
+      staleDetached.close();
+    }
+    ageFile(stalePath, 31);
+    ageFile(foreignPath, 31);
+    const dry = await invoke(ctx, deps, liveId, "gc");
+    expect(dry.kind).toBe("success");
+    expect(dry.text).toContain("stale-old");
+    expect(dry.text).not.toContain("foreign");
+    const named = await invoke(ctx, deps, liveId, "gc --session foreign --apply");
+    expect(named.kind).toBe("error");
+    expect(named.text).toMatch(/another process/);
+    expect(existsSync(foreignPath)).toBe(true);
+    const applied = await invoke(ctx, deps, liveId, "gc --apply");
+    expect(applied.kind).toBe("success");
+    expect(existsSync(stalePath)).toBe(false);
+    expect(existsSync(foreignPath)).toBe(true);
+    foreign.close();
+    const afterClose = await invoke(ctx, deps, liveId, "gc --apply");
+    expect(afterClose.kind).toBe("success");
+    expect(existsSync(foreignPath)).toBe(false);
+  });
+
   it("gc apply writes one export per sidecar so each restores", async () => {
     const { ctx } = setupContext(ROUTE, []);
     await mountBase(ctx);

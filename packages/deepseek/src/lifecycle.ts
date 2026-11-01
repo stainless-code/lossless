@@ -631,6 +631,13 @@ function gcCandidates(
           mtimeMs = Math.max(mtimeMs, statSync(`${ref.path}${suffix}`).mtimeMs);
         } catch {}
       }
+      // A -shm file exists only while a process holds the database open.
+      // liveStems covers this process; the shm probe covers every other one
+      // sharing the directory, so gc never deletes an open database.
+      try {
+        statSync(`${ref.path}-shm`);
+        continue;
+      } catch {}
       if (onlySession === undefined && mtimeMs > cutoff) continue;
       candidates.push({
         id: ref.id,
@@ -670,6 +677,22 @@ export function handleGc(
       kind: "error",
       text: `LCM gc: session ${onlySession} is open in this process; gc never deletes an open sidecar.`,
     };
+  }
+  if (onlySession !== undefined) {
+    // Explicit target: fail closed when another process holds it open, the
+    // same guarantee as the live guard above but across processes.
+    const target = listSidecarRefs(deps.sidecarDir).find(
+      (ref) => ref.id === onlySession || ref.id === sanitizeSidecarId(onlySession),
+    );
+    if (target !== undefined) {
+      try {
+        statSync(`${target.path}-shm`);
+        return {
+          kind: "error",
+          text: `LCM gc: session ${onlySession} is open in another process; gc never deletes an open sidecar.`,
+        };
+      } catch {}
+    }
   }
   const olderThanRaw = valueOf(args, "--older-than");
   const rawDays = olderThanRaw ?? String(GC_DEFAULT_DAYS);
