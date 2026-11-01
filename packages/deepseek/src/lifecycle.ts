@@ -611,7 +611,12 @@ function gcCandidates(
   sessionId: string,
   days: number,
   onlySession: string | undefined,
-): Array<{ id: string; path: string; sizeBytes: number; ageDays: number }> {
+): {
+  candidates: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }>;
+  /** Sidecars skipped because a -shm file marks them open in another process.
+   * A crashed owner can leave a stale -shm behind; deleting it collects the sidecar. */
+  heldOpen: number;
+} {
   const live = liveStems(deps, sessionId);
   const refs = listSidecarRefs(deps.sidecarDir).filter((ref) => !live.has(ref.id));
   // A named session bypasses the age window: the filter itself is the intent.
@@ -621,6 +626,7 @@ function gcCandidates(
       : refs.filter((ref) => ref.id === onlySession || ref.id === sanitizeSidecarId(onlySession));
   const cutoff = Date.now() - days * 86_400_000;
   const candidates: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }> = [];
+  let heldOpen = 0;
   for (const ref of selected) {
     try {
       const stat = statSync(ref.path);
@@ -636,6 +642,7 @@ function gcCandidates(
       // sharing the directory, so gc never deletes an open database.
       try {
         statSync(`${ref.path}-shm`);
+        heldOpen += 1;
         continue;
       } catch {}
       if (onlySession === undefined && mtimeMs > cutoff) continue;
@@ -649,7 +656,7 @@ function gcCandidates(
       continue;
     }
   }
-  return candidates;
+  return { candidates, heldOpen };
 }
 
 /** Age-based sidecar collection. Dry-run default; only --apply deletes, and
@@ -702,15 +709,23 @@ export function handleGc(
   if (!Number.isFinite(days) || days < 0) {
     return { kind: "error", text: "LCM gc: --older-than takes a number of days." };
   }
-  let candidates: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }>;
+  let found: {
+    candidates: Array<{ id: string; path: string; sizeBytes: number; ageDays: number }>;
+    heldOpen: number;
+  };
   try {
-    candidates = gcCandidates(deps, sessionId, days, onlySession);
+    found = gcCandidates(deps, sessionId, days, onlySession);
   } catch (error) {
     return {
       kind: "error",
       text: `LCM gc failed: cannot list ${deps.sidecarDir} (${error instanceof Error ? error.message : String(error)}).`,
     };
   }
+  const candidates = found.candidates;
+  const heldNote =
+    found.heldOpen === 0
+      ? ""
+      : ` ${found.heldOpen} sidecar(s) held open by another process were skipped (a crashed owner leaves a stale -shm behind; deleting it collects the sidecar).`;
   if (onlySession !== undefined && candidates.length === 0) {
     return {
       kind: "success",
@@ -720,7 +735,7 @@ export function handleGc(
   if (candidates.length === 0) {
     return {
       kind: "success",
-      text: `LCM gc: nothing eligible (no sidecar older than ${days} day(s); live sidecars are never candidates).`,
+      text: `LCM gc: nothing eligible (no sidecar older than ${days} day(s); live sidecars are never candidates).${heldNote}`,
     };
   }
   const lines = candidates.map(
@@ -735,15 +750,23 @@ export function handleGc(
         : "");
     return {
       kind: "success",
-      text: `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lcm gc --apply${selectors}\` to export then delete them. Backups are never touched.`,
+      text: `LCM gc dry-run: ${candidates.length} sidecar(s) removable:\n${lines.join("\n")}\nRun \`/lcm gc --apply${selectors}\` to export then delete them. Backups are never touched.${heldNote}`,
     };
   }
   const stamp = STAMP();
   let removed = 0;
   let exported = 0;
   let failed = 0;
+  let skippedOpen = found.heldOpen;
   const written: string[] = [];
   for (const candidate of candidates) {
+    try {
+      // Re-check right before deleting: another process may have opened the
+      // sidecar since the sweep probed it.
+      statSync(`${candidate.path}-shm`);
+      skippedOpen += 1;
+      continue;
+    } catch {}
     try {
       const probe = new LcmStore(candidate.path, { queryOnly: true });
       let rows = "";
@@ -768,15 +791,16 @@ export function handleGc(
       failed++;
     }
   }
+  const heldTail = skippedOpen === 0 ? "" : `; ${skippedOpen} skipped (open in another process)`;
   if (exported > 0) {
     return {
       kind: "success",
-      text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${written.join(", ")}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
+      text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); ${exported} transcript(s) exported to ${written.join(", ")}${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}${heldTail}.`,
     };
   }
   return {
     kind: "success",
-    text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); transcripts were empty so no export file was written${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}.`,
+    text: `LCM gc: removed ${removed} of ${candidates.length} sidecar(s); transcripts were empty so no export file was written${failed === 0 ? "" : `; ${failed} skipped (migrate or inspect first)`}${heldTail}.`,
   };
 }
 

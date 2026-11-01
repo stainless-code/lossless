@@ -211,6 +211,7 @@ describe("lcm mutating verbs", () => {
     expect(dry.kind).toBe("success");
     expect(dry.text).toContain("stale-old");
     expect(dry.text).not.toContain("foreign");
+    expect(dry.text).toContain("held open");
     const named = await invoke(ctx, deps, liveId, "gc --session foreign --apply");
     expect(named.kind).toBe("error");
     expect(named.text).toMatch(/another process/);
@@ -220,6 +221,9 @@ describe("lcm mutating verbs", () => {
     expect(existsSync(stalePath)).toBe(false);
     expect(existsSync(foreignPath)).toBe(true);
     foreign.close();
+    // Closing the last WAL handle checkpoints into the sqlite file and refreshes
+    // its mtime, so re-age before the final collect.
+    ageFile(foreignPath, 31);
     const afterClose = await invoke(ctx, deps, liveId, "gc --apply");
     expect(afterClose.kind).toBe("success");
     expect(existsSync(foreignPath)).toBe(false);

@@ -55,7 +55,7 @@ cd /tmp
 DSH_PERMISSION_MODE=danger-full-access timeout 60 dsh --profile lossless-plain --patch ./overlays/headless-overlay.yml headless --json "reply with exactly: pong" > /tmp/e2e-probe2.json
 ```
 
-## Probe 3: lossless bundle pong plus sidecar list
+## Probe 3: lossless bundle pong plus fresh sidecar
 
 No overlay needed: `lossless-e2e` already carries the route, the default
 model, and the bundle:
@@ -64,6 +64,21 @@ model, and the bundle:
 cd /tmp
 DSH_PERMISSION_MODE=danger-full-access timeout 60 dsh --profile lossless-e2e headless --json "reply with exactly: pong" > /tmp/e2e-lossless.json
 ls /tmp/e2e-dsh/lossless/*.sqlite
+```
+
+The scratch dir starts empty and the sidecar must postdate the probe, so a
+pass proves this run wrote it rather than a previous one.
+
+## Probe 4: second pong to warm backfill metrics
+
+A pong plus sidecar rows alone need not record anything: live mirroring
+writes database rows without metrics. The second mount sees probe 3's
+sidecar, so mount backfill records its row even when everything dedups:
+
+```sh
+cd /tmp
+DSH_PERMISSION_MODE=danger-full-access timeout 60 dsh --profile lossless-e2e headless --json "reply with exactly: pong" > /tmp/e2e-lossless2.json
+test -s /tmp/e2e-dsh/lossless/metrics.jsonl
 ```
 
 ## Expected pong output shape
@@ -84,7 +99,8 @@ because raw `curl` to the same OpenRouter model answered in about one second.
 
 ## Sidecar check paths
 
-After a passing probe 3, these exist:
+After a passing probe 3, the sqlite files exist; after probe 4, the metrics
+log joins them (mount backfill records on the second mount):
 
 - `/tmp/e2e-dsh/lossless/*.sqlite` (one per headless session)
 - `/tmp/e2e-dsh/lossless/metrics.jsonl`

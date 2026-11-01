@@ -3,11 +3,11 @@
 # Headless e2e probes for deepseek-lossless.
 #
 # Runs probe 1 (shipped headless profile + model overlay), probe 2 (plain
-# base + headless overlay), and probe 3 (lossless bundle pong + sidecar
-# list). Each dsh call is guarded with `timeout 60`. Takes no arguments,
-# exits nonzero on the first failure, and prints EXIT codes plus sidecar
-# paths. Probes export DSH_HOME=/tmp/e2e-dsh so sidecars land in
-# /tmp/e2e-dsh/lossless.
+# base + headless overlay), probe 3 (lossless bundle pong + fresh sidecar),
+# and probe 4 (second pong to warm backfill metrics). Each dsh call is
+# guarded with `timeout 60`. Takes no arguments, exits nonzero on the first
+# failure, and prints EXIT codes plus sidecar paths. Probes export
+# DSH_HOME=/tmp/e2e-dsh so sidecars land in /tmp/e2e-dsh/lossless.
 #
 # Usage: ./packages/deepseek/test/e2e/run-e2e.sh
 set -uo pipefail
@@ -81,11 +81,22 @@ if ! find "$SIDECAR_DIR" -name '*.sqlite' -newer "$OUT_DIR/e2e-probe3-start" | g
   exit 1
 fi
 echo "probe3: fresh sidecar OK"
-# Metrics: the recipe promises a metrics log beside the sidecars.
+
+echo "--- probe 4: lossless bundle pong again (warms backfill metrics) ---"
+# A pong plus sidecar rows alone need not record anything: live mirroring
+# writes database rows without metrics. The second mount sees probe 3's
+# sidecar, so mount backfill records its row even when everything dedups.
+timeout 60 dsh --profile lossless-e2e headless --json "$TASK" > "$OUT_DIR/e2e-lossless2.json"
+rc=$?
+echo "probe4 EXIT=$rc"
+[ "$rc" -eq 0 ] || { echo "probe4: FAIL: dsh exited $rc" >&2; exit 1; }
+check_pong "probe4" "$OUT_DIR/e2e-lossless2.json"
+
+echo "--- metrics in $SIDECAR_DIR ---"
 if [ ! -s "$SIDECAR_DIR/metrics.jsonl" ]; then
-  echo "probe3: FAIL: no metrics in $SIDECAR_DIR/metrics.jsonl" >&2
+  echo "probe4: FAIL: no metrics in $SIDECAR_DIR/metrics.jsonl" >&2
   exit 1
 fi
-echo "probe3: metrics OK ($SIDECAR_DIR/metrics.jsonl)"
+echo "probe4: metrics OK ($SIDECAR_DIR/metrics.jsonl)"
 
 echo "ALL PROBES PASSED"
