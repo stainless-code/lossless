@@ -147,6 +147,77 @@ Where this implementation departs from the paper, and what it does not claim:
     in [the OpenCode comparison](../apps/docs/content/reference/opencode/comparison.mdx).
     A separate TUI plugin could reuse the same command core. Evidence gate: a
     live session changes one option through a TUI and persists it without a restart.
+13. **A human DAG visualizer plus console (`packages/viz`, opt-in).** A side
+    package that reads stores read only and shows the DAG a human can click,
+    plus a console that runs the same views the recall tools run. Base shape:
+    zero runtime dep CLI with `dump` (one self contained HTML file, inline
+    SVG under 2,000 nodes else canvas, vanilla JS filters), `snapshot`
+    (machine JSON), `console` (readline REPL over grep, describe, expand,
+    files, stats, doctor, export), and `doctor` (text rollup). Scope resolves
+    through existing discovery (`listSessions` and `sessionsForScope` for Pi,
+    `SidecarStores` and `listSidecarRefs` for OpenCode) with session,
+    sessions, all_sessions, path, and dir modes; cross session search reuses
+    `searchSessions` caps. Filters compose: role, date range, toolName through
+    `toolScopeMessageIds`, FTS query with phrase fallback or regex pattern,
+    quality, depth, kind, removed flag. The snapshot envelope is versioned
+    (v1, qualified node ids, direct provenance edges only, thorough tier as a
+    badge plus token count, budgets with truncated plus cursor). Read only by
+    default; heal apply, repair, import, and config set need `--write` or
+    `write on`, and the package ships no model client. Safety: readOnly then
+    queryOnly opens, stale stores counted as skipped never migrated, redact
+    before clip and before embed, basenames only, atomic 0600 writes, size
+    guard with exit codes. Later grafts: an optional loopback serve mode for
+    live clicking (per request open and close, 403 without write, token only
+    behind allow remote), and live updates as polling rather than push. A
+    `--watch` flag on `dump` and `snapshot` re-sweeps on a `--poll-interval`
+    (default 5 s, floor 1 s) using file stat then a one statement
+    committed-only version read per store, and rewrites the output atomically
+    only when a version tuple moved; an unchanged sweep performs no write.
+    The page and the serve UI share one badge vocabulary (`live`, `as-of`,
+    `refreshing`, `behind`, `compacting`, `stale`, `unknown`, `skipped` with
+    reason), always paired with an absolute as-of timestamp. Serve mode adds
+    `GET /api/versions` (per session version tuples in one round trip) and
+    `GET /api/version` (single session with the `hasLiveRun` compaction
+    verdict), plus ETag and 304 on the graph family so idle polls cost
+    headers only. Polls open read only and close per sweep, never migrate,
+    count `StaleStoreError` as skipped, and never claim `live` without a
+    version compare inside `--stale-after`. Per session intervals back off
+    when idle (the selected session stays pinned at the base rate) and harder
+    on error; a sweep that exceeds its deadline marks unprobed sessions
+    `unknown`. An optional directory watcher may schedule an early sweep
+    (trailing debounce with ceiling, staggered resync, `degraded` flag on
+    failure), but only the version tuple asserts change; and a periodic
+    fingerprint re-compare closes the counter-only blind spot for in-place
+    committed rewrites. Navigation contract (Glance / Explore / Forensics):
+    one page, three explicit modes with visible control budgets 6 / 12 / 24,
+    counted without the switcher, the read-only badge, or keyboard-only
+    affordances. Glance is the first-run default and answers whether
+    everything is fine plus what changed, in plain words, with pause and
+    skipped-note controls only. Explore holds the graph canvas plus one
+    reading pane, filters in a single collapsed disclosure with a count
+    badge. Forensics holds scope pills, full tables, console, doctor, events,
+    watch interval, and export, grouped so the total stays 24; a twenty-fifth
+    control demotes an existing one into the palette or a disclosure.
+    Switching is instant, client side, and never automatic; selection, scope,
+    session, filters, and zoom persist across modes, last mode restores on
+    return, deep links win. Jargon tiers with the mode: plain words in
+    Glance, translation beside the term in Explore, full internals plus
+    glossary in Forensics. Glance ranks what matters now with reasons
+    (frontier, needs attention, biggest change) plus contextual next actions,
+    and health reads as a verdict card. Visual contract (sourced, no new
+    controls): near-black canvas with 1px borders drawn once, two text levels
+    plus a quiet tertiary, 13/14px copy with 12px tabular secondary, 6px radii
+    with 9999px reserved for pills, one restrained accent, text-safe status hues
+    always paired with words and shape, direct on-node labels, 2px primary edges
+    with 30 percent dim isolation, sourced motion tokens only with reduced motion
+    honored, 2px focus rings, and four empty states each carrying a primary
+    action. Evidence gate: one fixture session
+    dumped to HTML with node and edge counts matching store provenance, no
+    fixture secret in the file, a two sweep watch run with no writes between
+    performing no second write, a first-time user reaching what a summary
+    covers in two clicks with no docs, a control count test holding the
+    budgets, and the tree green. Deleting `packages/viz` removes the
+    feature; core stays untouched.
 
 ## Considered and deferred
 
