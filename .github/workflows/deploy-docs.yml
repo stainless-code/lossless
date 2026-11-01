@@ -9,8 +9,8 @@ on:
     branches: [main]
   # Async release follow-up: releases created by changesets with GITHUB_TOKEN
   # cannot trigger `release: published` downstream (GITHUB_TOKEN events spawn
-  # no new runs). workflow_run fires regardless of token, in its own run —
-  # Release stays untouched. Read from main, so this takes effect post-merge.
+  # no new runs). workflow_run fires regardless of token, in its own run,
+  # so Release stays untouched. Read from main, so this takes effect post-merge.
   workflow_run:
     workflows: [Release]
     types: [completed]
@@ -49,8 +49,8 @@ jobs:
           fetch-depth: 0
 
       # Release runs on every main push; deploy only when its head shipped
-      # a release (any tag present — every tag in these repos is a
-      # changesets release tag). Skips green — no red noise.
+      # a release (any tag present: every tag in these repos is a
+      # changesets release tag). Skips green, no red noise.
       - name: Require release tag on head
         id: gate
         if: github.event_name == 'workflow_run'
@@ -62,22 +62,28 @@ jobs:
           fi
 
       - name: Setup Bun
+        # Same gate as upload: no release, no work (still green).
+        if: steps.gate.outputs.release != 'false'
         uses: ./.github/actions/setup
 
       - name: Validate docs links
+        if: steps.gate.outputs.release != 'false'
         run: vp run --filter ./apps/docs validate --strict
 
       - name: Typecheck docs site
+        if: steps.gate.outputs.release != 'false'
         run: vp run --filter ./apps/docs check --isolated
 
       - name: Build docs site
+        if: steps.gate.outputs.release != 'false'
         run: vp run --filter ./apps/docs build
 
       - name: Audit docs site
+        if: steps.gate.outputs.release != 'false'
         run: vp run --filter ./apps/docs audit
 
       - name: Upload to /lossless via FTP
-        # Gate runs on workflow_run only; skipped (empty) elsewhere — upload proceeds.
+        # Gate runs on workflow_run only; skipped (empty) elsewhere, so upload proceeds.
         if: steps.gate.outputs.release != 'false'
         uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
