@@ -85,7 +85,7 @@ jobs:
       - name: Upload to /lossless via FTP
         # Gate runs on workflow_run only; skipped (empty) elsewhere, so upload proceeds.
         if: steps.gate.outputs.release != 'false'
-        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        uses: SamKirkland/FTP-Deploy-Action@110f9186c050f71550953127052e77650219c287 # v4.4.0
         with:
           server: ${{ secrets.FTP_HOST }}
           username: ${{ secrets.FTP_USERNAME }}
