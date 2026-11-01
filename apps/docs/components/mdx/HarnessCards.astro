@@ -2,7 +2,7 @@
 import Card from "blume/components/content/Card.astro";
 import CardGroup from "blume/components/content/CardGroup.astro";
 
-import { OPENCODE_ICON, PI_ICON } from "../../harness-icons.ts";
+import { DEEPSEEK_ICON, OPENCODE_ICON, PI_ICON } from "../../harness-icons.ts";
 
 interface Props {
   variant: "guides" | "comparison";
@@ -42,6 +42,13 @@ const cards =
           icon: OPENCODE_ICON,
           cta: "View comparison",
           body: "Context engines and memory services in two matrices, because they solve different problems.",
+        },
+        {
+          title: "DeepSeek",
+          href: "/reference/deepseek/comparison",
+          icon: DEEPSEEK_ICON,
+          cta: "View comparison",
+          body: "The basic compaction backend on one matrix, with where it leads and the gaps this package keeps.",
         },
       ];
 ---

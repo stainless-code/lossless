@@ -1,0 +1,115 @@
+Four tools reach stored history. `lcm_expand_query` runs in process over one streaming call per step; there is no child session on this harness.
+
+| Question                                                  | Tool               |
+| --------------------------------------------------------- | ------------------ |
+| "Where did we talk about X?"                              | `lcm_grep`         |
+| "What is in summary #12, and what would reading it cost?" | `lcm_describe`     |
+| "Read the originals."                                     | `lcm_expand`       |
+| "Read the originals and answer from them."                | `lcm_expand_query` |
+
+## lcm_grep
+
+Searches stored history, including content already compacted out of the visible context.
+
+| Parameter         | Type                                        | Default     | Meaning                                                                                     |
+| ----------------- | ------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| `query`           | string                                      | required*   | FTS5 search: words, quoted phrases, `AND`/`OR`, prefix `*`. Matches the first 100,000 characters of a message. |
+| `pattern`         | string                                      | none        | JavaScript regular expression over the full text of every stored message. Give one of `query` or `pattern`, not both. |
+| `case_sensitive`  | boolean                                     | `false`     | Match a `pattern` with its own case.                                                        |
+| `offset`          | integer                                     | `0`         | Hits to skip, for the next page.                                                            |
+| `after`           | string                                      | none        | Continue a pattern scan from this entry id, which is the `after` value a deadline stop names. |
+| `limit`           | integer                                     | `20`        | Hits one page holds.                                                                        |
+| `summary_id`      | integer                                     | none        | Restrict hits to the messages this summary covers.                                          |
+| `include_removed` | boolean                                     | `false`     | Include matches from a branch that left the active path.                                    |
+| `scope`           | `"session" \| "sessions" \| "all_sessions"` | `"session"` | Which sidecar to read. The last two are equivalent because the sidecar directory is global. |
+
+\* One of `query` or `pattern` is required in session scope; past-session scopes take `query` only. A pattern scan stays session-scoped.
+
+Bounds, each named in the output that hits it:
+
+| Bound                               | Value                                |
+| ----------------------------------- | ------------------------------------ |
+| Indexed characters per message      | 100,000                              |
+| One hit line                        | 400 characters, whitespace collapsed |
+| Cross-session sidecars scanned      | 20 most recent, newest first         |
+| Cross-session hits per store        | 10                                   |
+| Cross-session search deadline       | 1.5 seconds                          |
+| Cross-session hits                  | 40                                   |
+
+Every hit names the entry id that `lcm_expand` reads in full, and the summary (`#N`) that covers it. Past-session hits carry an `[lcm:session <id>]` label; read one with `lcm_expand({session, entry_id})`.
+
+## lcm_describe
+
+```text
+lcm_describe({ id: 12 })
+```
+
+`id` is the `N` in an `[lcm:summary #N ...]` header. Returns a node without expanding it:
+
+- kind, depth, and token count
+- the covered span (`e104 .. e238`)
+- costs: the source text behind it, in tokens and messages, and the whole subtree
+- tiers, when the node keeps a thorough text beside its terse one
+- the files its children cover, each with the first line of its exploration summary
+- children and parents, with a per-child cost line
+
+The thorough tier is what a describe returns when both exist, and both sizes are named. This reads the calling session only. An id the store does not hold is refused.
+
+## lcm_expand
+
+Reads one stored message, or lists a summary's messages, without a model call.
+
+| Parameter    | Type                  | Default | Meaning                                                                 |
+| ------------ | --------------------- | ------- | ----------------------------------------------------------------------- |
+| `id`         | integer               | none    | List this summary's messages, or check that an entry is covered.        |
+| `entry_id`   | string                | none    | Read this one message.                                                  |
+| `session`    | string                | none    | Read an entry from this past session's sidecar.                         |
+| `offset`     | integer `>= 0`        | `0`     | Message index to start listing from.                                    |
+| `limit`      | integer `1..50`       | `25`    | Messages to list.                                                       |
+| `char_offset`| integer `>= 0`        | `0`     | Character offset inside `entry_id`.                                     |
+| `max_chars`  | integer `200..20000`  | `20000` | Characters to read from `entry_id`.                                     |
+
+Pass `entry_id` to read one message, or `id` to list a summary. `session` names a past session id from an `[lcm:session <id>]` hit; that sidecar opens read-only and the text is labelled as a past session's history. A reader-loop call with a past `session` is refused: the reader is session-scoped.
+
+Bounds:
+
+| Bound          | Value                |
+| -------------- | -------------------- |
+| One read       | 20,000 characters    |
+| Messages listed| 50 per call          |
+
+## lcm_expand_query
+
+Reads stored originals in process and answers from them.
+
+| Parameter    | Type                 | Default  | Meaning                                                                                              |
+| ------------ | --------------------- | -------- | ---------------------------------------------------------------------------------------------------- |
+| `query`      | string               | required | What to search for in the stored history.                                                            |
+| `prompt`     | string               | none     | What to find out, and the form the answer takes. Ask for a verbatim quote when the exact words matter. |
+| `summary_id` | integer              | none     | Read this node's originals, from an `[lcm:summary #N ...]` header.                                   |
+| `entry_id`   | string               | none     | Read one stored message, from a grep hit.                                                            |
+| `session`    | string               | none     | Read another session kept in this process instead of the calling one; names a session id, never a file. |
+| `max_tokens` | integer `500..40000` | `10000`  | Retrieved content budget, in estimated tokens.                                                       |
+
+Pass `summary_id` or `entry_id`, not both. With neither, the reader searches. Findings come back wrapped in `<recovered_findings>`; the stored text does not enter this conversation. A past session's answer is labelled with its session id.
+
+The reader is one streaming call per step, at most 6 steps, over `lcm_grep`, `lcm_describe`, and `lcm_expand`; it cannot recurse. Without a routed provider and model, the run refuses before reading anything.
+
+## Failure modes
+
+| Result                                                              | Cause                                                              |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `No stored history for this session yet`                            | Nothing has been ingested, or the call arrived outside any agent.  |
+| `No summary with id N`                                              | The address is not in this store.                                  |
+| `Message eNNN is not covered by summary #N`                         | The entry and summary were mismatched.                             |
+| `Nothing was read: the reader is session-scoped`                    | The reader tried a past-session scope.                             |
+| `Nothing was read: no stored session with id ...`                   | The named past session has no sidecar.                             |
+| `LCM: past sessions are not reachable in this process`              | No sidecar directory is wired.                                     |
+| `LCM: a pattern scan searches this session`                         | A `pattern` was passed with a past-session scope.                  |
+| `lossless retrieval: no provider/model available for the reader`    | No route resolves for the reader's model call.                     |
+
+## Related
+
+- [Recall and provenance](/concepts/recall-and-provenance): what the headers and addresses mean.
+- [Limits](/concepts/limits): the caps in one place.
+- [Commands](/reference/deepseek/command): `/lcm compact` and the verbs that read these rows.

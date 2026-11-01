@@ -3,5 +3,5 @@ import { defineMeta } from "blume";
 export default defineMeta({
 	title: "Reference",
 	icon: "code",
-	pages: ["pi", "opencode"],
+	pages: ["pi", "opencode", "deepseek"],
 });

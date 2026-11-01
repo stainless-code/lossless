@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Lossless memory",
+    "description": "Long sessions keep working past the point where the model would forget, and every verbatim message stays searchable and readable.",
+    "detail": "docs/DETAIL.md"
+  }
+}

@@ -9,7 +9,7 @@ import {
   type PatternScanOutcome,
 } from "./pattern-scan.ts";
 import type { LcmStore, StoredMessage, SummaryNode } from "./store.ts";
-import { mechanicalToolNameOf } from "./util/summarizer-config.ts";
+import { mechanicalToolNameOf, toolNameOfText } from "./util/summarizer-config.ts";
 
 /**
  * Every view masks stored text with the injected `redact` before it is cut down
@@ -80,41 +80,48 @@ export function withToolScope(query: string, toolName: string): string {
  * only in the result. A trailing run of toolResult rows after a marker row
  * belongs to that call batch; any other role ends the run, as does a
  * toolResult row that names a different tool. Bracket text is checked
- * directly so one row naming two tools anchors both, and
- * mechanicalToolNameOf covers the `tool <name>` and payload forms. User and
+ * directly so one row naming two tools anchors both,
+ * mechanicalToolNameOf covers the `tool <name>` and payload forms, and
+ * toolNameOfText re-reads the marker lines without the mechanical tool-only
+ * gate so a call embedded in prose still anchors. User and
  * custom rows never open a scope, so quoting a marker in chat pulls in no
  * results; a mixed assistant block still opens through its literal marker. */
-export function toolScopeMessageIds(
-  store: LcmStore,
-  toolName: string,
-  opts?: { includeRemoved?: boolean; withinMessageIds?: ReadonlySet<number> },
-): Set<number> {
-  const want = toolName.trim().toLowerCase();
+/** The order-dependent scope state machine over already filtered rows. A
+ * REMOVED row never reaches the visible pass, so it cannot close the scope;
+ * the unfiltered pass sees it and closes, which preserves the pre-refactor
+ * visible-only behavior exactly. */
+function scopeIdsFromRows(rows: readonly StoredMessage[], want: string): Set<number> {
   const out = new Set<number>();
-  if (want.length === 0) return out;
-  const scope = opts?.withinMessageIds;
-  const includeRemoved = opts?.includeRemoved === true;
-  const visible = store
-    .allMessages()
-    .filter(
-      (m) =>
-        (includeRemoved || m.removedAt === undefined) && (scope === undefined || scope.has(m.id)),
-    );
   let open = false;
-  for (const row of visible) {
+  const escaped = want.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const bracketTest = new RegExp(`\\[tool:${escaped}\\]`, "i");
+  for (const row of rows) {
+    // A result body may quote another tool's marker further down, so only the
+    // opening line can open or close a scope for the tool that produced it.
+    const scopeText =
+      row.role === "toolResult"
+        ? (row.text.split("\n").find((line) => line.trim().length > 0) ?? "")
+        : row.text;
+    // toolNameOfText reads the same marker lines without the mechanical
+    // tool-only gate, so a call embedded in prose still anchors a scope.
+    const scoped = row.role !== "user" && row.role !== "custom";
+    const textName = scoped ? toolNameOfText(row.text, row.role) : undefined;
     const namesTool =
-      row.role !== "user" &&
-      row.role !== "custom" &&
-      (row.text.toLowerCase().includes(`[tool:${want}]`) ||
-        mechanicalToolNameOf({ text: row.text, payload: row.payload, role: row.role }) === want);
+      scoped &&
+      (bracketTest.test(scopeText) ||
+        mechanicalToolNameOf({ text: row.text, payload: row.payload, role: row.role }) === want ||
+        textName === want);
     if (namesTool) {
       out.add(row.id);
       open = true;
       continue;
     }
     if (row.role === "toolResult" && open) {
-      const other = mechanicalToolNameOf({ text: row.text, payload: row.payload }) ?? "";
-      if ((other.length > 0 && other !== want) || /\[tool:/i.test(row.text)) {
+      const other =
+        mechanicalToolNameOf({ text: row.text, payload: row.payload, role: row.role }) ??
+        textName ??
+        "";
+      if ((other.length > 0 && other !== want) || /\[tool:/i.test(scopeText)) {
         open = false;
         continue;
       }
@@ -124,6 +131,24 @@ export function toolScopeMessageIds(
     if (row.role !== "toolResult") open = false;
   }
   return out;
+}
+
+export function toolScopeMessageIds(
+  store: LcmStore,
+  toolName: string,
+  opts?: { includeRemoved?: boolean; withinMessageIds?: ReadonlySet<number> },
+): Set<number> {
+  const want = toolName.trim().toLowerCase();
+  if (want.length === 0) return new Set<number>();
+  const scope = opts?.withinMessageIds;
+  const includeRemoved = opts?.includeRemoved === true;
+  const visible = store
+    .allMessages()
+    .filter(
+      (m) =>
+        (includeRemoved || m.removedAt === undefined) && (scope === undefined || scope.has(m.id)),
+    );
+  return scopeIdsFromRows(visible, want);
 }
 
 export function grepView(
@@ -355,10 +380,17 @@ function toolScopedView(
     ...(params.dateStart === undefined ? {} : { dateStart: params.dateStart }),
     ...(params.dateEnd === undefined ? {} : { dateEnd: params.dateEnd }),
   };
-  const visibleIds = toolScopeMessageIds(store, toolName, {
-    includeRemoved,
-    withinMessageIds: params.withinMessageIds,
-  });
+  const want = toolName.trim().toLowerCase();
+  // One table load; the order-dependent scope machine runs twice over
+  // in-memory arrays so a REMOVED row cannot close the visible scope.
+  const allRows = store.allMessages();
+  const baseRows =
+    params.withinMessageIds === undefined
+      ? allRows
+      : allRows.filter((m) => params.withinMessageIds!.has(m.id));
+  const visibleRows = includeRemoved ? baseRows : baseRows.filter((m) => m.removedAt === undefined);
+  const visibleIds = want.length === 0 ? new Set<number>() : scopeIdsFromRows(visibleRows, want);
+  const allIds = want.length === 0 ? new Set<number>() : scopeIdsFromRows(baseRows, want);
   let pattern = query;
   const runAll = (text: string, ids: ReadonlySet<number>, removed: boolean) =>
     scopedGrepAll(store, text, { includeRemoved: removed, ...roleOpts, scoped: ids });
@@ -386,10 +418,6 @@ function toolScopedView(
   const hits = all.slice(offset, offset + limit);
   if (hits.length === 0) {
     if (!includeRemoved) {
-      const allIds = toolScopeMessageIds(store, toolName, {
-        includeRemoved: true,
-        withinMessageIds: params.withinMessageIds,
-      });
       let hidden: ReturnType<LcmStore["grep"]> = [];
       try {
         hidden = runAll(pattern, allIds, true);

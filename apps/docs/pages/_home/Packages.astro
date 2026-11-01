@@ -20,6 +20,13 @@ const shells = [
 		body: "The same engine as a plugin: recall tools, the swap point, and a per-session sidecar beside the session file.",
 		command: "opencode plugin add opencode-lossless",
 	},
+	{
+		name: "deepseek-lossless",
+		icon: "/logos/deepseek.svg",
+		title: "The DeepSeek bundle",
+		body: "The same engine as a profile bundle: recall tools, the compaction backend, and a per-session sidecar beside the session file.",
+		command: "dsh plugin --profile headless add deepseek-lossless",
+	},
 ];
 ---
 
@@ -47,7 +54,7 @@ const shells = [
 
         <p class="text-muted-foreground text-sm leading-relaxed">
           Ingest, compaction and retrieval behind a two-port host contract. One
-          engine runs in Pi, OpenCode v2, or the next host. Each install is one
+          engine runs in Pi, OpenCode v2, or DeepSeek. Each install is one
           package.
         </p>
 

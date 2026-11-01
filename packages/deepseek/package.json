@@ -1,0 +1,91 @@
+{
+  "name": "deepseek-lossless",
+  "version": "0.1.0",
+  "description": "Lossless Context Management for the DeepSeek harness: long sessions keep working past the point where the model would forget, and every verbatim message stays searchable and readable.",
+  "keywords": [
+    "coding-agent",
+    "context",
+    "deepseek",
+    "dsh-plugin",
+    "lcm",
+    "memory",
+    "tanstack-intent"
+  ],
+  "homepage": "https://github.com/stainless-code/lossless#readme",
+  "bugs": {
+    "url": "https://github.com/stainless-code/lossless/issues"
+  },
+  "license": "MIT",
+  "author": "stainless-code",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stainless-code/lossless.git",
+    "directory": "packages/deepseek"
+  },
+  "files": [
+    "dist",
+    "CHANGELOG.md",
+    "skills",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
+    "docs/DETAIL.md"
+  ],
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./preset": {
+      "types": "./dist/preset.d.mts",
+      "default": "./dist/preset.mjs"
+    },
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "scripts": {
+    "pack:watch": "vp pack --watch",
+    "prepack": "vp pack",
+    "prepublishOnly": "vp check && vp test && intent validate"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.5"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-commands": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-compaction": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-compaction-basic": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-token-meter": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
+    "lossless-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-agent": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-commands": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-compaction": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-compaction-basic": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-llm": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-session": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-token-meter": "^0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "^0.2.1-rc.3"
+  },
+  "icon": "./icon.svg",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

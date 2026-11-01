@@ -2,16 +2,24 @@
 import Accordion from "blume/components/content/Accordion.astro";
 import AccordionItem from "blume/components/content/AccordionItem.astro";
 import { contentHref } from "blume/components/content/base-href.ts";
+import { DEEPSEEK_FAQS } from "./deepseek-faqs.ts";
 import { LCM_FAQS } from "./lcm-faqs.ts";
 import { OPENCODE_FAQS } from "./opencode-faqs.ts";
 import { PI_FAQS } from "./pi-faqs.ts";
 
 interface Props {
-  host?: "pi" | "opencode";
+  host?: "pi" | "opencode" | "deepseek";
 }
 
 const { host } = Astro.props;
-const faqs = host === "pi" ? PI_FAQS : host === "opencode" ? OPENCODE_FAQS : LCM_FAQS;
+const faqs =
+  host === "pi"
+    ? PI_FAQS
+    : host === "opencode"
+      ? OPENCODE_FAQS
+      : host === "deepseek"
+        ? DEEPSEEK_FAQS
+        : LCM_FAQS;
 
 const toAnswerHtml = (text: string): string =>
 	text

@@ -1,0 +1,54 @@
+---
+title: "Getting started for DeepSeek"
+description: "DeepSeek: install `deepseek-lossless` into each profile you boot, switch the compaction backend over, and verify with `/lcm status`."
+search:
+  tags: ["guide", "install"]
+  boost: 5
+  keywords: [install, setup, quickstart, deepseek, dsh, profile]
+sidebar:
+  label: "Getting started"
+---
+
+Install into each profile you boot, starting with the one you run. Host-plane
+profiles (`headless`, `acp`, `sdk`, and custom profiles built from the base
+bundle) need only the host package:
+
+```sh
+dsh plugin --profile headless add deepseek-lossless
+```
+
+Preset-bearing profiles (`web`, `desktop`, or a custom profile built on
+`web-app`) need the preset companion too. It ships Lossless variants of all
+four shipped presets whose compaction backend runs the shared core:
+
+```sh
+dsh plugin --profile web add deepseek-lossless
+dsh plugin --profile web add deepseek-lossless-web
+```
+
+For a custom profile, replace the name. Without a shipped template, the
+profile starts from the base bundle. The install resolves through the npm
+registry, so the version you publish is the version they get. Each install
+appends its package to `dsh.profile.bundles` automatically because both
+declare `dsh.bundle`; without that manifest a package would warn and install
+as a plain dependency with no profile layer.
+
+The install switches the backend over with no further edits: the shipped
+patch quiets the base row and mounts our row enabled, matching the manager's
+rule that installation enables a new bundle. Restart the profile, then
+verify with `/lcm status` in a booted session. It reports per-session
+message and summary counts, the meter window, the resolved swap and re-cut
+thresholds, and the last pass outcome. Then run `/lcm compact` once on an
+idle session to prove the manual path: aged turns become summary pointers
+and every verbatim message stays in the local SQLite sidecar.
+
+On a preset-bearing profile, install both packages, restart, then select a
+Lossless preset for the session instead of a shipped one. The preset
+backend borrows the shared core and fails fast naming the host row when it
+is absent, instead of running a split-brain copy. To switch back, select a
+shipped preset again; the base backend returns for those sessions. To switch
+a host-plane profile back, re-enable `compaction-basic` and disable
+`deepseek-lossless` from the Plugins page or the profile patch; removing
+the bundle likewise restores the base row.
+
+Reference holds the full surface: [command](/reference/deepseek/command), [tools](/reference/deepseek/tools), [config](/reference/deepseek/config), and [files](/reference/deepseek/files). Common keys live under the plugin config: `auto` for pressure compaction inside the turn, `sidecarDir` for one SQLite file per session, `summaryTokens` and `leafChunkTokens` for summary budgets, and `mechanicalTools` for spans that compact without a model call. The Plugins page validates them against the bundled schema.

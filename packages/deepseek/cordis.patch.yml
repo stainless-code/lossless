@@ -1,0 +1,15 @@
+# Installing this bundle switches the host-plane compaction backend over with
+# no further edits: the base row goes quiet and our row mounts enabled. This
+# matches the manager's own rule that installation enables a new bundle by
+# default. The code-level default stays disabled (see the schema), so direct
+# composition callers still opt in explicitly; only the shipped profile row
+# opts in. To switch back, re-enable `compaction-basic` and disable
+# `deepseek-lossless` from the Plugins page or the profile patch.
+- id: compaction-basic
+  disabled: true
+
+- insert:
+    - id: deepseek-lossless
+      name: deepseek-lossless
+      config:
+        enabled: true

@@ -1,0 +1,58 @@
+---
+title: "Configuration for DeepSeek"
+description: "DeepSeek: set options in the profile patch: the enable flag, the compaction thresholds, the summarizer budgets, and what stays adapter-only."
+search:
+  tags: ["guide", "config"]
+  boost: 3
+  keywords: [config, cordis.patch.yml, thresholds, options]
+related:
+  - /concepts/compaction-zones
+  - /reference/deepseek/config
+  - /guides/deepseek/troubleshooting
+sidebar:
+  label: "Configuration"
+---
+
+There is no separate config file. Options live in the profile patch row for `deepseek-lossless` at `~/.dsh/profiles/<name>/cordis.patch.yml`. A patch replaces the whole row config, so restating only the keys you change is enough: the rest fall back to the bundled schema defaults, which the Plugins page validates. The shipped profile row mounts enabled, so a fresh install needs no edits; the schema default stays off as the code-level safe default for direct composition callers.
+
+```yaml
+- id: deepseek-lossless
+  config:
+    enabled: true
+    auto: false
+    sidecarDir: ./.lossless
+    summaryTokens: 1500
+```
+
+Preset sessions read the same keys from the preset's own backend row, which
+ships enabled. Keep `sidecarDir` identical in both rows: the realm backend
+borrows the host core and fails fast when the directories differ. The rows
+are configured independently, so keep shared policy knobs (thresholds,
+budgets, summarizer chain) aligned on both. Enable `auto` in at most one of
+the two rows so pressure compaction has a single driver per session.
+
+If you customized a shipped preset, your edits do not transfer to the
+Lossless twin, which starts from stock content. Either redo them on the
+Lossless preset through the editor, or bring lossless to your preset
+instead: open your customized preset, replace its compaction backend row
+with this block, and keep the host row enabled with a matching
+`sidecarDir`:
+
+```yaml
+- id: deepseek-lossless
+  name: deepseek-lossless/preset
+  config:
+    enabled: true
+```
+
+A fully custom preset of your own keeps the base backend otherwise, since
+no later layer can address rows inside it.
+Lossless presets start from the stock shipped presets: customizations you
+made to a shipped preset do not transfer, so redo them on the Lossless
+preset through the editor, which addresses our rows the same way. A fully
+custom preset of your own keeps the base backend, since no later layer can
+address rows inside it.
+
+The [config reference](/reference/deepseek/config#keys) lists every key with its type, default, and effect. `enabled` is the master flag and only exactly `true` mounts anything. `retainTokens` and `retainRatio` are mutually exclusive. `modelPolicies` entries match an exact provider plus model route and duplicate targets fail load. Seam keys ride the harness config where unknown keys fail load; adapter-only keys (`summarizerTokensPerCall`, `summarizerTokensPerPass`, `summarizerTokensPerHeal`, `healSourceTokens`, `mechanicalTools`) never reach the seam.
+
+The summarizer follows the routed provider and model unless both summarizer fields are set. `/lcm status` reports the effective values, so a bad value is visible before it costs anything.

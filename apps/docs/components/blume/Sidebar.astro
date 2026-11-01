@@ -17,12 +17,6 @@ interface Props {
 
 const { items, currentRoute, fragmentBase, ids, strings } = Astro.props;
 
-const nextHost = {
-  label: "DeepSeek",
-  description: "Coming next",
-  icon: withBase("/logos/deepseek.svg"),
-};
-
 const active: HostId = hostFromRoute(currentRoute) ?? "pi";
 
 const harnessOf = (node: NavNode): HostId | undefined =>
@@ -54,6 +48,21 @@ const filtered = !showSwitcher
 
 const current = HOSTS.find((host) => host.id === active) ?? HOSTS[0];
 
+// Every route the built tree serves. The host switcher swaps the section
+// segment only against this set, so a host without a page in the current
+// section falls through to its own entry instead of linking a 404.
+const servedRoutes = new Set<string>();
+const collectRoutes = (nodes: NavNode[]): void => {
+  for (const node of nodes) {
+    if (node.kind === "page") servedRoutes.add(node.route);
+    else {
+      if (node.route) servedRoutes.add(node.route);
+      collectRoutes(node.children);
+    }
+  }
+};
+collectRoutes(items);
+
 const firstRoute = (nodes: NavNode[]): string | undefined => {
   for (const node of nodes) {
     if (node.kind === "page") return node.route;
@@ -69,14 +78,22 @@ const firstRoute = (nodes: NavNode[]): string | undefined => {
 };
 
 const hrefFor = (host: HostId): string => {
-  const match = /^\/(guides|reference)\/(pi|opencode)(\/.*)?$/.exec(currentRoute);
-  if (match) return `/${match[1]}/${host}${match[3] ?? ""}`;
+  // DeepSeek ships reference only: a same-page swap inside guides/ has no
+  // target, so the swap applies only when the built tree serves the route.
+  const match = /^\/(guides|reference)\/(pi|opencode|deepseek)(\/.*)?$/.exec(currentRoute);
+  if (match) {
+    const candidate = `/${match[1]}/${host}${match[3] ?? ""}`;
+    if (servedRoutes.has(candidate)) return candidate;
+  }
 
   // A neutral page keeps the current section: switching from `/reference/...`
   // lands on the other host's reference entry, not its guides entry.
   const group = items.find((node) => harnessOf(node) === host);
   const first = group?.kind === "group" ? firstRoute(group.children) : undefined;
   if (first) return first;
+
+  const entry = HOSTS.find((candidate) => candidate.id === host)?.entry;
+  if (entry) return entry;
 
   return `/guides/${host}/getting-started`;
 };
@@ -123,21 +140,7 @@ const currentHref = (host: HostId): string =>
           </a>
         ))
       }
-
-      <div
-        aria-disabled="true"
-        class="flex w-full min-w-0 items-center gap-3 rounded-lg px-2 py-2 opacity-60"
-      >
-        <Icon name={nextHost.icon} size={16} />
-        <span class="flex min-w-0 flex-1 flex-col">
-          <span class="truncate font-medium text-foreground text-sm">{nextHost.label}</span>
-          <span class="truncate text-muted-foreground text-xs">{nextHost.description}</span>
-        </span>
-        <span class="font-mono text-[9px] text-[var(--landing-faint)] tracking-[0.08em]">
-          NEXT
-        </span>
       </div>
-    </div>
       </details>
     </div>
   )

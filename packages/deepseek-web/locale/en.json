@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Lossless presets",
+    "description": "Lossless variants of the shipped agent presets whose compaction backend runs the shared lossless core.",
+    "detail": "docs/DETAIL.md"
+  }
+}
