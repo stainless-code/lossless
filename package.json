@@ -22,7 +22,7 @@
     "opencode:compact": "bun scripts/opencode-compact.ts",
     "pack": "vp run --filter ./packages/core prepack && vp run --filter ./packages/pi prepack && vp run --filter ./packages/opencode prepack",
     "changeset": "changeset",
-    "version": "changeset version && rm -f bun.lock && bun install && bun scripts/sync-skill-versions.ts && vp fmt packages/*/CHANGELOG.md",
+    "version": "changeset version && bun install && bun scripts/sync-skill-versions.ts && vp fmt packages/*/CHANGELOG.md",
     "release": "changeset publish",
     "prepare": "vp config || true",
     "eval": "bun scripts/eval-long-context.ts"
@@ -52,9 +52,9 @@
   },
   "packageManager": "bun@1.4.4",
   "catalog": {
-    "@vitest/coverage-v8": "5.0.5",
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.4.0",
-    "vitest": "5.0.5",
-    "vite-plus": "1.4.0"
+    "@vitest/coverage-v8": "5.1.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",
+    "vitest": "5.1.0",
+    "vite-plus": "1.5.0"
   }
 }

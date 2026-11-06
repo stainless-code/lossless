@@ -17,7 +17,7 @@ runs:
     # Vite+'s installer is what puts `vp` on PATH for a bare `vp run` step; the
     # two manager flags keep setup-bun and setup-node the tools the jobs use.
     - name: Setup Vite+ (vp on PATH, cached dependencies)
-      uses: voidzero-dev/setup-vp@v1.21.2
+      uses: voidzero-dev/setup-vp@v1.22.0
       with:
         node-manager: false
         package-manager: false
