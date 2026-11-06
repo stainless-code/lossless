@@ -19,6 +19,7 @@ import { metricsPath } from "../src/metrics.ts";
 import { LcmStore } from "../src/store.ts";
 import { fakeHost, scriptedHost } from "./support/fake-host.ts";
 import { storedPass } from "./support/pass-outcome.ts";
+import { strictHost } from "./support/strict-host.ts";
 
 test("llm: resolveModels resolves a summarizer whose id contains slashes", () => {
   const host = scriptedHost(
@@ -100,6 +101,73 @@ test("llm: a model without reasoning keeps the requested cap", async () => {
   await llm("sys", "body", 1500);
   assert.equal(calls[0]!.maxTokens, 1500);
 });
+
+test("llm: the port asks a strict host for a whole number of tokens", async () => {
+  const { host, calls, refused } = strictHost(
+    [{ key: "p/reasoner", reasoning: true, answer: "ok" }],
+    "p/reasoner",
+  );
+  const llm = makeLlm(host, { summarizer: "p/reasoner" }, OPTS);
+  assert.ok(llm);
+  assert.equal(await llm("sys", "body", 1447.5), "ok");
+  assert.deepEqual(refused, []);
+  assert.deepEqual(
+    calls.map((call) => call.maxTokens),
+    [1448 + REASONING_HEADROOM],
+  );
+});
+
+const BUDGETS: Array<{
+  label: string;
+  requested: number;
+  expected: number;
+  openBudget?: boolean;
+}> = [
+  { label: "an integer", requested: 1500, expected: 1500 },
+  { label: "a fractional", requested: 1447.5, expected: 1448 },
+  { label: "a fraction below a half", requested: 1.4, expected: 1 },
+  { label: "a half", requested: 1.5, expected: 2 },
+  { label: "a zero", requested: 0, expected: 1 },
+  { label: "a negative", requested: -12, expected: 1 },
+  { label: "a NaN", requested: Number.NaN, expected: 1 },
+  {
+    label: "an infinite",
+    requested: Number.POSITIVE_INFINITY,
+    expected: 1,
+    openBudget: true,
+  },
+];
+
+for (const budget of BUDGETS) {
+  for (const reasoning of [false, true]) {
+    const kind = reasoning ? "a reasoning" : "a plain";
+    test(`llm: ${budget.label} budget reaches ${kind} model as ${budget.expected}${reasoning ? " plus headroom" : ""}`, async () => {
+      const reply = text("ok");
+      const { host, calls } = scriptedHost({ "p/m": reply }, "p/m", {
+        reasoning: reasoning ? ["p/m"] : [],
+      });
+      const llm = makeLlm(
+        host,
+        budget.openBudget
+          ? {
+              summarizer: "p/m",
+              summarizerTokensPerCall: Number.POSITIVE_INFINITY,
+              summarizerTokensPerPass: Number.POSITIVE_INFINITY,
+            }
+          : { summarizer: "p/m" },
+        OPTS,
+      );
+      assert.ok(llm);
+      await llm("sys", "body", budget.requested);
+      assert.equal(calls.length, 1);
+      assert.deepEqual(
+        calls.map((call) => call.maxTokens),
+        [budget.expected + (reasoning ? REASONING_HEADROOM : 0)],
+      );
+      assert.ok(Number.isInteger(calls[0]!.maxTokens));
+    });
+  }
+}
 
 test("llm: makeLlm wraps the prompt and text in the conversation block", async () => {
   const { host, calls } = chainHost({ "p/m": text("ok") });

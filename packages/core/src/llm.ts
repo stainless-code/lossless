@@ -430,6 +430,14 @@ function outcomeOf(answer: ModelAnswer): SummarizerOutcome {
   return answer.text.trim().length > 0 ? "ok" : "empty";
 }
 
+/** A provider's output cap is a non-negative integer; the caller's target is
+ * whatever the budget math produced. Round to nearest, never below one, and
+ * treat a non-finite budget as that same floor. */
+function providerBudget(maxTokens: number): number {
+  if (!Number.isFinite(maxTokens)) return 1;
+  return Math.max(1, Math.round(maxTokens));
+}
+
 /** One rendered prompt and one output cap. The prompt is joined here, delimiters
  * included, so no host can change what the summarizer is asked. */
 function requestOf(
@@ -440,6 +448,6 @@ function requestOf(
 ): CompletionRequest {
   return {
     prompt: `${systemPrompt}\n\n<conversation>\n${userText}\n</conversation>`,
-    maxTokens: maxTokens + (model.reasoning ? REASONING_HEADROOM : 0),
+    maxTokens: providerBudget(maxTokens) + (model.reasoning ? REASONING_HEADROOM : 0),
   };
 }
