@@ -5,7 +5,7 @@ license: MIT
 metadata:
   type: core
   library: "lossless-core"
-  library_version: "0.1.2"
+  library_version: "0.1.3"
 sources:
   - stainless-code/lossless:packages/core/src/host.ts
   - stainless-code/lossless:packages/core/src/index.ts
